@@ -63,6 +63,14 @@ _DEFAULT_HTTP_TIMEOUT = 10.0
 _SESSION_CALL_HEADROOM = 30.0
 
 
+class _NoRedirectHandler(_urlrequest.HTTPRedirectHandler):
+    """Keep an allowlisted loopback probe from escaping through redirects."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        del req, fp, code, msg, headers, newurl
+        return None
+
+
 # ---------------------------------------------------------------------------
 # HTTP plumbing
 # ---------------------------------------------------------------------------
@@ -105,7 +113,10 @@ def _http_fetch(
     """
     request = _urlrequest.Request(url, data=data, headers=headers or {}, method="POST" if data else "GET")
     try:
-        with _urlrequest.urlopen(request, timeout=timeout) as resp:  # noqa: S310 - loopback-only by design
+        # A redirect can leave loopback and forward an Authorization header.
+        # Treat 3xx as an observed status instead of following it.
+        opener = _urlrequest.build_opener(_NoRedirectHandler)
+        with opener.open(request, timeout=timeout) as resp:  # noqa: S310 - initial URL is loopback-only; redirects are disabled
             return int(resp.status), resp.read().decode("utf-8", errors="replace")
     except _urlerror.HTTPError as exc:
         try:

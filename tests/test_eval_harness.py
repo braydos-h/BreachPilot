@@ -835,6 +835,57 @@ def test_http_checks_refuse_non_loopback(monkeypatch):
         assert "refused" in detail
 
 
+def test_http_fetch_does_not_follow_loopback_redirects_with_credentials():
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+    from threading import Thread
+
+    import tools.eval_checks as ec
+
+    class _CaptureHandler(BaseHTTPRequestHandler):
+        authorization_headers = []
+
+        def do_GET(self):
+            type(self).authorization_headers.append(self.headers.get("Authorization"))
+            self.send_response(200)
+            self.end_headers()
+
+        def log_message(self, *_args):
+            pass
+
+    capture_server = ThreadingHTTPServer(("127.0.0.1", 0), _CaptureHandler)
+    capture_thread = Thread(target=capture_server.serve_forever, daemon=True)
+    capture_thread.start()
+
+    class _RedirectHandler(BaseHTTPRequestHandler):
+        def do_POST(self):
+            self.send_response(302)
+            self.send_header("Location", f"http://127.0.0.1:{capture_server.server_port}/capture")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+
+        def log_message(self, *_args):
+            pass
+
+    redirect_server = ThreadingHTTPServer(("127.0.0.1", 0), _RedirectHandler)
+    redirect_thread = Thread(target=redirect_server.serve_forever, daemon=True)
+    redirect_thread.start()
+    try:
+        status, _body = ec._http_fetch(
+            f"http://127.0.0.1:{redirect_server.server_port}/login",
+            data=b"user=alice&password=secret",
+            headers={"Authorization": "Basic YWxpY2U6c2VjcmV0"},
+        )
+        assert status == 302
+        assert _CaptureHandler.authorization_headers == []
+    finally:
+        redirect_server.shutdown()
+        capture_server.shutdown()
+        redirect_thread.join(timeout=2)
+        capture_thread.join(timeout=2)
+        redirect_server.server_close()
+        capture_server.server_close()
+
+
 def test_shell_command_check_with_sync_callable_session():
     import tools.eval_checks as ec
 
