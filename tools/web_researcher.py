@@ -60,6 +60,7 @@ from tools.research import (
 from tools.research import (
     WebResearcherSettings as WebResearcherSettings,
 )
+from tools.research.text_utils import validate_url as validate_url
 
 __all__ = [
     "RESEARCH_API_KEY_MISSING",
@@ -80,4 +81,5 @@ __all__ = [
     "StdlibFetchProvider",
     "WebResearcher",
     "WebResearcherSettings",
+    "validate_url",
 ]
