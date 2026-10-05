@@ -797,15 +797,13 @@ def register_domain_tools(mcp: Any, *, ctx: ToolContext) -> None:
                     return sub, ip
                 except (TimeoutError, OSError):
                     return sub, None
-                except Exception:
-                    return sub, None
 
             try:
                 with _TPE(max_workers=16) as _pool:
                     for sub, ip in _pool.map(_resolve_pending, pending):
                         if ip:
                             subs[sub] = ip
-            except Exception:
+            except Exception:  # noqa: BLE001 -- pool failures fall back to serial DNS; cancellation groups propagate
                 pass
         for sub in sorted(subs.keys())[:max_results]:
             ip = subs[sub]

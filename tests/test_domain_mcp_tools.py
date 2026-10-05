@@ -165,6 +165,36 @@ async def test_enumerate_subdomains_crt_sh(tmp_path: Path, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_enumerate_subdomains_retries_serially_when_dns_pool_fails(tmp_path: Path, monkeypatch):
+    import concurrent.futures
+
+    from tools.mcp_tools import domain as domain_tools
+
+    mcp = _make_server(tmp_path)
+
+    class _UnavailableExecutor:
+        def __init__(self, **_kwargs):
+            pass
+
+        def __enter__(self):
+            raise RuntimeError("worker thread unavailable")
+
+    monkeypatch.setattr(concurrent.futures, "ThreadPoolExecutor", _UnavailableExecutor)
+    monkeypatch.setattr(
+        domain_tools,
+        "_stdlib_fetch",
+        lambda *_args, **_kwargs: (200, {}, json.dumps([{"name_value": "api.example.com"}])),
+    )
+    monkeypatch.setattr(domain_tools, "resolve_target_bounded", lambda host, **_kwargs: ("93.184.216.34", host))
+
+    text = _text(await mcp.call_tool("enumerate_subdomains", {"domain": "example.com", "sources": "crt_sh"}))
+
+    assert "SUBDOMAIN_RESULT:" in text
+    assert "api.example.com" in text
+    assert "93.184.216.34" in text
+
+
+@pytest.mark.asyncio
 async def test_enumerate_subdomains_rejects_invalid(tmp_path: Path):
     mcp = _make_server(tmp_path)
     text = _text(await mcp.call_tool("enumerate_subdomains", {"domain": "no-tld"}))
