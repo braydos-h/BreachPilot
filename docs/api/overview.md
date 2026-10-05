@@ -48,7 +48,7 @@ main._run_daemon  -->  app.create_app(config_path, config, callables)
                         | RunManager(persistence, registry, config, ...)     app.py:91
                         | CORSMiddleware (loopback-only) + error handlers    app.py:120
                         | configure(route modules)                           app.py:133
-                        | optionally mount webui/dist/ SPA at /              app.py:162
+                        | optionally mount checkout or packaged SPA at /     app.py:162
                         --> FastAPI(lifespan=recover_interrupted/shutdown)
 ```
 

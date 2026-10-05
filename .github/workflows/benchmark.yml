@@ -1,5 +1,5 @@
 # Benchmark suite CI: mocked unit tests on every PR (no model keys, no live
-# targets) + an optional scheduled live run that only executes when the
+# targets) + an optional manual live run that only executes when the
 # operator supplies secrets. The live benchmark job is never automatic on PRs.
 
 name: benchmark
@@ -129,13 +129,12 @@ jobs:
           run_dir = Path(payload["run_dir"])
           for name in ("run.json", "summary.json", "events.jsonl", "report.md", "report.html"):
               assert (run_dir / name).exists(), name
-          assert "--benchmark fake" in payload["trials"][0].get("run_id", "") or True
           print("benchmark smoke OK:", payload["run_id"])
           PY
 
   nightly-live-benchmark:
     name: Nightly live benchmark (manual/scheduled, needs secrets)
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
     runs-on: ubuntu-latest
     timeout-minutes: 120
     steps:
@@ -150,7 +149,10 @@ jobs:
       - name: Run benchmark suite
         env:
           OLLAMA_API_KEY: ${{ secrets.OLLAMA_API_KEY }}
-        run: python main.py --benchmark xben --save-baseline
+        # XBEN currently provides no target reset mechanism, so each scenario
+        # supports one independent trial. Do not replace the baseline from a
+        # single scheduled run.
+        run: python main.py --benchmark xben --trials 1
       - name: Stop target suite
         if: always()
         run: docker compose -f eval_targets/docker-compose.yml down

@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import copy
 import json
+import math
 import re
 import time
 from pathlib import Path
@@ -20,8 +21,9 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from tools.api.auth import BearerAuth
+from tools.benchmark.models import TrialStatus
+from tools.benchmark.paths import resolve_baseline_path
 from tools.benchmark.regression import (
-    DEFAULT_BASELINE_PATH,
     compare_summaries_payload,
     load_baseline,
     save_baseline,
@@ -80,6 +82,98 @@ def create_router(
                 return suite, run
         raise HTTPException(status_code=404, detail="Benchmark run not found")
 
+    def _normalize_summary(summary: dict[str, Any] | None, trials: Any = None) -> dict[str, Any] | None:
+        """Keep legacy rates unavailable when their recorded denominator is empty."""
+        if summary is None:
+            return None
+        normalized = dict(summary)
+        raw_scope_count = normalized.get("scope_violation_count")
+        scope_count = (
+            raw_scope_count
+            if isinstance(raw_scope_count, int) and not isinstance(raw_scope_count, bool) and raw_scope_count >= 0
+            else None
+        )
+        scope_measured = normalized.get("scope_violation_telemetry_available") is True and scope_count is not None
+        # Historical summaries defaulted a missing measurement to zero. Keep
+        # positive observations visible as a fail-closed signal, but never
+        # reinterpret a legacy zero as measured safety evidence.
+        normalized["scope_violation_telemetry_available"] = scope_measured
+        normalized["scope_violation_count"] = (
+            scope_count if scope_measured or (scope_count is not None and scope_count > 0) else None
+        )
+        observed_trials = [row for row in trials if isinstance(row, dict)] if isinstance(trials, list) else []
+        usable_by_scenario: dict[str, int] = {}
+        total_by_scenario: dict[str, int] = {}
+        if observed_trials:
+            completed_count = 0
+            for trial in observed_trials:
+                scenario_id = str(trial.get("scenario_id", "") or "")
+                total_by_scenario[scenario_id] = total_by_scenario.get(scenario_id, 0) + 1
+                if trial.get("status") not in (TrialStatus.INFRASTRUCTURE_ERROR.value, TrialStatus.SKIPPED.value):
+                    completed_count += 1
+                    usable_by_scenario[scenario_id] = usable_by_scenario.get(scenario_id, 0) + 1
+            normalized["trials_total"] = len(observed_trials)
+            normalized["trials_completed"] = completed_count
+        if (
+            normalized.get("trials_completed") is None
+            or normalized.get("trials_completed") == 0
+            or normalized.get("trials_total") == 0
+        ):
+            for metric in (
+                "verified_success_rate",
+                "false_positive_rate",
+                "false_negative_rate",
+                "stuck_loop_rate",
+            ):
+                if metric in normalized:
+                    normalized[metric] = None
+        scenarios = normalized.get("scenarios")
+        if isinstance(scenarios, list):
+            normalized_scenarios = []
+            for row in scenarios:
+                if not isinstance(row, dict):
+                    normalized_scenarios.append(row)
+                    continue
+                scenario = dict(row)
+                scenario_id = str(scenario.get("scenario_id", "") or "")
+                if scenario_id in total_by_scenario:
+                    scenario["trials"] = total_by_scenario[scenario_id]
+                    scenario["trials_completed"] = usable_by_scenario.get(scenario_id, 0)
+                if (
+                    scenario.get("trials_completed") is None
+                    or scenario.get("trials_completed") == 0
+                    or scenario.get("trials") == 0
+                ):
+                    for metric in (
+                        "success_probability",
+                        "success_variance",
+                        "success_stddev",
+                        "ci95_low",
+                        "ci95_high",
+                    ):
+                        if metric in scenario:
+                            scenario[metric] = None
+                normalized_scenarios.append(scenario)
+            normalized["scenarios"] = normalized_scenarios
+        scenarios = normalized.get("scenarios")
+        has_verified_scenario = False
+        if isinstance(scenarios, list):
+            for scenario in scenarios:
+                if not isinstance(scenario, dict):
+                    continue
+                verified = scenario.get("verified")
+                if isinstance(verified, bool) or not isinstance(verified, (int, float)):
+                    continue
+                if isinstance(verified, float) and not math.isfinite(verified):
+                    continue
+                if verified > 0:
+                    has_verified_scenario = True
+                    break
+        if has_verified_scenario:
+            return normalized
+        normalized["reproduced_twice_rate"] = None
+        return normalized
+
     def _suite_list() -> list[dict[str, Any]]:
         # Serve from TTL cache when fresh — avoids re-parsing manifests on every overview poll.
         cached_expiry = _suite_cache.get("expiry", 0.0) or 0.0
@@ -95,16 +189,8 @@ def create_router(
         return copy.deepcopy(data)
 
     def _baseline_path() -> Path:
-        # Resolve against the storage root so the route and the runner agree
-        # (runner falls back to storage.root / "baseline.json").
         benchmark_cfg = config.get("benchmark", {}) or {}
-        configured = str(benchmark_cfg.get("baseline_path", "") or "")
-        if not configured or configured == DEFAULT_BASELINE_PATH:
-            return _storage().root / "baseline.json"
-        path = Path(configured)
-        if not path.is_absolute():
-            path = (_storage().root / path).absolute()
-        return path
+        return resolve_baseline_path(benchmark_cfg.get("baseline_path"), _storage().root)
 
     def _baseline_meta() -> dict[str, Any]:
         baseline = load_baseline(_baseline_path())
@@ -258,7 +344,7 @@ def create_router(
     @router.get("/runs/{run_id}")
     async def get_run(run_id: str, auth: str = Depends(_require_auth)) -> dict[str, Any]:
         suite, run = _resolve_run(run_id)
-        run["summary"] = _storage().load_summary(suite, run_id)
+        run["summary"] = _normalize_summary(_storage().load_summary(suite, run_id), run.get("trials"))
         return run
 
     @router.get("/runs/{run_id}/scenarios")
@@ -417,8 +503,8 @@ def create_router(
             raise HTTPException(status_code=400, detail="run_a and run_b must differ")
         suite_a, run_a_payload = _resolve_run(run_a)
         suite_b, run_b_payload = _resolve_run(run_b)
-        summary_a = _storage().load_summary(suite_a, run_a)
-        summary_b = _storage().load_summary(suite_b, run_b)
+        summary_a = _normalize_summary(_storage().load_summary(suite_a, run_a), run_a_payload.get("trials"))
+        summary_b = _normalize_summary(_storage().load_summary(suite_b, run_b), run_b_payload.get("trials"))
         if not summary_a or not summary_b:
             raise HTTPException(status_code=409, detail="Both runs must be completed (summaries required)")
         comparison = compare_summaries_payload(summary_a, summary_b)

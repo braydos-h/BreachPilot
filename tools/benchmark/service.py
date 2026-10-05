@@ -11,11 +11,13 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import copy
 from pathlib import Path
 from typing import Any
 
 from tools.benchmark.runner import BenchmarkRunner
 from tools.benchmark.storage import BenchmarkStorage
+from tools.kernel.config_fingerprint import config_fingerprint
 
 __all__ = ["BenchmarkService"]
 
@@ -76,6 +78,11 @@ class BenchmarkService:
         from tools.benchmark.models import RunConfig
         from tools.benchmark.registry import get_provider
 
+        # Snapshot before any await. PATCH /config mutates the shared app
+        # config dict, so the runner must keep the values accepted here.
+        config_snapshot = copy.deepcopy(self.config)
+        accepted_config_fingerprint = config_fingerprint(config_snapshot)
+
         suite = str(request.get("suite", "") or "").strip()
         if not suite:
             return {"error": "suite is required", "code": "missing_suite"}
@@ -95,7 +102,7 @@ class BenchmarkService:
             if not matched:
                 return {"error": "no scenarios matched the given filters", "code": "no_match"}
 
-        benchmark_cfg = self.config.get("benchmark", {}) or {}
+        benchmark_cfg = config_snapshot.get("benchmark", {}) or {}
         trials_raw = request.get("trials", None)
         if trials_raw is None:
             trials_raw = benchmark_cfg.get("trials", 1)
@@ -123,12 +130,17 @@ class BenchmarkService:
                 return {"error": "a benchmark run is already active", "run_id": self._active_run_id}
             # ponytail: single global cap — active API runs occupy benchmark slots.
             if self._run_manager is not None:
-                cap = int(((self.config.get("api", {}) or {}).get("max_concurrent_runs", 1)) or 1)
+                cap = int(((config_snapshot.get("api", {}) or {}).get("max_concurrent_runs", 1)) or 1)
                 busy = len(getattr(self._run_manager, "active_run_ids", []))
                 if busy >= max(cap, 1):
                     return {"error": f"{cap} run(s) already active. Cancel one first (api.max_concurrent_runs)."}
 
-            runner = BenchmarkRunner(self.config, self.config_path, model_alias=run_config.model_alias)
+            runner = BenchmarkRunner(
+                config_snapshot,
+                self.config_path,
+                model_alias=run_config.model_alias,
+                config_fingerprint=accepted_config_fingerprint,
+            )
             cancel = asyncio.Event()
             self._cancel_event = cancel
             self._last_run_id = None

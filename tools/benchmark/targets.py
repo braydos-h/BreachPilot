@@ -2,8 +2,10 @@
 
 One manager per benchmark run. For ``docker`` scenarios it starts one container
 per trial (``recreate``), restarts it between trials (``restart``), or leaves a
-static host alone (``none``). Every docker call goes through the module-level
-``_docker_run`` seam so tests monkeypatch it (same pattern as
+static target alone (``none``). A static target cannot be reused for an
+independent repeated trial: requesting a reset without a supported reset
+mechanism is an infrastructure error, never a silent no-op. Every docker call
+goes through the module-level ``_docker_run`` seam so tests monkeypatch it (same pattern as
 ``tools/snapshots.py`` / ``tools/eval_harness.docker_suite_up``).
 
 Failures raise :class:`TargetProvisionError` — the runner converts that into
@@ -75,17 +77,20 @@ class TargetManager:
     def _run(self, *args: str, timeout: int = 180) -> subprocess.CompletedProcess[str]:
         return self._docker(*args, timeout=timeout)
 
-    @staticmethod
-    def _image_digest(image: str) -> str:
-        """Resolve a local image digest; unknown stays 'unknown' (never guessed)."""
-        if not image:
+    def _container_image_digest(self, container: str) -> str:
+        """Record the immutable image ID Docker actually assigned to a container."""
+        if not container:
             return "unknown"
         try:
-            from tools.benchmark.envinfo import docker_image_digest
-
-            return docker_image_digest(image)
-        except Exception:  # noqa: BLE001 -- metadata is best-effort, never fatal
+            proc = self._run("inspect", "--format", "{{.Image}}", container, timeout=30)
+        except (OSError, subprocess.TimeoutExpired):
             return "unknown"
+        image_id = proc.stdout.strip() if proc.returncode == 0 else ""
+        if len(image_id) == 71 and image_id.startswith("sha256:"):
+            suffix = image_id[7:]
+            if all(character in "0123456789abcdef" for character in suffix.lower()):
+                return image_id.lower()
+        return "unknown"
 
     # ----------------------------------------------------------------- public
 
@@ -100,13 +105,18 @@ class TargetManager:
             host=scenario.target_host,
             ports=list(scenario.target_ports),
             image=scenario.target_image or "unknown",
-            image_digest=self._image_digest(scenario.target_image) if scenario.target_image else "unknown",
+            image_digest="unknown",
             reset_strategy=scenario.reset_strategy,
         )
+        if scenario.reset_strategy not in {strategy.value for strategy in ResetStrategy}:
+            raise TargetProvisionError(
+                f"scenario {scenario.scenario_id}: unsupported reset strategy {scenario.reset_strategy!r}"
+            )
         if scenario.target_type != "docker":
-            if scenario.reset_strategy != ResetStrategy.NONE.value:
-                # A non-docker target cannot be reset by us; treat as static.
-                snapshot.reset_strategy = ResetStrategy.NONE.value
+            # A host target is operator-managed. Record the reset behavior we
+            # can actually provide; if another trial is requested, reset()
+            # will fail explicitly instead of pretending this host was reset.
+            snapshot.reset_strategy = ResetStrategy.NONE.value
             return snapshot
         if not scenario.target_image:
             raise TargetProvisionError(f"scenario {scenario.scenario_id}: docker target without target_image")
@@ -126,18 +136,28 @@ class TargetManager:
             )
         container_id = proc.stdout.strip().splitlines()[-1] if proc.stdout.strip() else ""
         snapshot.container_id = container_id
+        snapshot.image_digest = self._container_image_digest(container_id)
         self._containers[scenario.scenario_id] = container_id
         return snapshot
 
     def reset(self, scenario: BenchmarkScenario) -> TargetSnapshot:
-        """Restore the target to a clean state before the next trial."""
+        """Restore a Docker target before the next trial or fail explicitly.
+
+        ``none`` means the target is static and operator-managed; it does not
+        mean a repeated trial may reuse state left by the previous trial.
+        """
         strategy = scenario.reset_strategy
-        if scenario.target_type != "docker" or strategy == ResetStrategy.NONE.value:
-            return TargetSnapshot(
-                host=scenario.target_host,
-                ports=list(scenario.target_ports),
-                image=scenario.target_image or "unknown",
-                reset_strategy=ResetStrategy.NONE.value,
+        if strategy not in {item.value for item in ResetStrategy}:
+            raise TargetProvisionError(f"scenario {scenario.scenario_id}: unsupported reset strategy {strategy!r}")
+        if strategy == ResetStrategy.NONE.value:
+            raise TargetProvisionError(
+                f"scenario {scenario.scenario_id}: reset_strategy='none' cannot provide an independent repeated "
+                "trial; reset the target externally between separate single-trial runs or use a resettable target"
+            )
+        if scenario.target_type != "docker":
+            raise TargetProvisionError(
+                f"scenario {scenario.scenario_id}: host-managed targets cannot be reset automatically; "
+                "provide a target manager with an explicit reset mechanism"
             )
         if strategy == ResetStrategy.RESTART.value:
             container = self._containers.get(scenario.scenario_id, "")
@@ -152,7 +172,7 @@ class TargetManager:
                 host=scenario.target_host,
                 ports=list(scenario.target_ports),
                 image=scenario.target_image or "unknown",
-                image_digest=self._image_digest(scenario.target_image) if scenario.target_image else "unknown",
+                image_digest=self._container_image_digest(container),
                 container_id=container,
                 reset_strategy=strategy,
             )

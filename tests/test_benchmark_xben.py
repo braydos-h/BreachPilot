@@ -66,6 +66,21 @@ def test_parse_manifest_requires_oracle_flags():
         parse_manifest(data)
 
 
+def test_parse_manifest_accepts_explicitly_unsupported_verification_with_reason():
+    data = dict(
+        _VALID,
+        verification_supported=False,
+        verification_note="target-side verifier is unavailable",
+        oracle={"flags": [], "host_owned_when": "all"},
+    )
+
+    scenario = parse_manifest(data)
+
+    assert scenario.verification_supported is False
+    assert scenario.verification_note == "target-side verifier is unavailable"
+    assert scenario.oracle["flags"] == []
+
+
 def test_parse_manifest_list_form():
     scenarios = [parse_manifest(d) for d in [_VALID, dict(_VALID, benchmark_id="xben-002")]]
     assert [s.scenario_id for s in scenarios] == ["xben-001", "xben-002"]
@@ -90,6 +105,24 @@ def test_load_manifest_file_invalid(tmp_path):
     path.write_text("{not json", encoding="utf-8")
     with pytest.raises(ManifestError):
         load_manifest_file(path)
+
+
+def test_metasploitable_without_target_side_verifier_is_skipped() -> None:
+    root = Path(__file__).resolve().parents[1]
+    scenario = load_manifest_file(root / "benchmarks/xben/metasploitable2.json")[0]
+
+    assert scenario.verification_supported is False
+    assert "local worker" in scenario.verification_note
+    assert scenario.oracle["flags"] == []
+
+
+def test_kubernetes_placeholder_is_skipped_until_a_real_target_verifier_exists() -> None:
+    root = Path(__file__).resolve().parents[1]
+    scenario = load_manifest_file(root / "benchmarks/xben/vulnerable_k8s.json")[0]
+
+    assert scenario.verification_supported is False
+    assert "HTTP echo stub" in scenario.verification_note
+    assert scenario.oracle["flags"] == []
 
 
 # ---------------------------------------------------------------------------
@@ -142,7 +175,7 @@ def test_resolve_model_metadata_alias_resolution():
     config = {"models": {"default_alias": "glm", "registry": {"glm": "glm-5.2:cloud"}}}
     meta = resolve_model_metadata(config, "glm")
     assert meta["model_id"] == "glm-5.2:cloud"
-    assert meta["model_version"] == "cloud"
+    assert meta["model_version"] == "5.2:cloud"
     assert meta["model_alias"] == "glm"
     assert meta["model_provider"] in {"ollama", "chatgpt", "unknown"}
 
@@ -154,7 +187,7 @@ def test_resolve_model_metadata_unknown_alias_stays_unknown():
 
 
 def test_collect_environment_honest_unknowns(monkeypatch):
-    monkeypatch.setattr("tools.benchmark.envinfo._git", lambda *a, **kw: "")
+    monkeypatch.setattr("tools.benchmark.envinfo._git", lambda *a, **kw: None)
     monkeypatch.setattr("tools.benchmark.envinfo.docker_image_digest", lambda image: "unknown")
     config = {"models": {"default_alias": "glm"}, "sandbox": {"enabled": False, "image": "x:1"}}
     env = collect_environment(config, model_alias="glm", sandbox_enabled=False, sandbox_required=True)
@@ -163,6 +196,44 @@ def test_collect_environment_honest_unknowns(monkeypatch):
     assert env.sandbox_image_digest == "unknown"
     assert env.sandbox_required is True
     assert env.config_hash != "unknown"
+
+
+def test_failed_git_status_is_unknown_even_when_commit_sha_is_known(monkeypatch):
+    def fake_git(*args, **_kwargs):
+        if args == ("rev-parse", "HEAD"):
+            return "abc123"
+        if args == ("status", "--porcelain"):
+            return None
+        if args == ("rev-parse", "--abbrev-ref", "HEAD"):
+            return "main"
+        return None
+
+    monkeypatch.setattr("tools.benchmark.envinfo._git", fake_git)
+    monkeypatch.setattr("tools.benchmark.envinfo.docker_image_digest", lambda image: "unknown")
+
+    env = collect_environment({"models": {"default_alias": "glm"}}, model_alias="glm")
+
+    assert env.git_sha == "abc123"
+    assert env.git_dirty is None
+
+
+def test_successful_empty_git_status_is_known_clean(monkeypatch):
+    def fake_git(*args, **_kwargs):
+        if args == ("rev-parse", "HEAD"):
+            return "abc123"
+        if args == ("status", "--porcelain"):
+            return ""
+        if args == ("rev-parse", "--abbrev-ref", "HEAD"):
+            return "main"
+        return None
+
+    monkeypatch.setattr("tools.benchmark.envinfo._git", fake_git)
+    monkeypatch.setattr("tools.benchmark.envinfo.docker_image_digest", lambda image: "unknown")
+
+    env = collect_environment({"models": {"default_alias": "glm"}}, model_alias="glm")
+
+    assert env.git_sha == "abc123"
+    assert env.git_dirty is False
 
 
 # ---------------------------------------------------------------------------

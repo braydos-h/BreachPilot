@@ -79,6 +79,7 @@ def _seed_and_patch_runner(monkeypatch, tmp_path):
                 oracle_verified_success=call_count["n"] == 1,
                 duration_seconds=42.0,
                 total_tokens=1500,
+                scope_violations=0,
                 telemetry=TrialTelemetry(model_calls=5, tool_calls=9, total_tokens=1500),
             )
             summary = compute_run_summary([trial], run_id=run_id, suite=run_config.suite)
@@ -269,6 +270,7 @@ def _persist_run(storage: Any, suite: str, run_id: str, *, verified: bool) -> No
         status=TrialStatus.VERIFIED.value if verified else TrialStatus.FALSE_POSITIVE.value,
         agent_claimed_success=True,
         oracle_verified_success=verified,
+        tool_calls=1,
         duration_seconds=60.0,
     )
     from tools.benchmark.models import RunConfig, RunEnvironment
@@ -334,6 +336,174 @@ def test_baseline_get_post_and_compare(tmp_path, monkeypatch):
         params={"run_a": "run-1", "run_b": "nope"},
     )
     assert resp.status_code == 404
+
+
+def test_unavailable_reproduced_rate_survives_api_and_baseline_serialization(tmp_path, monkeypatch):
+    _seed_and_patch_runner(monkeypatch, tmp_path)
+    client = _make_client(tmp_path, monkeypatch)
+    import json
+
+    from tools.benchmark.storage import BenchmarkStorage
+
+    storage = BenchmarkStorage(tmp_path / "bench")
+    _persist_run(storage, "fake", "run-unverified", verified=False)
+    _persist_run(storage, "fake", "run-verified", verified=True)
+
+    # Pre-fix persisted summaries recorded 0.0 despite having no verified
+    # scenario denominator. API consumers must receive the corrected meaning.
+    legacy_summary_path = storage.run_dir("fake", "run-unverified") / "summary.json"
+    legacy_summary = json.loads(legacy_summary_path.read_text(encoding="utf-8"))
+    legacy_summary["reproduced_twice_rate"] = 0.0
+    legacy_summary_path.write_text(json.dumps(legacy_summary), encoding="utf-8")
+
+    run = client.get("/api/v1/benchmarks/runs/run-unverified", headers=_headers())
+    assert run.status_code == 200, run.text
+    assert run.json()["summary"]["reproduced_twice_rate"] is None
+
+    comparison = client.get(
+        "/api/v1/benchmarks/compare",
+        headers=_headers(),
+        params={"run_a": "run-unverified", "run_b": "run-verified"},
+    )
+    assert comparison.status_code == 200, comparison.text
+    comparison_payload = comparison.json()
+    assert comparison_payload["run_a"]["summary"]["reproduced_twice_rate"] is None
+    reproduction_metric = next(
+        row for row in comparison_payload["comparison"]["metrics"] if row["metric"] == "reproduced_twice_rate"
+    )
+    assert reproduction_metric["baseline"] is None
+    assert reproduction_metric["direction"] == "unavailable"
+
+    saved = client.post("/api/v1/benchmarks/baseline", headers=_headers(), json={"run_id": "run-unverified"})
+    assert saved.status_code == 200, saved.text
+    baseline = client.get("/api/v1/benchmarks/baseline", headers=_headers())
+    assert baseline.status_code == 200, baseline.text
+    assert baseline.json()["reproduced_twice_rate"] is None
+
+
+def test_api_normalizes_legacy_rates_with_zero_completed_trials(tmp_path, monkeypatch):
+    _seed_and_patch_runner(monkeypatch, tmp_path)
+    client = _make_client(tmp_path, monkeypatch)
+    import json
+
+    from tools.benchmark.storage import BenchmarkStorage
+
+    storage = BenchmarkStorage(tmp_path / "bench")
+    _persist_run(storage, "fake", "run-empty", verified=False)
+    run_path = storage.run_dir("fake", "run-empty") / "run.json"
+    run_payload = json.loads(run_path.read_text(encoding="utf-8"))
+    run_payload["trials"][0]["status"] = TrialStatus.INFRASTRUCTURE_ERROR.value
+    run_payload["trials"].append(
+        {**run_payload["trials"][0], "trial_id": "s1#skipped", "status": TrialStatus.SKIPPED.value}
+    )
+    run_path.write_text(json.dumps(run_payload), encoding="utf-8")
+    summary_path = storage.run_dir("fake", "run-empty") / "summary.json"
+    summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    summary.update(
+        {
+            "trials_total": 2,
+            "trials_completed": 0,
+            "verified_success_rate": 0.0,
+            "false_positive_rate": 0.0,
+            "false_negative_rate": 0.0,
+            "stuck_loop_rate": 0.0,
+        }
+    )
+    summary["scenarios"][0].update(
+        {
+            "trials": 2,
+            "trials_completed": 0,
+            "success_probability": 0.0,
+            "success_variance": 0.0,
+            "success_stddev": 0.0,
+            "ci95_low": 0.0,
+            "ci95_high": 0.65,
+        }
+    )
+    summary_path.write_text(json.dumps(summary), encoding="utf-8")
+
+    response = client.get("/api/v1/benchmarks/runs/run-empty", headers=_headers())
+
+    assert response.status_code == 200, response.text
+    body = response.json()["summary"]
+    assert body["verified_success_rate"] is None
+    assert body["false_positive_rate"] is None
+    assert body["false_negative_rate"] is None
+    assert body["stuck_loop_rate"] is None
+    scenario = body["scenarios"][0]
+    assert scenario["success_probability"] is None
+    assert scenario["success_variance"] is None
+    assert scenario["success_stddev"] is None
+    assert scenario["ci95_low"] is None and scenario["ci95_high"] is None
+
+
+def test_api_manual_compare_keeps_scope_gate_when_trial_counts_differ(tmp_path, monkeypatch):
+    _seed_and_patch_runner(monkeypatch, tmp_path)
+    client = _make_client(tmp_path, monkeypatch)
+    import json
+
+    from tools.benchmark.storage import BenchmarkStorage
+
+    storage = BenchmarkStorage(tmp_path / "bench")
+    _persist_run(storage, "fake", "run-baseline", verified=True)
+    _persist_run(storage, "fake", "run-candidate", verified=False)
+    run_path = storage.run_dir("fake", "run-candidate") / "run.json"
+    run_payload = json.loads(run_path.read_text(encoding="utf-8"))
+    run_payload["trials"].append({**run_payload["trials"][0], "trial_id": "s1#t1", "trial_index": 1})
+    run_path.write_text(json.dumps(run_payload), encoding="utf-8")
+    summary_path = storage.run_dir("fake", "run-candidate") / "summary.json"
+    summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    summary["trials_total"] = 2
+    summary["trials_completed"] = 2
+    summary["scope_violation_count"] = 1
+    summary["scope_violation_telemetry_available"] = True
+    summary["scenarios"][0]["trials"] = 2
+    summary["scenarios"][0]["trials_completed"] = 2
+    summary_path.write_text(json.dumps(summary), encoding="utf-8")
+
+    response = client.get(
+        "/api/v1/benchmarks/compare",
+        headers=_headers(),
+        params={"run_a": "run-baseline", "run_b": "run-candidate"},
+    )
+
+    assert response.status_code == 200, response.text
+    metrics = {row["metric"]: row for row in response.json()["comparison"]["metrics"]}
+    assert metrics["verified_success_rate"]["direction"] == "incomparable"
+    assert metrics["scope_violation_count"]["direction"] == "regressed"
+    assert metrics["scope_violation_count"]["current"] == 1
+    assert metrics["scope_violation_count"]["safety_gate"] == "failed"
+
+
+def test_api_manual_compare_does_not_pass_legacy_unmeasured_scope_zero(tmp_path, monkeypatch):
+    _seed_and_patch_runner(monkeypatch, tmp_path)
+    client = _make_client(tmp_path, monkeypatch)
+    import json
+
+    from tools.benchmark.storage import BenchmarkStorage
+
+    storage = BenchmarkStorage(tmp_path / "bench")
+    _persist_run(storage, "fake", "run-baseline", verified=True)
+    _persist_run(storage, "fake", "run-candidate", verified=True)
+    summary_path = storage.run_dir("fake", "run-candidate") / "summary.json"
+    summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    summary["scope_violation_count"] = 0
+    summary.pop("scope_violation_telemetry_available", None)
+    summary_path.write_text(json.dumps(summary), encoding="utf-8")
+
+    response = client.get(
+        "/api/v1/benchmarks/compare",
+        headers=_headers(),
+        params={"run_a": "run-baseline", "run_b": "run-candidate"},
+    )
+
+    assert response.status_code == 200, response.text
+    candidate = response.json()["run_b"]["summary"]
+    gate = next(row for row in response.json()["comparison"]["metrics"] if row["metric"] == "scope_violation_count")
+    assert candidate["scope_violation_count"] is None
+    assert candidate["scope_violation_telemetry_available"] is False
+    assert gate["safety_gate"] == "unavailable"
+    assert gate["current"] is None
 
 
 def test_run_detail_scenarios_and_events(tmp_path, monkeypatch):

@@ -77,13 +77,19 @@ def run_benchmark_cli(args: Any) -> int:
     if not 1 <= int(trials) <= 20:
         print("[!] --trials must be between 1 and 20.")
         return 2
+    timeout_seconds = getattr(args, "timeout_seconds", None)
+    if timeout_seconds is None:
+        timeout_seconds = int(benchmark_cfg.get("timeout_seconds", 1800) or 1800)
+    if int(timeout_seconds) < 30:
+        print("[!] --timeout-seconds must be at least 30.")
+        return 2
 
     run_config = RunConfig(
         suite=suite,
         scenario_ids=[str(s) for s in (getattr(args, "scenario", None) or [])],
         tags=[str(t) for t in (getattr(args, "tag", None) or [])],
         trials=int(trials),
-        timeout_seconds=int(benchmark_cfg.get("timeout_seconds", 1800) or 1800),
+        timeout_seconds=int(timeout_seconds),
         sandbox_required=bool(benchmark_cfg.get("sandbox_required", True)),
         save_baseline=bool(getattr(args, "save_baseline", False)),
         check_regression=bool(getattr(args, "check_regression", False)),
@@ -131,10 +137,15 @@ def run_benchmark_cli(args: Any) -> int:
     print("\n" + "=" * 60)
     print("  Benchmark results")
     print(f"  Run ID: {payload.get('run_id')}")
+    success_rate = summary.get("verified_success_rate")
+    success_rate_text = f"{success_rate:.1%}" if isinstance(success_rate, (int, float)) else "n/a"
     print(
-        f"  Verified: {summary.get('solved', 0)}/{summary.get('trials_total', 0)} ({summary.get('verified_success_rate', 0):.1%})"
+        f"  Verified: {summary.get('solved', 0)}/{summary.get('trials_completed', 'n/a')} completed "
+        f"({success_rate_text}); {summary.get('trials_total', 0)} total trials"
     )
-    print(f"  False positives: {summary.get('false_positive_rate', 0):.1%}")
+    false_positive_rate = summary.get("false_positive_rate")
+    false_positive_text = f"{false_positive_rate:.1%}" if isinstance(false_positive_rate, (int, float)) else "n/a"
+    print(f"  False positives: {false_positive_text}")
     median_time = summary.get("median_solve_time")
     if median_time:
         minutes, secs = divmod(int(median_time), 60)
@@ -142,7 +153,10 @@ def run_benchmark_cli(args: Any) -> int:
     cost = summary.get("estimated_cost")
     if cost is not None:
         print(f"  Estimated cost: ${float(cost):.2f}")
-    print(f"  Infra errors: {summary.get('infra_error_count', 0)}  timeouts: {summary.get('timeout_count', 0)}")
+    print(
+        f"  Infra errors: {summary.get('infra_error_count', 0)}  skipped: {summary.get('skipped_count', 0)}  "
+        f"timeouts: {summary.get('timeout_count', 0)}"
+    )
     print(f"  Report: {payload.get('report_markdown')}")
     print("=" * 60)
 
@@ -150,11 +164,15 @@ def run_benchmark_cli(args: Any) -> int:
     regression = payload.get("regression")
     if regression is not None:
         for finding in regression.get("findings", []):
-            marker = {"hard": "REGRESSION", "warning": "warn", "improvement": "improved", "unchanged": "ok"}.get(
-                finding.get("severity", ""), finding.get("severity", "")
-            )
+            marker = {
+                "hard": "REGRESSION",
+                "warning": "warn",
+                "improvement": "improved",
+                "unchanged": "ok",
+                "incomparable": "n/a",
+            }.get(finding.get("severity", ""), finding.get("severity", ""))
             print(f"  [{marker}] {finding.get('metric')}: {finding.get('detail')}")
         if not regression.get("passed", True):
             exit_code = 1
-            print("[!] Hard regression detected; exiting non-zero for CI.")
+            print("[!] Regression check failed or was incomplete; exiting non-zero for CI.")
     return exit_code

@@ -380,7 +380,7 @@ curl -X POST -H "Authorization: Bearer $BREACHPILOT_API_TOKEN" \
 
 - Purpose: read the regression baseline meta (missing baseline is a `200`, not a `404`).
 - Authentication: bearer.
-- Params/body: none. Path resolution (`benchmarks.py:97`): config `benchmark.baseline_path` when set (relative paths resolve against the storage root), else `<storage.root>/baseline.json` (`DEFAULT_BASELINE_PATH` is `reports/benchmarks/baseline.json`, `tools/benchmark/regression.py:40`).
+- Params/body: none. `tools/benchmark.paths.resolve_baseline_path` honors absolute `benchmark.baseline_path` values and resolves custom relative paths under the benchmark storage root. The default `reports/benchmarks/baseline.json` maps to `<storage.root>/baseline.json`.
 - Status codes: `200 BaselineMeta` — `{exists:false, path}` when absent, else `{exists:true, path, run_id, suite, timestamp, trials_total, verified_success_rate, ...}`; `401`.
 - Error conditions: none beyond auth.
 - Example request:
@@ -478,7 +478,8 @@ curl -H "Authorization: Bearer $BREACHPILOT_API_TOKEN" \
 - `tools/benchmark/service.py` — `BenchmarkService` (active-run ownership, `start_run` validation, `cancel`, `subscribe` fanout, `run_end`/`run_error`)
 - `tools/benchmark/storage.py` — `BenchmarkStorage` (run dirs, index, summaries, `load_events`)
 - `tools/benchmark/events.py` — `BenchmarkEventLogger` event shape + redaction/truncation
-- `tools/benchmark/regression.py` — `DEFAULT_BASELINE_PATH`, `load_baseline`, `save_baseline`, `compare_summaries_payload`
+- `tools/benchmark/paths.py` — shared baseline path resolution used by API and runner
+- `tools/benchmark/regression.py` — baseline load/save and comparison, including the `DEFAULT_BASELINE_PATH` compatibility export
 - `tools/benchmark/registry.py` — suite/scenario providers behind discovery + readiness
 - `tools/benchmark/targets.py` — `target_ports_reachable` probe used by readiness
 - `tools/benchmark/metrics.py` — `run_summary_from_dict` validation for baseline saves

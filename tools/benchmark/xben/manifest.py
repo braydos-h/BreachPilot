@@ -58,14 +58,20 @@ def parse_manifest(data: dict[str, Any], *, suite: str = "xben", source: str = "
         if not str(data.get(key, "") or "").strip():
             raise ManifestError(f"manifest {source!r}: missing required field {key!r}")
     scenario_id = str(data["benchmark_id"]).strip()
+    verification_supported = data.get("verification_supported", True)
+    if not isinstance(verification_supported, bool):
+        raise ManifestError(f"manifest {source!r}: verification_supported must be a boolean")
+    verification_note = str(data.get("verification_note", "") or "").strip()
+    if not verification_supported and not verification_note:
+        raise ManifestError(f"manifest {source!r}: unsupported verification requires verification_note")
     oracle = data.get("oracle")
-    if not isinstance(oracle, dict) or not (oracle.get("flags") or []):
+    if not isinstance(oracle, dict) or (verification_supported and not (oracle.get("flags") or [])):
         raise ManifestError(
             f"manifest {source!r}: oracle.flags must declare at least one independent check "
             "(agent claims never decide success)"
         )
     flags = [f for f in oracle.get("flags", []) if isinstance(f, dict)]
-    if not flags:
+    if verification_supported and not flags:
         raise ManifestError(f"manifest {source!r}: oracle.flags contains no valid check objects")
     timeout = data.get("timeout", data.get("timeout_seconds", 1800))
     try:
@@ -90,6 +96,8 @@ def parse_manifest(data: dict[str, Any], *, suite: str = "xben", source: str = "
         goal=str(data.get("goal", "initial_access") or "initial_access"),
         expected_flags=_as_list(data.get("expected_flags")),
         oracle={"flags": flags, "host_owned_when": oracle.get("host_owned_when", "any")},
+        verification_supported=verification_supported,
+        verification_note=verification_note,
         tags=_as_list(data.get("tags")),
         difficulty=str(data.get("difficulty", "unknown") or "unknown"),
         reset_strategy=str(data.get("reset_strategy", "recreate") or "recreate"),

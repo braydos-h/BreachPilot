@@ -195,13 +195,13 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         "--save-baseline",
         dest="save_baseline",
         action="store_true",
-        help="With --eval: persist the graded report as the regression baseline (eval.baseline_path)",
+        help="With graded --eval (without --target): persist the report as the regression baseline",
     )
     evalgrp.add_argument(
         "--check-regression",
         dest="check_regression",
         action="store_true",
-        help="With --eval/--benchmark: exit 1 on hard regressions vs the saved baseline",
+        help="With graded --eval (without --target) or --benchmark: exit 1 on hard regressions",
     )
     benchgrp = parser.add_argument_group("benchmark suite")
     benchgrp.add_argument(
@@ -238,6 +238,13 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         default=None,
         metavar="N",
         help="With --benchmark: repeated trials per scenario (default benchmark.trials, 1-20)",
+    )
+    benchgrp.add_argument(
+        "--timeout-seconds",
+        type=int,
+        default=None,
+        metavar="SECONDS",
+        help="With --benchmark: per-trial mission timeout override (minimum 30 seconds)",
     )
 
     ctf = parser.add_argument_group("ctf autopilot")

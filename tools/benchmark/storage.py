@@ -157,6 +157,7 @@ class BenchmarkStorage:
                 "status": status,
                 "timestamp": summary.timestamp,
                 "trials_total": summary.trials_total,
+                "trials_completed": summary.trials_completed,
                 "solved": summary.solved,
                 "verified_success_rate": summary.verified_success_rate,
                 "false_positive_rate": summary.false_positive_rate,
@@ -225,6 +226,13 @@ class BenchmarkStorage:
                             indexed.add(str(entry.get("run_id")))
                         row = dict(entry)
                         row.setdefault("suite", s)
+                        if (
+                            row.get("trials_completed") is None
+                            or row.get("trials_completed") == 0
+                            or row.get("trials_total") == 0
+                        ):
+                            row["verified_success_rate"] = None
+                            row["false_positive_rate"] = None
                         runs.append(row)
             suite_dir = self.root / s
             try:
@@ -250,9 +258,10 @@ class BenchmarkStorage:
                         "status": data.get("status", "running"),
                         "timestamp": data.get("timestamp", ""),
                         "trials_total": len(data.get("trials", []) or []),
+                        "trials_completed": None,
                         "solved": 0,
-                        "verified_success_rate": 0.0,
-                        "false_positive_rate": 0.0,
+                        "verified_success_rate": None,
+                        "false_positive_rate": None,
                         "median_solve_time": None,
                         "estimated_cost": None,
                         "total_tokens": 0,

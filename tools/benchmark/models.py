@@ -92,10 +92,15 @@ class FailureCategory(str, Enum):
 
 
 class ResetStrategy(str, Enum):
-    """How a scenario's target is restored between trials."""
+    """How a scenario's target is restored between trials.
+
+    ``RESTART`` only restarts Docker processes; it does not revert filesystem
+    state. Stateful scenarios should use ``RECREATE`` or another explicit
+    snapshot restore implementation.
+    """
 
     NONE = "none"  # static host, operator-managed
-    RESTART = "restart"  # docker restart of the container
+    RESTART = "restart"  # process restart; writable container state remains
     RECREATE = "recreate"  # remove + re-run the image (fresh state)
 
 
@@ -137,6 +142,8 @@ class BenchmarkScenario:
     goal: str = "initial_access"
     expected_flags: list[str] = field(default_factory=list)
     oracle: dict[str, Any] = field(default_factory=dict)
+    verification_supported: bool = True
+    verification_note: str = ""
     tags: list[str] = field(default_factory=list)
     difficulty: str = "unknown"
     reset_strategy: str = ResetStrategy.RECREATE.value
@@ -223,7 +230,8 @@ class TrialResult:
 
     ``agent_claimed_success`` and ``oracle_verified_success`` are independent:
     claimed-and-not-verified is a FALSE_POSITIVE trial; verified-but-not-claimed
-    is a VERIFIED trial with ``false_negative=True`` (the agent undersold).
+    is an uncredited failure with ``false_negative=True``. Aggregate success
+    requires an oracle pass, an agent success claim, and recorded tool actions.
     """
 
     run_id: str = ""
@@ -241,9 +249,9 @@ class TrialResult:
     #: gated by the regression check (rise) and live thresholds.
     stuck_loop: bool = False
     #: Violations observed REACHING the network layer in this trial (past
-    #: containment; default 0). Distinct from sandbox-blocked actions (blocks
-    #: are the firewall working). Any nonzero count is a HARD regression.
-    scope_violations: int = 0
+    #: containment). None means the run did not collect this signal; it must
+    #: not be interpreted as a measured zero. Distinct from sandbox blocks.
+    scope_violations: int | None = None
     failure_category: str = FailureCategory.UNKNOWN.value
     failure_detail: str = ""
     started_at: str = ""
@@ -336,15 +344,21 @@ class ScenarioSummary:
     difficulty: str = "unknown"
     tags: list[str] = field(default_factory=list)
     trials: int = 0
+    #: Trials with a usable outcome; infrastructure errors and skips do not
+    #: contribute to the success-probability denominator. None means an older
+    #: persisted summary did not record this sample count.
+    trials_completed: int | None = None
     verified: int = 0
     claimed: int = 0
     false_positives: int = 0
     false_negatives: int = 0
     timeouts: int = 0
     infra_errors: int = 0
-    success_probability: float = 0.0
-    success_variance: float = 0.0
-    success_stddev: float = 0.0
+    skipped: int = 0
+    #: None when no completed trial provided a usable outcome.
+    success_probability: float | None = None
+    success_variance: float | None = None
+    success_stddev: float | None = None
     ci95_low: float | None = None
     ci95_high: float | None = None
     #: Repeated-trials gate (#02 Level C): True only when the scenario
@@ -375,11 +389,13 @@ class RunSummary:
     suite: str = ""
     timestamp: str = ""
     trials_total: int = 0
-    trials_completed: int = 0
-    verified_success_rate: float = 0.0
+    #: None for legacy summaries that did not store the usable-outcome count.
+    trials_completed: int | None = None
+    #: None when all recorded trials were skipped or infrastructure failures.
+    verified_success_rate: float | None = None
     solved: int = 0  # verified trials
-    false_positive_rate: float = 0.0
-    false_negative_rate: float = 0.0
+    false_positive_rate: float | None = None
+    false_negative_rate: float | None = None
     median_solve_time: float | None = None
     mean_solve_time: float | None = None
     median_tool_actions: float | None = None
@@ -390,18 +406,21 @@ class RunSummary:
     time_to_first_verified_success: float | None = None
     sandbox_blocked_actions: int = 0
     infra_error_count: int = 0
+    skipped_count: int = 0
     timeout_count: int = 0
     #: Metric #9 (run level): scenarios reproduced on ≥2 independent trials,
     #: and their fraction over scenarios with ≥1 verification. Zero verified
-    #: scenarios → rate 0.0 (undefined, never presented as success).
+    #: scenarios → rate unavailable (None), because the denominator is empty.
     scenarios_reproduced_twice: int = 0
-    reproduced_twice_rate: float = 0.0
+    reproduced_twice_rate: float | None = None
     #: Stuck-loop trials / rate over completed trials (regression-gated).
     stuck_loop_count: int = 0
-    stuck_loop_rate: float = 0.0
+    stuck_loop_rate: float | None = None
     #: Metric #10 (run level): violations reaching the network layer. Must
     #: be 0; any nonzero count is a HARD regression.
-    scope_violation_count: int = 0
+    scope_violation_count: int | None = None
+    #: False for legacy summaries or runs that could not measure the signal.
+    scope_violation_telemetry_available: bool = False
     failure_categories: dict[str, int] = field(default_factory=dict)
     scenarios: list[ScenarioSummary] = field(default_factory=list)
 

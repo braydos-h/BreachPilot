@@ -17,6 +17,10 @@ from tools.benchmark.targets import TargetProvisionError
 
 
 def _scenario(scenario_id: str = "s1", *, oracle_flags: list[dict] | None = None, **kw) -> BenchmarkScenario:
+    # These fixtures represent operator-managed host targets. Keep their
+    # lack of an automatic reset explicit instead of inheriting Docker's
+    # recreate default.
+    kw.setdefault("reset_strategy", "none")
     return BenchmarkScenario(
         suite="fake",
         scenario_id=scenario_id,
@@ -50,9 +54,11 @@ class _FakeMission:
     def __init__(self, outcomes: list[MissionResult]) -> None:
         self.outcomes = list(outcomes)
         self.calls: list[str] = []
+        self.timeouts: list[int | None] = []
 
     async def run_mission(self, scenario, *, workspace, trial_id, event_logger=None, goal=None, timeout_seconds=None):
         self.calls.append(trial_id)
+        self.timeouts.append(timeout_seconds)
         workspace.mkdir(parents=True, exist_ok=True)
         outcome = self.outcomes.pop(0) if self.outcomes else MissionResult()
         return outcome
@@ -101,15 +107,18 @@ def _fail_executor(check):
 
 def test_verified_success(tmp_path, runner_cls_patched, monkeypatch):
     seed_fake_suite([_scenario("s1")])
-    runner_cls_patched([_verified_mission(agent_claimed_success=True, claimed_summary="compromises: 1")])
+    mission = runner_cls_patched([_verified_mission(agent_claimed_success=True, claimed_summary="compromises: 1")])
     runner = BenchmarkRunner(_config(tmp_path), Path("config.yaml"), verifier_factory=lambda s: _v(s, _pass_executor))
-    payload = asyncio.run(runner.run(RunConfig(suite="fake", scenario_ids=["s1"], trials=1, sandbox_required=False)))
+    payload = asyncio.run(
+        runner.run(RunConfig(suite="fake", scenario_ids=["s1"], trials=1, sandbox_required=False, timeout_seconds=123))
+    )
     trial = payload["trials"][0]
     assert trial["status"] == "VERIFIED"
     assert trial["oracle_verified_success"] is True
     assert trial["false_positive"] is False
     assert payload["summary"]["verified_success_rate"] == 1.0
     assert payload["summary"]["false_positive_rate"] == 0.0
+    assert mission.timeouts == [123]
     # Persistence: run.json + summary.json + report + events exist.
     run_dir = Path(payload["run_dir"])
     assert (run_dir / "summary.json").exists()
@@ -264,6 +273,27 @@ def test_multiple_trials_and_cancellation(tmp_path, runner_cls_patched):
     payload = asyncio.run(runner.run(RunConfig(suite="fake", trials=2, sandbox_required=False), cancel=cancel))
     assert payload["status"] == "cancelled"
     assert len(payload["trials"]) < 4  # cancelled before all trials ran
+
+
+def test_static_host_target_cannot_be_reused_for_repeated_trials(tmp_path, runner_cls_patched):
+    """A static host target's second trial must not inherit first-trial state."""
+    seed_fake_suite([_scenario("s1", reset_strategy="none")])
+    mission = runner_cls_patched(
+        [
+            _verified_mission(agent_claimed_success=True, claimed_summary="compromises: 1"),
+            _verified_mission(agent_claimed_success=True, claimed_summary="compromises: 1"),
+        ]
+    )
+    runner = BenchmarkRunner(_config(tmp_path), Path("config.yaml"), verifier_factory=lambda s: _v(s, _pass_executor))
+
+    payload = asyncio.run(runner.run(RunConfig(suite="fake", scenario_ids=["s1"], trials=2, sandbox_required=False)))
+
+    first, second = payload["trials"]
+    assert first["status"] == TrialStatus.VERIFIED.value
+    assert second["status"] == TrialStatus.INFRASTRUCTURE_ERROR.value
+    assert second["failure_category"] == FailureCategory.TARGET_RESET_FAILED.value
+    assert "reset_strategy='none'" in second["failure_detail"]
+    assert mission.calls == ["s1#t1"]
 
 
 def test_run_records_reproducibility_metadata(tmp_path, runner_cls_patched, monkeypatch):

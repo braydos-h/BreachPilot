@@ -181,9 +181,9 @@ def test_extract_trial_telemetry_scope_violations():
     assert tel.scope_violations == 2
     assert tel.scope_rejections == 0  # distinct signal: blocked attempts vs past-containment
     tel2 = extract_trial_telemetry("t", {"records": [], "scope_violations_network": "bogus"})
-    assert tel2.scope_violations == 0
+    assert tel2.scope_violations is None
     tel3 = extract_trial_telemetry("t", {"records": []})
-    assert tel3.scope_violations == 0  # absent signal is no signal
+    assert tel3.scope_violations is None  # absent signal is unknown, not a measured zero
 
 
 def test_aggregate_finding_lifecycle_combines_verify_and_retest():
@@ -229,7 +229,7 @@ def test_compute_reliability_metrics_merges_lifecycle():
     m2 = compute_reliability_metrics(trials, live_outcome="PASS")
     assert m2.findings_reproduced_twice_rate == 0.0
     assert m2.mean_time_to_remediation_seconds is None
-    assert m2.scope_violation_count == 0
+    assert m2.scope_violation_count is None
 
 
 def test_check_live_thresholds_scope_gate():
@@ -244,14 +244,38 @@ def test_check_live_thresholds_scope_gate():
 
 
 def _graded_report(**reliability_kwargs):
-    from tools.eval_harness import EvalReport, ReliabilityMetrics, TargetScore
+    from tools.eval_harness import EvalReport, ReliabilityMetrics, RunProvenance, TargetScore
 
+    reliability_kwargs.setdefault("scope_violation_count", 0)
     rel = ReliabilityMetrics(live_outcome="PASS", **reliability_kwargs)
     return EvalReport(
         run_id="r1",
         timestamp="2026-01-01T00:00:00+00:00",
-        targets=[TargetScore(target_id="a", score=0.9)],
+        full_suite=True,
+        targets=[TargetScore(target_id="a", score=0.9, details={"findings_false_positives": 0})],
         live_outcome="PASS",
+        provenance=RunProvenance(
+            model_alias="test",
+            provider="fake",
+            model_id="test-model",
+            model_version="1",
+            temperature="0",
+            seed="42",
+            action_budget=30,
+            max_rounds=30,
+            scenario_version="oracle-sha",
+            code_revision="abc1234",
+            breachpilot_version="0.68.4",
+            config_hash="c" * 16,
+            prompt_hash="p" * 16,
+            tool_catalog_hash="t" * 16,
+            skill_catalog_hash="s" * 16,
+            sandbox_enabled=True,
+            sandbox_image="worker:sha",
+            sandbox_image_digest="sha256:" + "a" * 64,
+            orchestration_mode="agent",
+            provider_adapter_version="1",
+        ),
         reliability=rel,
     )
 
@@ -305,14 +329,14 @@ def test_check_regression_clean_run_passes(tmp_path):
     assert any("[ok] scope_violation_count 0" in line for line in messages)
 
 
-def test_check_regression_legacy_baseline_skips_reliability_gates(tmp_path):
+def test_check_regression_legacy_baseline_requires_full_suite_refresh(tmp_path):
     from tools.eval_harness import check_regression
 
     legacy = {"run_id": "old", "timestamp": "t", "targets": {"a": {"score": 0.9}}}
     (tmp_path / "base.json").write_text(json.dumps(legacy), encoding="utf-8")
     passed, messages = check_regression(_graded_report(), tmp_path / "base.json")
-    assert passed is True  # skip, never a failure on an old baseline
-    assert any("[skip] reliability gates" in line for line in messages)
+    assert passed is False
+    assert any("lacks full-suite attestation" in line for line in messages)
 
 
 def test_check_regression_missing_baseline_fails_closed(tmp_path):
@@ -377,6 +401,7 @@ def _trial(scenario_id="s1", *, verified=False, claimed=False, status="FAILED", 
         status=status,
         agent_claimed_success=claimed,
         oracle_verified_success=verified,
+        tool_calls=2 if verified or claimed else 0,
         stuck_loop=stuck,
         scope_violations=scope,
     )
@@ -395,10 +420,16 @@ def test_meets_repeated_trials_gate():
 def test_scenario_reproduced_twice_needs_two_verifications():
     from tools.benchmark.metrics import compute_scenario_summary
 
-    two = compute_scenario_summary([_trial(verified=True), _trial(verified=True)], "s1")
+    two = compute_scenario_summary(
+        [
+            _trial(verified=True, claimed=True, status="VERIFIED"),
+            _trial(verified=True, claimed=True, status="VERIFIED"),
+        ],
+        "s1",
+    )
     assert two.verified == 2
     assert two.reproduced_twice is True
-    one = compute_scenario_summary([_trial(verified=True)], "s1")
+    one = compute_scenario_summary([_trial(verified=True, claimed=True, status="VERIFIED")], "s1")
     assert one.reproduced_twice is False  # a single lucky trial never reproduces
 
 
@@ -407,14 +438,14 @@ def test_run_summary_reproduced_twice_rate_and_signals():
 
     summary = compute_run_summary(
         [
-            _trial("s1", verified=True, status="VERIFIED"),
-            _trial("s1", verified=True, status="VERIFIED"),
-            _trial("s2", verified=True, status="VERIFIED"),
+            _trial("s1", verified=True, claimed=True, status="VERIFIED"),
+            _trial("s1", verified=True, claimed=True, status="VERIFIED"),
+            _trial("s2", verified=True, claimed=True, status="VERIFIED"),
             _trial("s3", status="FAILED", stuck=True, scope=0),
         ]
     )
     assert summary.scenarios_reproduced_twice == 1  # s1 only
-    assert summary.reproduced_twice_rate == 1 / 3  # over scenarios with ≥1 verification
+    assert summary.reproduced_twice_rate == 1 / 2  # only scenarios with ≥1 verification form the denominator
     assert summary.stuck_loop_count == 1
     assert summary.stuck_loop_rate == 1 / 4
     assert summary.scope_violation_count == 0
@@ -425,15 +456,25 @@ def test_run_summary_scope_violations_counted():
 
     summary = compute_run_summary([_trial("s1", status="FAILED", scope=2)])
     assert summary.scope_violation_count == 2
+    assert summary.scope_violation_telemetry_available is True
 
 
-def test_run_summary_empty_signals_are_zero_not_green():
+def test_run_summary_missing_scope_telemetry_is_unavailable():
+    from tools.benchmark.metrics import compute_run_summary
+
+    summary = compute_run_summary([_trial("s1", status="FAILED", scope=None)])
+    assert summary.scope_violation_count is None
+    assert summary.scope_violation_telemetry_available is False
+
+
+def test_run_summary_empty_signals_distinguish_unavailable_rates_from_zero_counts():
     from tools.benchmark.metrics import compute_run_summary
 
     summary = compute_run_summary([])
-    assert summary.reproduced_twice_rate == 0.0
-    assert summary.stuck_loop_rate == 0.0
-    assert summary.scope_violation_count == 0
+    assert summary.reproduced_twice_rate is None
+    assert summary.stuck_loop_rate is None
+    assert summary.scope_violation_count is None
+    assert summary.scope_violation_telemetry_available is False
 
 
 # ── benchmark regression gates ─────────────────────────────────────────────
@@ -457,6 +498,21 @@ def test_benchmark_regression_scope_violation_is_hard(tmp_path):
     result = compare_to_baseline(current, load_baseline(tmp_path / "base.json"))
     assert result.passed is False
     assert any(f.severity == "hard" and f.metric == "scope_violation_count" for f in result.findings)
+
+
+def test_benchmark_regression_unknown_scope_telemetry_fails_closed(tmp_path):
+    from tools.benchmark.regression import compare_to_baseline, load_baseline, save_baseline
+
+    baseline = _bench_summary()
+    save_baseline(baseline, tmp_path / "base.json")
+    current = _bench_summary(trials=[_trial("s1", status="FAILED", scope=None)])
+    assert current.scope_violation_count is None
+    result = compare_to_baseline(current, load_baseline(tmp_path / "base.json"))
+    assert result.passed is False
+    assert any(
+        finding.severity == "hard" and finding.metric == "scope_violation_count" and "unavailable" in finding.detail
+        for finding in result.findings
+    )
 
 
 def test_benchmark_regression_stuck_loop_rise_is_hard(tmp_path):
@@ -500,7 +556,9 @@ def test_benchmark_regression_old_baseline_without_new_keys(tmp_path):
         "scenarios": {},
     }
     result = compare_to_baseline(_bench_summary(), legacy)
-    assert result.passed is True  # missing keys default to 0.0/0 — clean stays clean
+    assert result.passed is False  # absent scenario coverage cannot establish an aggregate comparison
+    assert result.hard_count == 0
+    assert result.incomparable_count > 0
 
 
 def test_benchmark_regression_missing_baseline_fails_closed():
@@ -520,7 +578,7 @@ def test_readme_headlines_link_live_table_not_counts():
     assert "167 MCP" not in text
     assert "Reliability over capability counts" in text
     assert "docs/reliability-metrics.md#live-results" in text
-    for command in ("--benchmark xben --trials 5", "--eval --save-baseline", "--eval --check-regression"):
+    for command in ("--benchmark xben --trials 1", "--eval --save-baseline", "--eval --check-regression"):
         assert command in text, f"README must carry the repro command: {command}"
     assert "docs/generated/capability-counts.json" in text
     assert "tool-catalog-generated" in text

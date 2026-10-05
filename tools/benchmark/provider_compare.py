@@ -12,6 +12,7 @@ single misleading number: each row pins provider + model + suite + trials.
 
 from __future__ import annotations
 
+import math
 import statistics
 from dataclasses import dataclass, field
 from typing import Any
@@ -25,8 +26,8 @@ class ProviderRow:
     model_id: str = "unknown"
     suite: str = "unknown"
     trials: int = 0
-    verified_rate: float = 0.0
-    false_positive_rate: float = 0.0
+    verified_rate: float | None = None
+    false_positive_rate: float | None = None
     median_actions: float | None = None
     estimated_cost: float | None = None
 
@@ -62,7 +63,7 @@ class ProviderComparison:
             cost = f"${r.estimated_cost:.2f}" if r.estimated_cost is not None else "n/a"
             lines.append(
                 f"| {r.provider} | {r.model_id} | {r.suite} | {r.trials} | "
-                f"{r.verified_rate:.1%} | {r.false_positive_rate:.1%} | {med} | {cost} |"
+                f"{_fmt_rate(r.verified_rate)} | {_fmt_rate(r.false_positive_rate)} | {med} | {cost} |"
             )
         if len(self.rows) < 2:
             lines.append("")
@@ -72,6 +73,10 @@ class ProviderComparison:
 
 def _median(values: list[float]) -> float | None:
     return statistics.median(values) if values else None
+
+
+def _fmt_rate(value: float | None) -> str:
+    return f"{value:.1%}" if value is not None and math.isfinite(value) else "n/a"
 
 
 def compare_runs(runs: list[dict[str, Any]]) -> ProviderComparison:
@@ -94,7 +99,10 @@ def compare_runs(runs: list[dict[str, Any]]) -> ProviderComparison:
             verified_actions = [
                 float(t.get("tool_calls", 0) or 0)
                 for t in trials
-                if isinstance(t, dict) and t.get("oracle_verified_success") is True
+                if isinstance(t, dict)
+                and t.get("oracle_verified_success") is True
+                and t.get("agent_claimed_success") is True
+                and float(t.get("tool_calls", 0) or 0) > 0
             ]
             median_actions = _median(verified_actions)
         if median_actions is None and isinstance(summary.get("median_tool_actions"), (int, float)):
@@ -106,11 +114,18 @@ def compare_runs(runs: list[dict[str, Any]]) -> ProviderComparison:
                 model_id=str(env.get("model_id", "unknown") or "unknown"),
                 suite=str(summary.get("suite", "unknown") or "unknown"),
                 trials=int(summary.get("trials_total", 0) or 0),
-                verified_rate=float(summary.get("verified_success_rate", 0.0) or 0.0),
-                false_positive_rate=float(summary.get("false_positive_rate", 0.0) or 0.0),
+                verified_rate=_optional_float(summary.get("verified_success_rate")),
+                false_positive_rate=_optional_float(summary.get("false_positive_rate")),
                 median_actions=median_actions,
                 estimated_cost=float(cost) if isinstance(cost, (int, float)) else None,
             )
         )
     comparison.rows.sort(key=lambda r: (r.provider, r.model_id, r.suite))
     return comparison
+
+
+def _optional_float(value: Any) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    parsed = float(value)
+    return parsed if math.isfinite(parsed) else None

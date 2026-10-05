@@ -14,6 +14,7 @@ from __future__ import annotations
 import hashlib
 import json
 import platform
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -24,8 +25,14 @@ from tools.benchmark.models import RunEnvironment, unknown
 __all__ = ["collect_environment", "config_hash", "resolve_model_metadata"]
 
 
-def _git(*args: str, cwd: Path | str = ".") -> str:
-    """Run one git command, returning stripped stdout (``""`` on any failure)."""
+def _git(*args: str, cwd: Path | str = ".") -> str | None:
+    """Run one git command, returning stripped stdout or ``None`` on failure.
+
+    An empty string is a successful command with no output (the clean result
+    from ``git status --porcelain``); ``None`` means the result is unknown.
+    Keeping those cases separate prevents a failed status probe from being
+    recorded as a clean working tree.
+    """
     try:
         proc = subprocess.run(
             ["git", *args],
@@ -34,9 +41,9 @@ def _git(*args: str, cwd: Path | str = ".") -> str:
             timeout=15,
             cwd=str(cwd),
         )
-    except (OSError, subprocess.TimeoutExpired):
-        return ""
-    return proc.stdout.strip() if proc.returncode == 0 else ""
+    except (OSError, subprocess.TimeoutExpired, UnicodeError):
+        return None
+    return proc.stdout.strip() if proc.returncode == 0 else None
 
 
 def config_hash(config: dict[str, Any] | None) -> str:
@@ -114,17 +121,42 @@ def resolve_model_metadata(config: dict[str, Any], model_alias: str) -> dict[str
     # Cloud-hosted ollama ids carry the version in the tag (``family:tag``);
     # local daemon metadata needs a round-trip we do not require here, so the
     # version stays unknown unless it is embedded in the id.
-    model_version = model_id.split(":", 1)[1] if ":" in model_id else "unknown"
+    model_version = _model_version(model_id)
     try:
         provider = get_ai_provider(config)
     except Exception:  # noqa: BLE001 -- provider resolution must never abort a run
         provider = "unknown"
+    if model_id == "unknown" and alias:
+        # Benchmark selection resolves provider defaults to a concrete model
+        # ID before constructing the runner. Preserve that known ID in replay
+        # metadata instead of looking it up as though it were a registry alias.
+        try:
+            from tools.providers.registry import resolve_default_model
+
+            if alias == resolve_default_model(config, provider):
+                model_id = alias
+            elif isinstance(registry, dict):
+                for candidate in registry.values():
+                    if isinstance(candidate, dict):
+                        candidate = candidate.get("model") or candidate.get("model_id") or candidate.get("name")
+                    if isinstance(candidate, str) and candidate.strip() == alias:
+                        model_id = alias
+                        break
+        except Exception:  # noqa: BLE001 -- metadata remains unknown on resolver errors
+            pass
+    model_version = _model_version(model_id)
     return {
         "model_alias": unknown(alias),
         "model_id": unknown(model_id),
         "model_version": unknown(model_version),
         "model_provider": unknown(provider),
     }
+
+
+def _model_version(model_id: str) -> str:
+    """Extract a version suffix only when the concrete ID makes it explicit."""
+    match = re.search(r"-(\d+(?:\.\d+)*(?:[-:][A-Za-z0-9._-]+)?)$", model_id)
+    return match.group(1) if match else "unknown"
 
 
 def collect_environment(
@@ -147,7 +179,7 @@ def collect_environment(
     sha = _git("rev-parse", "HEAD")
     env.git_sha = sha or "unknown"
     dirty_raw = _git("status", "--porcelain")
-    env.git_dirty = bool(dirty_raw) if (sha or dirty_raw != "") else None
+    env.git_dirty = bool(dirty_raw) if dirty_raw is not None else None
     env.git_branch = _git("rev-parse", "--abbrev-ref", "HEAD") or "unknown"
 
     meta = resolve_model_metadata(config, model_alias)

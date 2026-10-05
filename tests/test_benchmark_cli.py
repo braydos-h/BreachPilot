@@ -44,6 +44,7 @@ def _args(**kw) -> argparse.Namespace:
         "scenario": None,
         "tag": None,
         "trials": None,
+        "timeout_seconds": None,
         "save_baseline": False,
         "check_regression": False,
     }
@@ -88,6 +89,7 @@ def _patch_runner(monkeypatch, tmp_path, mission_outcomes):
                         else TrialStatus.FAILED.value,
                         oracle_verified_success=outcome.agent_claimed_success,
                         agent_claimed_success=outcome.agent_claimed_success,
+                        tool_calls=outcome.telemetry.tool_calls,
                         duration_seconds=60.0,
                     )
                 )
@@ -129,12 +131,62 @@ def test_cli_benchmark_list(fake_suite, capsys):
 
 
 def test_cli_run_benchmark(tmp_path, monkeypatch, fake_suite, capsys):
-    _patch_runner(monkeypatch, tmp_path, [MissionResult(agent_claimed_success=True)])
+    _patch_runner(
+        monkeypatch,
+        tmp_path,
+        [MissionResult(agent_claimed_success=True, telemetry=TrialTelemetry(tool_calls=1))],
+    )
     rc = run_benchmark_cli(_args(trials=2))
     assert rc == 0
     out = capsys.readouterr().out
     assert "Verified:" in out
     assert "100.0%" in out or "100%" in out
+
+
+def test_cli_renders_unavailable_rates_for_only_infra_and_skipped_trials(tmp_path, monkeypatch, fake_suite, capsys):
+    import yaml
+
+    from tools.benchmark.metrics import compute_run_summary
+    from tools.benchmark.models import TrialResult, TrialStatus
+
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(yaml.safe_dump(_config(tmp_path)), encoding="utf-8")
+
+    class _Runner:
+        def __init__(self, config, path):
+            pass
+
+        async def run(self, run_config, **kwargs):
+            trials = [
+                TrialResult(
+                    run_id="r-empty",
+                    suite="fake",
+                    scenario_id="s1",
+                    status=TrialStatus.INFRASTRUCTURE_ERROR.value,
+                ),
+                TrialResult(
+                    run_id="r-empty",
+                    suite="fake",
+                    scenario_id="s1",
+                    status=TrialStatus.SKIPPED.value,
+                ),
+            ]
+            summary = compute_run_summary(trials, run_id="r-empty", suite="fake")
+            return {
+                "run_id": "r-empty",
+                "summary": summary.to_dict(),
+                "report_markdown": "report.md",
+                "regression": None,
+            }
+
+    monkeypatch.setattr("tools.benchmark_cli.BenchmarkRunner", _Runner)
+
+    rc = run_benchmark_cli(_args(config=config_path, trials=2))
+
+    assert rc == 0
+    output = capsys.readouterr().out
+    assert "Verified: 0/0 completed (n/a); 2 total trials" in output
+    assert "False positives: n/a" in output
 
 
 def test_cli_run_benchmark_invalid_config(tmp_path, monkeypatch, fake_suite):
@@ -151,6 +203,11 @@ def test_cli_trials_out_of_range(fake_suite):
     assert rc == 2
 
 
+def test_cli_timeout_below_supported_minimum_is_usage_error(fake_suite):
+    rc = run_benchmark_cli(_args(timeout_seconds=29))
+    assert rc == 2
+
+
 def test_cli_hard_regression_exit_code(tmp_path, monkeypatch, fake_suite, capsys):
     """--check-regression against a stronger baseline must exit non-zero."""
     _patch_runner(monkeypatch, tmp_path, [MissionResult(agent_claimed_success=False)])
@@ -158,7 +215,8 @@ def test_cli_hard_regression_exit_code(tmp_path, monkeypatch, fake_suite, capsys
     baseline_path.write_text(
         '{"run_id": "b0", "suite": "fake", "trials_total": 10, "verified_success_rate": 0.9, '
         '"false_positive_rate": 0.0, "median_solve_time": null, "median_tool_actions": null, '
-        '"estimated_cost": null, "scenarios": {}}',
+        '"estimated_cost": null, "scenarios": {"s1": {"success_probability": 1.0, "verified": 1, '
+        '"trials": 1, "trials_completed": 1}}}',
         encoding="utf-8",
     )
     config = _config(tmp_path)
@@ -212,21 +270,18 @@ def test_service_start_and_status(tmp_path, monkeypatch):
 
     monkeypatch.setattr("tools.benchmark.service.BenchmarkRunner", _FakeRunner)
     service = BenchmarkService(config, Path("config.yaml"))
-    result = asyncio.run(service.start_run({"suite": "fake"}))
+
+    async def start_and_drain():
+        result = await service.start_run({"suite": "fake"})
+        task = service._active_task
+        if task is not None:
+            await task
+        return result
+
+    result = asyncio.run(start_and_drain())
     assert "error" not in result
     assert result["run_id"] == "fake-run-1"
-    # Wait for task completion.
-    task = service._active_task
-    if task is not None:
-        asyncio.run(_await_task(task))
     assert service.status()["state"] == "completed"
-
-
-async def _await_task(task):
-    try:
-        await task
-    except (asyncio.CancelledError, Exception):  # noqa: BLE001
-        pass
 
 
 def test_service_rejects_concurrent_run(tmp_path, monkeypatch):
@@ -249,10 +304,8 @@ def test_service_rejects_concurrent_run(tmp_path, monkeypatch):
         assert "error" not in first
         second = loop.run_until_complete(service.start_run({"suite": "fake"}))
         assert "error" in second
-        loop.run_until_complete(service.cancel())
     finally:
-        if service._active_task is not None:
-            service._active_task.cancel()
+        loop.run_until_complete(service.shutdown())
         loop.close()
 
 
@@ -269,16 +322,29 @@ def test_service_run_config_from_request(tmp_path, monkeypatch):
 
     monkeypatch.setattr("tools.benchmark.service.BenchmarkRunner", _CaptureRunner)
     service = BenchmarkService(_config(tmp_path), Path("config.yaml"))
-    result = asyncio.run(
-        service.start_run({"suite": "fake", "trials": 3, "model": "kimi", "tags": ["web"], "check_regression": True})
-    )
+
+    async def start_and_drain():
+        result = await service.start_run(
+            {
+                "suite": "fake",
+                "trials": 3,
+                "model": "kimi",
+                "tags": ["web"],
+                "check_regression": True,
+                "timeout_seconds": 321,
+            }
+        )
+        task = service._active_task
+        if task is not None:
+            await task
+        return result
+
+    result = asyncio.run(start_and_drain())
     assert "error" not in result
     rc: RunConfig = captured["run_config"]
     assert rc.trials == 3
+    assert rc.timeout_seconds == 321
     assert rc.model_alias == "kimi"
     assert rc.tags == ["web"]
     assert rc.check_regression is True
     assert captured["model_alias"] == "kimi"
-    task = service._active_task
-    if task is not None:
-        asyncio.run(_await_task(task))

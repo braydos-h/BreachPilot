@@ -30,6 +30,7 @@ from tools.benchmark.agent_runner import MissionRunner
 from tools.benchmark.envinfo import collect_environment
 from tools.benchmark.events import BenchmarkEventLogger
 from tools.benchmark.metrics import compute_run_summary
+from tools.benchmark.model import resolve_model_alias
 from tools.benchmark.models import (
     FailureCategory,
     RunConfig,
@@ -38,8 +39,11 @@ from tools.benchmark.models import (
     TrialResult,
     TrialStatus,
 )
+from tools.benchmark.paths import resolve_baseline_path
 from tools.benchmark.registry import get_provider
 from tools.benchmark.regression import (
+    RegressionFinding,
+    RegressionResult,
     compare_to_baseline,
     load_baseline,
     save_baseline,
@@ -98,6 +102,28 @@ def _safe_progress(progress: _PROGRESS | None, payload: dict[str, Any]) -> None:
         pass
 
 
+def _observed_target_image_pins(
+    scenarios: list[Any], trials: list[TrialResult], *, expected_trials: int
+) -> dict[str, str]:
+    """Pin each scenario to one immutable image ID observed by all its trials."""
+    pins: dict[str, str] = {}
+    for scenario in scenarios:
+        scenario_id = str(scenario.scenario_id)
+        observed = [trial for trial in trials if trial.scenario_id == scenario_id]
+        image_digests = [trial.target.image_digest for trial in observed if trial.target is not None]
+        if len(observed) != expected_trials or len(image_digests) != expected_trials or len(set(image_digests)) != 1:
+            pins[scenario_id] = "unknown"
+            continue
+        image_digest = image_digests[0]
+        if len(image_digest) == 71 and image_digest.startswith("sha256:"):
+            suffix = image_digest[7:]
+            if all(character in "0123456789abcdef" for character in suffix.lower()):
+                pins[scenario_id] = image_digest.lower()
+                continue
+        pins[scenario_id] = "unknown"
+    return pins
+
+
 def _loopback_mapping_enabled(config: dict[str, Any]) -> bool:
     """True when the dev-lab host-loopback mapping is explicitly opted in."""
     try:
@@ -120,16 +146,18 @@ class BenchmarkRunner:
         target_manager: TargetManager | None = None,
         verifier_factory: Callable[[Any], IndependentVerifier] | None = None,
         model_alias: str = "",
+        config_fingerprint: str | None = None,
     ) -> None:
         self.config = config
         self.config_path = Path(config_path)
+        self.config_fingerprint = config_fingerprint
         self.storage = storage or BenchmarkStorage(
             str(((config.get("benchmark", {}) or {}).get("output_dir", "")) or "reports/benchmarks")
         )
         self._run_session = run_session
         self._make_target_manager = (lambda: target_manager) if target_manager is not None else TargetManager
         self._verifier_factory = verifier_factory
-        self.model_alias = model_alias or str((config.get("models", {}) or {}).get("default_alias", "") or "glm")
+        self.model_alias = resolve_model_alias(config, model_alias)
 
     # ------------------------------------------------------------------ main
 
@@ -158,8 +186,6 @@ class BenchmarkRunner:
             sandbox_enabled=sandbox_enabled,
             sandbox_required=sandbox_required,
         )
-        environment.target_images = {s.scenario_id: (s.target_image or "unknown") for s in scenarios}
-
         run_dir = self.storage.init_run(
             run_config.suite, run_id, run_config, environment, [s.scenario_id for s in scenarios]
         )
@@ -190,7 +216,11 @@ class BenchmarkRunner:
             )
 
         mission = MissionRunner(
-            self.config, self.config_path, model_alias=self.model_alias, run_session=self._run_session
+            self.config,
+            self.config_path,
+            model_alias=self.model_alias,
+            run_session=self._run_session,
+            config_fingerprint=self.config_fingerprint,
         )
 
         cancelled = False
@@ -226,6 +256,7 @@ class BenchmarkRunner:
                         run_dir=run_dir,
                         sandbox_required=sandbox_required,
                         sandbox_shortfall=sandbox_shortfall,
+                        timeout_seconds=run_config.timeout_seconds,
                         progress=progress,
                     )
                     trials.append(trial)
@@ -238,6 +269,9 @@ class BenchmarkRunner:
         # Aggregate + persist.
         meta = {s.scenario_id: {"name": s.name, "difficulty": s.difficulty, "tags": s.tags} for s in scenarios}
         summary = compute_run_summary(trials, run_id=run_id, suite=run_config.suite, scenario_meta=meta)
+        environment.target_images = _observed_target_image_pins(
+            scenarios, trials, expected_trials=max(1, run_config.trials)
+        )
         status = "cancelled" if cancelled else "completed"
         manifest = build_replay_manifest(
             run_id, run_config.suite, run_config, environment, target_images=environment.target_images
@@ -264,20 +298,41 @@ class BenchmarkRunner:
             render_report_html(stored_run, stored_summary),
         )
 
-        # Baseline / regression (best-effort: never fail the run).
+        # Compare against the existing baseline before considering an update.
+        # In particular, `save_baseline + check_regression` must not replace
+        # the evidence the gate is supposed to compare against.
         regression_payload: dict[str, Any] | None = None
-        try:
-            if run_config.save_baseline:
-                baseline_path = Path(str(benchmark_cfg.get("baseline_path", "")) or self.storage.root / "baseline.json")
-                save_baseline(summary, baseline_path)
-                event_logger.log("baseline_saved", {"path": str(baseline_path)})
-            if run_config.check_regression:
-                baseline_path = Path(str(benchmark_cfg.get("baseline_path", "")) or self.storage.root / "baseline.json")
-                result = compare_to_baseline(summary, load_baseline(baseline_path), thresholds_from_config(self.config))
-                regression_payload = result.to_dict()
-                event_logger.log("regression_check", regression_payload, level="info" if result.passed else "error")
-        except Exception as exc:  # noqa: BLE001 -- baseline is advisory, run results stand
-            event_logger.log("baseline_failed", {"detail": str(exc)[:300]}, level="warn")
+        regression_result: RegressionResult | None = None
+        baseline_path = resolve_baseline_path(benchmark_cfg.get("baseline_path"), self.storage.root)
+        if run_config.check_regression:
+            try:
+                regression_result = compare_to_baseline(
+                    summary, load_baseline(baseline_path), thresholds_from_config(self.config)
+                )
+            except Exception as exc:  # noqa: BLE001 -- a gate error must fail closed
+                regression_result = RegressionResult(
+                    passed=False,
+                    findings=[RegressionFinding("hard", "baseline", "baseline check failed (fail-closed)")],
+                )
+                event_logger.log("baseline_failed", {"detail": str(exc)[:300]}, level="warn")
+            regression_payload = regression_result.to_dict()
+            event_logger.log(
+                "regression_check", regression_payload, level="info" if regression_result.passed else "error"
+            )
+
+        if run_config.save_baseline:
+            if not run_config.check_regression or (regression_result is not None and regression_result.passed):
+                try:
+                    save_baseline(summary, baseline_path)
+                    event_logger.log("baseline_saved", {"path": str(baseline_path)})
+                except Exception as exc:  # noqa: BLE001 -- baseline writes are advisory
+                    event_logger.log("baseline_failed", {"detail": str(exc)[:300]}, level="warn")
+            else:
+                event_logger.log(
+                    "baseline_save_skipped",
+                    {"reason": "regression check failed or was incomplete", "path": str(baseline_path)},
+                    level="warn",
+                )
 
         event_logger.log(
             "run_end",
@@ -285,8 +340,11 @@ class BenchmarkRunner:
                 "status": status,
                 "solved": summary.solved,
                 "trials_total": summary.trials_total,
+                "trials_completed": summary.trials_completed,
                 "verified_success_rate": summary.verified_success_rate,
                 "false_positive_rate": summary.false_positive_rate,
+                "infra_error_count": summary.infra_error_count,
+                "skipped_count": summary.skipped_count,
             },
         )
         return {
@@ -316,6 +374,7 @@ class BenchmarkRunner:
         run_dir: Path,
         sandbox_required: bool,
         sandbox_shortfall: bool,
+        timeout_seconds: int | None = None,
         progress: _PROGRESS | None,
     ) -> TrialResult:
         trial = TrialResult(
@@ -327,6 +386,22 @@ class BenchmarkRunner:
             started_at=datetime.now(timezone.utc).isoformat(),
         )
         workspace = run_dir / "scenarios" / scenario.scenario_id / f"trial_{trial_index}_workspace"
+
+        if not getattr(scenario, "verification_supported", True):
+            trial.status = TrialStatus.SKIPPED.value
+            trial.failure_category = FailureCategory.CAPABILITY_UNAVAILABLE.value
+            trial.failure_detail = str(
+                getattr(scenario, "verification_note", "Independent target verification is unavailable")
+            )
+            trial.ended_at = datetime.now(timezone.utc).isoformat()
+            event_logger.log(
+                "capability_unavailable",
+                {"detail": trial.failure_detail, "capability": "target_side_verification"},
+                trial_id=trial_id,
+                scenario_id=scenario.scenario_id,
+                level="warn",
+            )
+            return trial
 
         # 0. Sandbox gate first: required-but-unavailable is infrastructure
         # failure without provisioning anything.
@@ -477,12 +552,13 @@ class BenchmarkRunner:
                 "phase": "exploit",
             },
         )
+        mission_timeout_seconds = timeout_seconds if timeout_seconds is not None else scenario.timeout_seconds
         mission_result = await mission.run_mission(
             scenario,
             workspace=workspace,
             trial_id=trial_id,
             event_logger=event_logger,
-            timeout_seconds=scenario.timeout_seconds,
+            timeout_seconds=mission_timeout_seconds,
         )
         trial.duration_seconds = mission_result.duration_seconds
         trial.model_calls = mission_result.telemetry.model_calls
@@ -510,22 +586,24 @@ class BenchmarkRunner:
                 else False
             )
         )
-        try:
-            raw_scope = getattr(mission_result, "scope_violations", 0)
-            if (not raw_scope) and isinstance(mission_result.final_result, dict):
-                raw_scope = mission_result.final_result.get("scope_violations_network", 0)
-            trial.scope_violations = max(0, int(raw_scope or 0))
-        except (TypeError, ValueError):
-            trial.scope_violations = 0
+        raw_scope = getattr(mission_result, "scope_violations", None)
+        if raw_scope is None and isinstance(mission_result.final_result, dict):
+            raw_scope = mission_result.final_result.get("scope_violations_network")
+        if type(raw_scope) is int and raw_scope >= 0:
+            trial.scope_violations = raw_scope
+        elif isinstance(raw_scope, str) and raw_scope.isdecimal():
+            trial.scope_violations = int(raw_scope)
+        else:
+            trial.scope_violations = None
 
         if mission_result.timed_out:
             trial.status = TrialStatus.TIMEOUT.value
             trial.failure_category = FailureCategory.TIMEOUT.value
-            trial.failure_detail = f"mission exceeded {scenario.timeout_seconds}s"
+            trial.failure_detail = f"mission exceeded {mission_timeout_seconds}s"
             trial.ended_at = datetime.now(timezone.utc).isoformat()
             event_logger.log(
                 "mission_timeout",
-                {"timeout_seconds": scenario.timeout_seconds},
+                {"timeout_seconds": mission_timeout_seconds},
                 trial_id=trial_id,
                 scenario_id=scenario.scenario_id,
                 level="error",
@@ -603,6 +681,9 @@ class BenchmarkRunner:
                 exploit_port=int(self.config.get("mcp", {}).get("http_port", 8001) or 8001),
                 workspace=workspace,
                 soft_fail=True,
+                config_fingerprint=self.config_fingerprint,
+                config_snapshot=self.config if self.config_fingerprint is not None else None,
+                snapshot_excluded_paths=(workspace, self.storage.root) if self.config_fingerprint is not None else (),
             )
             session = await cm.__aenter__()
             loop = asyncio.get_running_loop()
@@ -651,6 +732,18 @@ class BenchmarkRunner:
     def _classify(mission_result: Any, verified: bool) -> tuple[str, str, str]:
         """Map mission + verification outcome to (status, failure_category, detail)."""
         if verified:
+            if mission_result.total_actions <= 0 or mission_result.telemetry.tool_calls <= 0:
+                return (
+                    TrialStatus.FAILED.value,
+                    FailureCategory.PLANNER_FAILURE.value,
+                    "oracle state was present without recorded agent tool actions",
+                )
+            if not mission_result.agent_claimed_success:
+                return (
+                    TrialStatus.FAILED.value,
+                    FailureCategory.AGENT_ABORTED.value,
+                    "oracle state was verified, but the agent did not identify a successful outcome",
+                )
             return TrialStatus.VERIFIED.value, FailureCategory.UNKNOWN.value, ""
         errors = [str(e) for e in (mission_result.errors or [])]
         claimed = (mission_result.claimed_summary or "")[:300]

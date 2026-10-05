@@ -49,3 +49,17 @@ def test_compare_single_run_marks_hint():
 
     comp = compare_runs([_run("ollama", "m", "xben", 4, 0.5, 0.0)])
     assert "Single run" in comp.to_markdown()
+
+
+def test_compare_runs_preserves_unavailable_rates():
+    from tools.benchmark.provider_compare import compare_runs
+
+    payload = _run("ollama", "m", "xben", 2, 0.0, 0.0)
+    payload["summary"]["verified_success_rate"] = None
+    payload["summary"]["false_positive_rate"] = None
+
+    comparison = compare_runs([payload])
+
+    assert comparison.rows[0].verified_rate is None
+    assert comparison.rows[0].false_positive_rate is None
+    assert "| n/a | n/a |" in comparison.to_markdown()

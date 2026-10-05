@@ -28,6 +28,7 @@ from pathlib import Path
 from typing import Any
 
 from tools.benchmark.events import BenchmarkEventLogger
+from tools.benchmark.model import resolve_model_alias
 from tools.benchmark.models import BenchmarkScenario, SandboxSnapshot, TrialTelemetry
 from tools.exceptions import _EXC_GROUP_CATCH, _is_exception_group, _log_nested_exceptions
 from tools.exploit_agent import ExploitPermission, ExploitSettings
@@ -75,6 +76,7 @@ class MissionResult:
     audit_path: str = ""
     workspace: str = ""
     errors: list[str] = field(default_factory=list)
+    scope_violations: int | None = None
     timed_out: bool = False
     aborted: bool = False
     duration_seconds: float = 0.0
@@ -138,11 +140,13 @@ class MissionRunner:
         *,
         model_alias: str = "",
         run_session: Any = None,
+        config_fingerprint: str | None = None,
     ) -> None:
         self.config = config
         self.config_path = Path(config_path)
-        self.model_alias = model_alias or str((config.get("models", {}) or {}).get("default_alias", "") or "glm")
+        self.model_alias = resolve_model_alias(config, model_alias)
         self._run_session = run_session  # None = the real run_exploit_session
+        self.config_fingerprint = config_fingerprint
 
     # ------------------------------------------------------------- telemetry
 
@@ -282,6 +286,11 @@ class MissionRunner:
 
         final: dict[str, Any] = {}
         sink = _MissionEventSink(event_logger, scenario.scenario_id, trial_id) if event_logger is not None else None
+        config_attestation_kwargs = (
+            {"config": self.config, "config_fingerprint": self.config_fingerprint}
+            if self.config_fingerprint is not None
+            else {}
+        )
         try:
             final = await asyncio.wait_for(
                 run_session(
@@ -296,6 +305,7 @@ class MissionRunner:
                     exploit_port=int(self.config.get("mcp", {}).get("http_port", 8001) or 8001),
                     reports_dir=workspace,
                     event_sink=sink,
+                    **config_attestation_kwargs,
                 ),
                 timeout=timeout,
             )

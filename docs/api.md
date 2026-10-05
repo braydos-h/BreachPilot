@@ -13,9 +13,11 @@ the CLI uses.
 - **Transport:** HTTP/1.1 + WebSocket; loopback-only bind (no public override in v1)
 - **Concurrency:** `api.max_concurrent_runs` (lab default **3**, legacy `1` → HTTP 409 on a second; per-run allowlist snapshot so Run A's target never leaks into Run B's allowlist — `tools/api/run_manager.py:22`, `config.yaml:399`)
 - **Persistence:** `reports/api_runtime.db` (SQLite; Flow B's `research.db` untouched)
-- **Bundled WebUI:** `python main.py --web` builds `webui/dist/` (if needed), sets
-  `api.serve_webui: true` in memory, and serves the SPA at `/` with a deep-link
-  fallback. The SPA is a Vite + React + TypeScript app under `webui/`.
+- **Bundled WebUI:** `python main.py --web` builds `webui/dist/` in a source
+  checkout when needed; installed wheels include the same bundle under
+  `tools/webui/dist/`. It sets `api.serve_webui: true` in memory and serves the
+  SPA at `/` with a deep-link fallback. The SPA source is a Vite + React +
+  TypeScript app under `webui/`.
 
 > Source: `app.py` (ASGI factory), `tools/api/` (services + routes), `tools/run_service/` (transport-neutral contracts).
 
@@ -91,7 +93,7 @@ v1 is locked down by design. There is no public-bind path.
 | WebSocket auth | First message after accept must be `{"auth": "<token>"}`. Close `4401` on missing/invalid auth (5s timeout). |
 | Config patch | `PATCH /config` re-validates `api.allowed_origins` is loopback-only before writing. |
 | Secrets | `GET /secrets` returns only `configured`/`missing` status per provider key — values are write-only. |
-| Redaction | `sanitize()` recursively redacts any dict value whose key matches `password|passwd|secret|token|api[_-]?key|auth|bearer|credential|private[_-]?key` (case-insensitive). Applied to config responses, event payloads, and any error details. |
+| Redaction | `sanitize()` recursively redacts dict values whose keys match `password|passwd|secret|token|api[_-]?key|auth|bearer|credential|private[_-]?key` (case-insensitive). Error details are sanitized; request-validation responses omit submitted input values and raw validation contexts. |
 
 **WebSocket close codes**
 
@@ -1440,7 +1442,7 @@ api:
 | `event_buffer_size` | int | 256 | In-memory ring per run; ≥ 1 |
 | `event_durability` | str | `balanced` | Event fsync policy: `strict` (per event), `balanced` (per batch + decisions/terminal transitions), `fast` (checkpoint/close only) |
 | `shutdown_timeout_seconds` | int | 15 | Graceful cancel wait before forcing cleanup |
-| `serve_webui` | bool | false | Mount `webui/dist/` at `/` when true. `--web` sets this in memory only (never written to `config.yaml`). Requires `webui/dist/index.html` to exist. |
+| `serve_webui` | bool | false | Mount the built SPA at `/` when true. `--web` sets this in memory only (never written to `config.yaml`). Uses `webui/dist/` in a source checkout or `tools/webui/dist/` from an installed wheel. |
 | `max_concurrent_runs` | int | 3 | D3: N concurrent runs; 1 = legacy single-run 409 (`tools/api/run_manager.py:22`) |
 | `multi_operator` | bool | true | D4: user accounts + annotations (`tools/api/auth.py:60`) |
 | `graph_route` | bool | true | Attack-path DAG route (`tools/api/routes/graph_explorer.py:30`) |

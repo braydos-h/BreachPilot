@@ -173,7 +173,7 @@ All below additionally gated `api.graph_route` → `404 graph_disabled` (`graph_
 | Method | Route | Handler | Notes |
 |--------|-------|---------|-------|
 | `GET` | `/docs`, `/openapi.json`, `/redoc` | FastAPI built-ins | Not bearer-protected; filtered to hide webui routes when `api.serve_webui` (`app.py:214`) |
-| `GET` | `/assets/*` + `/{full_path:path}` SPA fallback | `StaticFiles` + `FileResponse` (`app.py:172` `/_webui_spa`) | only when `api.serve_webui:true` and `webui/dist/index.html` exists |
+| `GET` | `/assets/*` + `/{full_path:path}` SPA fallback | `StaticFiles` + `FileResponse` (`app.py:172` `/_webui_spa`) | only when `api.serve_webui:true` and a checkout `webui/dist/index.html` or installed `tools/webui/dist/index.html` exists |
 
 ## Coverage Notes
 

@@ -11,19 +11,20 @@ import pytest
 
 from tools.benchmark import BenchmarkScenario, seed_fake_suite
 from tools.benchmark.agent_runner import MissionResult, TrialTelemetry
-from tools.benchmark.models import FailureCategory, RunConfig, TrialStatus
+from tools.benchmark.models import FailureCategory, RunConfig, TargetSnapshot, TrialStatus
 from tools.benchmark.runner import BenchmarkRunner
 from tools.benchmark.targets import TargetProvisionError
 
 
 def _scenario(scenario_id: str = "s1", **kw) -> BenchmarkScenario:
+    oracle = kw.pop("oracle", {"flags": [{"id": "f1", "check": {}}], "host_owned_when": "any"})
     return BenchmarkScenario(
         suite="fake",
         scenario_id=scenario_id,
         name=f"Scenario {scenario_id}",
         target_type="host",
         target_host="127.0.0.1",
-        oracle={"flags": [{"id": "f1", "check": {}}], "host_owned_when": "any"},
+        oracle=oracle,
         **kw,
     )
 
@@ -119,11 +120,26 @@ async def test_trial_isolation_workspace_per_trial(tmp_path):
     # Monkeypatch MissionRunner to use our fake
     import tools.benchmark.runner as runner_mod
 
+    class _ResettableTargetManager:
+        """Test seam for a host target reset by its lab owner."""
+
+        def provision(self, scenario):
+            return TargetSnapshot(host=scenario.target_host, reset_strategy="external-reset")
+
+        def reset(self, scenario):
+            return TargetSnapshot(host=scenario.target_host, reset_strategy="external-reset")
+
+        def destroy_all(self):
+            pass
+
     orig = runner_mod.MissionRunner
     runner_mod.MissionRunner = lambda *a, **kw: mission  # type: ignore
     try:
         runner = BenchmarkRunner(
-            _config(tmp_path), Path("config.yaml"), verifier_factory=lambda s: _v(s, _fail_executor)
+            _config(tmp_path),
+            Path("config.yaml"),
+            verifier_factory=lambda s: _v(s, _fail_executor),
+            target_manager=_ResettableTargetManager(),
         )
         payload = await runner.run(RunConfig(suite="fake", trials=2, sandbox_required=False))
     finally:
@@ -131,6 +147,7 @@ async def test_trial_isolation_workspace_per_trial(tmp_path):
     assert len(payload["trials"]) == 2
     assert payload["trials"][0]["trial_index"] == 0
     assert payload["trials"][1]["trial_index"] == 1
+    assert mission.calls == ["s1#t1", "s1#t2"]
     # Workspaces distinct
     assert payload["trials"][0]["workspace"] != payload["trials"][1]["workspace"]
 
@@ -159,6 +176,50 @@ async def test_timeout_maps_to_timeout_status(tmp_path):
     assert payload["trials"][0]["failure_category"] == FailureCategory.TIMEOUT.value
 
 
+@pytest.mark.asyncio
+async def test_unsupported_target_verification_skips_before_provisioning(tmp_path):
+    scenario = _scenario(
+        "unverifiable",
+        verification_supported=False,
+        verification_note="target-side shell verification is unavailable",
+        oracle={"flags": [], "host_owned_when": "all"},
+    )
+    seed_fake_suite([scenario])
+
+    class _NoProvisionManager:
+        provision_calls = 0
+
+        def provision(self, _scenario):
+            self.provision_calls += 1
+            raise AssertionError("unverifiable target must not be contacted")
+
+        def destroy_all(self):
+            pass
+
+    manager = _NoProvisionManager()
+    mission = _FakeMission([MissionResult(agent_claimed_success=True)])
+    import tools.benchmark.runner as runner_mod
+
+    original = runner_mod.MissionRunner
+    runner_mod.MissionRunner = lambda *a, **kw: mission  # type: ignore[assignment]
+    try:
+        runner = BenchmarkRunner(
+            _config(tmp_path),
+            Path("config.yaml"),
+            verifier_factory=lambda s: _v(s, _pass_executor),
+            target_manager=manager,
+        )
+        payload = await runner.run(RunConfig(suite="fake", trials=1, sandbox_required=False))
+    finally:
+        runner_mod.MissionRunner = original
+
+    trial = payload["trials"][0]
+    assert trial["status"] == TrialStatus.SKIPPED.value
+    assert trial["failure_category"] == FailureCategory.CAPABILITY_UNAVAILABLE.value
+    assert manager.provision_calls == 0
+    assert mission.calls == []
+
+
 # ---------------------------------------------------------------------------
 # Deterministic score calculations
 # ---------------------------------------------------------------------------
@@ -178,6 +239,7 @@ def test_deterministic_score_same_input_same_output():
             trial_index=i,
             trial_id=f"s1#t{i}",
             status=TrialStatus.VERIFIED.value,
+            agent_claimed_success=True,
             oracle_verified_success=True,
             duration_seconds=10.0,
             tool_calls=5,
@@ -241,7 +303,7 @@ async def test_provider_failure_maps_to_model_failed(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_oracle_success_drives_verified(tmp_path):
+async def test_oracle_state_without_agent_claim_is_not_credited_as_success(tmp_path):
     seed_fake_suite([_scenario("s1")])
     import tools.benchmark.runner as runner_mod
 
@@ -266,8 +328,10 @@ async def test_oracle_success_drives_verified(tmp_path):
         runner_mod.MissionRunner = orig
     t = payload["trials"][0]
     assert t["oracle_verified_success"] is True
-    assert t["status"] == TrialStatus.VERIFIED.value
+    assert t["status"] == TrialStatus.FAILED.value
+    assert t["failure_category"] == FailureCategory.AGENT_ABORTED.value
     assert t["false_negative"] is True  # oracle verified but agent didn't claim
+    assert payload["summary"]["verified_success_rate"] == 0.0
 
 
 @pytest.mark.asyncio
@@ -305,6 +369,7 @@ def test_summary_statistics_presence():
         trial_index=0,
         trial_id="s1#t0",
         status=TrialStatus.VERIFIED.value,
+        agent_claimed_success=True,
         oracle_verified_success=True,
         duration_seconds=10.0,
         tool_calls=5,
