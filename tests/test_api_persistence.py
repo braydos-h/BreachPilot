@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import sqlite3
+
 import pytest
 
 from tools.api.decision_broker import DecisionBroker
@@ -118,6 +120,60 @@ def test_expire_pending_decisions(persistence):
     persistence.expire_pending_decisions("r-exp")
     decisions = persistence.list_decisions("r-exp")
     assert decisions[0]["status"] == "expired"
+
+
+def test_legacy_database_migrates_to_current_schema(tmp_path):
+    reports = tmp_path / "reports"
+    reports.mkdir()
+    db_path = reports / "api_runtime.db"
+    with sqlite3.connect(db_path) as conn:
+        conn.executescript(
+            """
+            CREATE TABLE _migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);
+            INSERT INTO _migrations (version, applied_at) VALUES (1, '2024-01-01');
+            CREATE TABLE runs (
+                id TEXT PRIMARY KEY,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                state TEXT NOT NULL DEFAULT 'draft',
+                request_json TEXT NOT NULL DEFAULT '{}',
+                preview_json TEXT NOT NULL DEFAULT '{}',
+                result_json TEXT NOT NULL DEFAULT '{}',
+                resumed_from TEXT NOT NULL DEFAULT '',
+                error TEXT NOT NULL DEFAULT '',
+                cancelled_at TEXT NOT NULL DEFAULT ''
+            );
+            CREATE TABLE decisions (
+                id TEXT PRIMARY KEY,
+                run_id TEXT NOT NULL,
+                kind TEXT NOT NULL,
+                prompt_text TEXT NOT NULL DEFAULT '',
+                required_text TEXT NOT NULL DEFAULT '',
+                options_json TEXT NOT NULL DEFAULT '[]',
+                status TEXT NOT NULL DEFAULT 'pending',
+                answer TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL,
+                answered_at TEXT NOT NULL DEFAULT '',
+                FOREIGN KEY (run_id) REFERENCES runs(id) ON DELETE CASCADE
+            );
+            """
+        )
+
+    persistence = ApiPersistence(reports)
+    try:
+        with sqlite3.connect(db_path) as conn:
+            versions = {row[0] for row in conn.execute("SELECT version FROM _migrations")}
+            run_columns = {row[1] for row in conn.execute("PRAGMA table_info(runs)")}
+            tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        assert versions >= {1, 2, 3, 4, 5}
+        assert {"title", "is_demo"} <= run_columns
+        assert {"users", "annotations", "app_state", "custom_goals"} <= tables
+
+        persistence.create_run(run_id="after-migration", request={}, preview={})
+        run = persistence.get_run("after-migration")
+        assert run is not None and run["title"] == "" and run["is_demo"] == 0
+    finally:
+        persistence.close()
 
 
 def test_decision_waiter_cancellation_propagates(persistence):

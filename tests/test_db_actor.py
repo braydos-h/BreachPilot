@@ -5,6 +5,20 @@ from __future__ import annotations
 import asyncio
 
 
+def test_persistence_reexports_canonical_db_actor_and_keeps_lazy_actor(tmp_path):
+    from tools.api.db_actor import DbActor as CanonicalDbActor
+    from tools.api.persistence import ApiPersistence, DbActor
+
+    persistence = ApiPersistence(tmp_path)
+    try:
+        assert DbActor is CanonicalDbActor
+        actor = persistence.actor
+        assert isinstance(actor, CanonicalDbActor)
+        assert persistence.actor is actor
+    finally:
+        persistence.close()
+
+
 def test_db_actor_fifo_errors_and_drain(tmp_path):
     from tools.api.persistence import ApiPersistence, DbActor
 

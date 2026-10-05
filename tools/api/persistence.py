@@ -7,11 +7,9 @@ cancelling) is marked ``interrupted`` and pending decisions are ``expired``.
 
 from __future__ import annotations
 
-import asyncio
 import contextlib
 import json
 import os
-import queue as _queue
 import sqlite3
 import threading
 import uuid
@@ -19,123 +17,16 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-_SCHEMA_VERSION = 5
-_API_DB_NAME = "api_runtime.db"
-
-_DDL = """
-CREATE TABLE IF NOT EXISTS _migrations (
-    version INTEGER PRIMARY KEY,
-    applied_at TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS runs (
-    id TEXT PRIMARY KEY,
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL,
-    state TEXT NOT NULL DEFAULT 'draft',
-    request_json TEXT NOT NULL DEFAULT '{}',
-    preview_json TEXT NOT NULL DEFAULT '{}',
-    result_json TEXT NOT NULL DEFAULT '{}',
-    resumed_from TEXT NOT NULL DEFAULT '',
-    error TEXT NOT NULL DEFAULT '',
-    cancelled_at TEXT NOT NULL DEFAULT '',
-    title TEXT NOT NULL DEFAULT '',
-    is_demo INTEGER NOT NULL DEFAULT 0
-);
-
-CREATE TABLE IF NOT EXISTS decisions (
-    id TEXT PRIMARY KEY,
-    run_id TEXT NOT NULL,
-    kind TEXT NOT NULL,
-    prompt_text TEXT NOT NULL DEFAULT '',
-    required_text TEXT NOT NULL DEFAULT '',
-    options_json TEXT NOT NULL DEFAULT '[]',
-    status TEXT NOT NULL DEFAULT 'pending',
-    answer TEXT NOT NULL DEFAULT '',
-    created_at TEXT NOT NULL,
-    answered_at TEXT NOT NULL DEFAULT '',
-    FOREIGN KEY (run_id) REFERENCES runs(id) ON DELETE CASCADE
-);
-
-CREATE INDEX IF NOT EXISTS idx_decisions_run_id ON decisions(run_id);
-CREATE INDEX IF NOT EXISTS idx_runs_state ON runs(state);
-
--- Phase 6.3 (D4): multi-operator user accounts + per-run annotations.
--- Users: password-hash auth (stdlib hashlib.pbkdf2_hmac + secrets). No roles
---   (AGENTS.md §E rejects a permissions system). The loopback bind is the
---   trust boundary; user accounts add attribution + pair-testing annotations.
--- Annotations: operator comments attached to a run's findings. Stored per
---   run_id so the WebUI can render them inline with the run timeline.
-CREATE TABLE IF NOT EXISTS users (
-    id TEXT PRIMARY KEY,
-    username TEXT NOT NULL UNIQUE,
-    password_hash TEXT NOT NULL,
-    password_salt TEXT NOT NULL,
-    created_at TEXT NOT NULL,
-    last_login TEXT NOT NULL DEFAULT ''
-);
-
-CREATE TABLE IF NOT EXISTS annotations (
-    id TEXT PRIMARY KEY,
-    run_id TEXT NOT NULL,
-    user_id TEXT NOT NULL,
-    username TEXT NOT NULL DEFAULT '',
-    body TEXT NOT NULL DEFAULT '',
-    finding_ref TEXT NOT NULL DEFAULT '',
-    created_at TEXT NOT NULL,
-    FOREIGN KEY (run_id) REFERENCES runs(id) ON DELETE CASCADE
-);
-
-CREATE INDEX IF NOT EXISTS idx_annotations_run_id ON annotations(run_id);
-
-CREATE TABLE IF NOT EXISTS custom_goals (
-    id TEXT PRIMARY KEY,
-    name TEXT NOT NULL COLLATE NOCASE,
-    objective TEXT NOT NULL,
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL,
-    UNIQUE(name)
-);
-CREATE INDEX IF NOT EXISTS idx_custom_goals_name ON custom_goals(name COLLATE NOCASE);
-"""
-
-# v2: add ``title`` column to runs for AI-generated session titles.
-# Existing v1 DBs lack the column; ALTER it in idempotently. New DBs get it
-# via _DDL above so this migration is a no-op there (PRAGMA table_info check).
-_MIGRATION_V2 = [
-    "ALTER TABLE runs ADD COLUMN title TEXT NOT NULL DEFAULT ''",
-]
-
-# v3 (D4): add multi-operator user accounts + per-run annotations tables.
-# New DBs get them via _DDL; existing v2 DBs get them created idempotently
-# (CREATE TABLE IF NOT EXISTS is safe to re-run).
-_MIGRATION_V3 = [
-    "CREATE TABLE IF NOT EXISTS users ("
-    "id TEXT PRIMARY KEY, username TEXT NOT NULL UNIQUE, "
-    "password_hash TEXT NOT NULL, password_salt TEXT NOT NULL, "
-    "created_at TEXT NOT NULL, last_login TEXT NOT NULL DEFAULT '')",
-    "CREATE TABLE IF NOT EXISTS annotations ("
-    "id TEXT PRIMARY KEY, run_id TEXT NOT NULL, user_id TEXT NOT NULL, "
-    "username TEXT NOT NULL DEFAULT '', body TEXT NOT NULL DEFAULT '', "
-    "finding_ref TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, "
-    "FOREIGN KEY (run_id) REFERENCES runs(id) ON DELETE CASCADE)",
-    "CREATE INDEX IF NOT EXISTS idx_annotations_run_id ON annotations(run_id)",
-]
-
-# v4: demo session support — is_demo flag + tombstone app_state table.
-_MIGRATION_V4 = [
-    "ALTER TABLE runs ADD COLUMN is_demo INTEGER NOT NULL DEFAULT 0",
-    "CREATE TABLE IF NOT EXISTS app_state (key TEXT PRIMARY KEY, value TEXT NOT NULL DEFAULT '')",
-]
-
-# v5: persistent user-created custom goals (Goals tab + RunWizard).
-_MIGRATION_V5 = [
-    "CREATE TABLE IF NOT EXISTS custom_goals ("
-    "id TEXT PRIMARY KEY, name TEXT NOT NULL COLLATE NOCASE, "
-    "objective TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, "
-    "UNIQUE(name))",
-    "CREATE INDEX IF NOT EXISTS idx_custom_goals_name ON custom_goals(name COLLATE NOCASE)",
-]
+from tools.api.db_actor import DbActor
+from tools.api.persistence_schema import (
+    _API_DB_NAME,
+    _DDL,
+    _MIGRATION_V2,
+    _MIGRATION_V3,
+    _MIGRATION_V4,
+    _MIGRATION_V5,
+    _SCHEMA_VERSION,
+)
 
 # Sort clauses for list_runs. Keys map to the public ``sort`` query param.
 # All use index-backed columns or the small runs table's natural size; no
@@ -1046,111 +937,3 @@ class ApiPersistence:
                 return cur.rowcount > 0
             finally:
                 self._release_conn(conn)
-
-
-class DbActor:
-    """Single-threaded FIFO front for :class:`ApiPersistence` (P1-10).
-
-    Async server paths use ``await actor.arun(fn, *args, **kwargs)`` so the
-    event loop never blocks on SQLite I/O; sync shims keep calling the
-    persistence methods directly. One worker thread executes submissions in
-    FIFO order; :meth:`submit_batch` groups calls into a single transaction
-    via :meth:`ApiPersistence.batched`. The queue is bounded and fail-closed
-    (``RuntimeError`` on full instead of unbounded growth). Errors propagate
-    to the submitter. :meth:`close` drains the queue, then stops the worker.
-    The worker never calls back into async code.
-    """
-
-    def __init__(self, persistence: ApiPersistence, *, max_queue: int = 1000) -> None:
-        self._persistence = persistence
-        self._queue: _queue.Queue = _queue.Queue(maxsize=max_queue)
-        self._closed = False
-        self._state_lock = threading.Lock()
-        self._worker = threading.Thread(target=self._worker_loop, name="db-actor", daemon=True)
-        self._worker.start()
-
-    def _worker_loop(self) -> None:
-        while True:
-            try:
-                op = self._queue.get()
-            except Exception:  # noqa: BLE001 -- queue glitch must never kill the actor
-                continue
-            try:
-                if op is None:  # sentinel
-                    return
-                future, kind, payload = op
-                if future.done():
-                    continue
-                try:
-                    if kind == "call":
-                        fn, args, kwargs = payload
-                        future.set_result(fn(*args, **kwargs))
-                    else:  # "batch"
-                        results = []
-                        with self._persistence.batched():
-                            for fn, args, kwargs in payload:
-                                results.append(fn(*args, **kwargs))
-                        future.set_result(results)
-                except BaseException as exc:
-                    if not future.done():
-                        future.set_exception(exc)
-            finally:
-                try:
-                    self._queue.task_done()
-                except ValueError:
-                    pass
-
-    def submit(self, fn: Any, *args: Any, **kwargs: Any) -> Any:
-        """Run ``fn(*args, **kwargs)`` on the DB thread; block for the result.
-
-        Never call from the event loop (use :meth:`arun` there) — this blocks
-        the calling thread until the worker finishes the op.
-        """
-        import concurrent.futures as _futures
-
-        with self._state_lock:
-            if self._closed:
-                raise RuntimeError("DbActor is closed.")
-            future: _futures.Future = _futures.Future()
-            try:
-                self._queue.put_nowait((future, "call", (fn, args, kwargs)))
-            except _queue.Full as exc:
-                raise RuntimeError("DbActor queue is full.") from exc
-        return future.result()
-
-    def submit_batch(self, calls: list[tuple[Any, tuple[Any, ...], dict[str, Any]]]) -> list[Any]:
-        """Run ``calls`` back-to-back in one transaction; block for results."""
-        import concurrent.futures as _futures
-
-        with self._state_lock:
-            if self._closed:
-                raise RuntimeError("DbActor is closed.")
-            future: _futures.Future = _futures.Future()
-            try:
-                self._queue.put_nowait((future, "batch", list(calls)))
-            except _queue.Full as exc:
-                raise RuntimeError("DbActor queue is full.") from exc
-        return future.result()
-
-    async def arun(self, fn: Any, *args: Any, **kwargs: Any) -> Any:
-        """Async front for :meth:`submit` (off the event loop, FIFO ordered)."""
-        return await asyncio.to_thread(self.submit, fn, *args, **kwargs)
-
-    async def abatch(self, calls: list[tuple[Any, tuple[Any, ...], dict[str, Any]]]) -> list[Any]:
-        """Async front for :meth:`submit_batch` (one transaction)."""
-        return await asyncio.to_thread(self.submit_batch, calls)
-
-    def close(self, timeout: float = 10.0) -> None:
-        """Drain queued ops, then stop the worker (idempotent)."""
-        with self._state_lock:
-            if self._closed:
-                worker = self._worker
-            else:
-                self._closed = True
-                worker = self._worker
-                try:
-                    self._queue.put_nowait(None)
-                except _queue.Full:
-                    pass
-        if worker.is_alive() and threading.current_thread() is not worker:
-            worker.join(timeout=timeout)

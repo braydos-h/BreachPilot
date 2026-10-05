@@ -2,6 +2,8 @@
 title: API Persistence — SQLite (api_runtime.db), Migrations, Runs, Decisions, Users, Annotations
 sources:
   - tools/api/persistence.py
+  - tools/api/persistence_schema.py
+  - tools/api/db_actor.py
   - app.py
 tests:
   - tests/test_api_persistence.py
@@ -12,11 +14,11 @@ status: maintained
 
 # Persistence
 
-`tools/api/persistence.py:131` `ApiPersistence` — thread-safe SQLite at `reports/api_runtime.db`. Separate from Flow B `research.db`; DB file lives inside `reports_dir` and is held open by the live instance (never deleted on reset — rows are deleted instead).
+`tools/api/persistence.py` `ApiPersistence` — thread-safe SQLite at `reports/api_runtime.db`. Separate from Flow B `research.db`; DB file lives inside `reports_dir` and is held open by the live instance (never deleted on reset — rows are deleted instead). The DDL and incremental migrations live in `tools/api/persistence_schema.py`; `tools/api/persistence.py` applies them at startup.
 
 ## Schema
 
-DDL (`tools/api/persistence.py:21`):
+DDL (`tools/api/persistence_schema.py`):
 
 ```sql
 CREATE TABLE _migrations(version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);
@@ -31,7 +33,8 @@ CREATE TABLE runs(
   resumed_from TEXT NOT NULL DEFAULT '',
   error TEXT NOT NULL DEFAULT '',
   cancelled_at TEXT NOT NULL DEFAULT '',
-  title TEXT NOT NULL DEFAULT ''          -- v2
+  title TEXT NOT NULL DEFAULT '',         -- v2
+  is_demo INTEGER NOT NULL DEFAULT 0      -- v4
 );
 CREATE TABLE decisions(
   id TEXT PRIMARY KEY, run_id TEXT NOT NULL,
@@ -55,15 +58,24 @@ CREATE TABLE annotations(                  -- D4
 CREATE INDEX idx_decisions_run_id ON decisions(run_id);
 CREATE INDEX idx_runs_state ON runs(state);
 CREATE INDEX idx_annotations_run_id ON annotations(run_id);
+CREATE TABLE app_state(key TEXT PRIMARY KEY, value TEXT NOT NULL DEFAULT ''); -- v4
+CREATE TABLE custom_goals(
+  id TEXT PRIMARY KEY, name TEXT NOT NULL COLLATE NOCASE,
+  objective TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+  UNIQUE(name)
+); -- v5
+CREATE INDEX idx_custom_goals_name ON custom_goals(name COLLATE NOCASE);
 ```
 
-Version (`tools/api/persistence.py:18`) `3`. Migrations applied idempotently in `_init_db` (`tools/api/persistence.py:151`):
+Current schema version: `5` (`tools/api/persistence_schema.py`). Migrations are applied idempotently in `ApiPersistence._init_db`:
 
-- v2 (`tools/api/persistence.py:90`): `ALTER TABLE runs ADD COLUMN title TEXT NOT NULL DEFAULT ''` when column missing.
-- v3 (`tools/api/persistence.py:97`): create `users` + `annotations` idempotently (new DBs get them via DDL).
-- Always `INSERT OR IGNORE (_SCHEMA_VERSION, now)`.
+- v2: add `runs.title` when missing.
+- v3: create `users` and `annotations` idempotently.
+- v4: add `runs.is_demo` and the `app_state` tombstone table.
+- v5: create `custom_goals` and its case-insensitive name index.
+- Startup records the current schema version in `_migrations`.
 
-Thread safety: `self._lock = threading.Lock()` (`tools/api/persistence.py:138`) around every `_connect()` (`tools/api/persistence.py:145`, `check_same_thread=False`, `PRAGMA foreign_keys=ON`, `row_factory=sqlite3.Row`).
+Thread safety: `self._lock = threading.Lock()` guards operations on the persistent SQLite connection (`check_same_thread=False`, `PRAGMA foreign_keys=ON`, `row_factory=sqlite3.Row`). `DbActor` (`tools/api/db_actor.py`) sends async request-path operations to a bounded FIFO worker; `tools.api.persistence` continues to re-export `DbActor` for compatibility.
 
 ## Construction & Lifecycle
 
