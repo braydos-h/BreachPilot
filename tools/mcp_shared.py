@@ -437,7 +437,9 @@ def assert_loopback_bind(host: str, allow_public_bind: bool = False) -> None:
     )
 
 
-def _wrap_http_auth(app: Callable[..., Awaitable[None]], token: str) -> Callable[..., Awaitable[None]]:
+def _wrap_http_auth(
+    app: Callable[..., Awaitable[None]], token: str, identity_secret: str = ""
+) -> Callable[..., Awaitable[None]]:
     """Wrap an ASGI app to require ``Authorization: Bearer <token>``.
 
     Pure-ASGI (no Starlette import) so it works with the streamable-http app
@@ -445,9 +447,11 @@ def _wrap_http_auth(app: Callable[..., Awaitable[None]], token: str) -> Callable
     not wrap -- the server is loopback-only by default. Comparison uses
     ``hmac.compare_digest`` to avoid timing side channels.
     """
+    import hashlib
     import hmac
 
     expected = f"Bearer {token}".encode("utf-8")
+    identity_key = identity_secret.encode("utf-8")
 
     async def auth_app(
         scope: Mapping[str, object],
@@ -463,6 +467,32 @@ def _wrap_http_auth(app: Callable[..., Awaitable[None]], token: str) -> Callable
             for k, v in raw_headers:  # type: ignore[misc]
                 if isinstance(k, bytes) and isinstance(v, bytes):
                     headers[k.lower()] = v
+        if (
+            scope_type == "http"
+            and scope.get("method") == "GET"
+            and scope.get("path") == "/.well-known/breachpilot-mcp-identity"
+        ):
+            challenge = headers.get(b"x-breachpilot-challenge", b"")
+            if not identity_key or not challenge or len(challenge) > 256:
+                await send(
+                    {
+                        "type": "http.response.start",
+                        "status": 404,
+                        "headers": [(b"content-length", b"0")],
+                    }
+                )
+                await send({"type": "http.response.body", "body": b""})
+                return
+            proof = hmac.new(identity_key, challenge, hashlib.sha256).hexdigest().encode("ascii")
+            await send(
+                {
+                    "type": "http.response.start",
+                    "status": 200,
+                    "headers": [(b"content-length", b"0"), (b"x-breachpilot-proof", proof)],
+                }
+            )
+            await send({"type": "http.response.body", "body": b""})
+            return
         if hmac.compare_digest(headers.get(b"authorization", b""), expected):
             return await app(scope, receive, send)
         if scope_type == "websocket":
@@ -505,5 +535,5 @@ def run_mcp_http_server(mcp: object, host: str, port: int, *, allow_public_bind:
             "HTTP MCP transport needs uvicorn and starlette. Run: python -m pip install -r requirements.txt"
         ) from exc
     if token:
-        app = _wrap_http_auth(app, token)
+        app = _wrap_http_auth(app, token, os.environ.get("MCP_HTTP_IDENTITY_SECRET", ""))
     uvicorn.run(app, host=host, port=port, log_level="info")

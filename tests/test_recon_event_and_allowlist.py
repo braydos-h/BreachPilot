@@ -73,6 +73,7 @@ def test_recon_first_emits_recon_assessment_event(tmp_path):
     shared_workspace_root = tmp_path / "absolute-workspace-root"
     config = {"mcp": {"http_port": 8001}, "exploit": {"workspace_dir": str(shared_workspace_root)}}
     request = RunRequest(target="10.0.0.50", mode="recon", config_path=tmp_path / "config.yaml")
+    accepted_fingerprint = "b" * 64
 
     async def _go():
         return await service._recon_first(
@@ -91,6 +92,7 @@ def test_recon_first_emits_recon_assessment_event(tmp_path):
             decision_provider=_StubDecisionProvider("recon_only"),
             event_sink=sink,
             cancellation=CancellationToken(),
+            config_fingerprint=accepted_fingerprint,
         )
 
     result_assessment, result_goal = asyncio.run(_go())
@@ -107,6 +109,9 @@ def test_recon_first_emits_recon_assessment_event(tmp_path):
     assert result_goal.name == "recon_only"
     assert session_arguments["workspace"].parent == shared_workspace_root.resolve()
     assert session_arguments["workspace"] != shared_workspace_root.resolve()
+    assert session_arguments["config_fingerprint"] == accepted_fingerprint
+    assert session_arguments["config_snapshot"] == config
+    assert session_arguments["snapshot_excluded_paths"] == (tmp_path,)
 
 
 # ── 2. RunManager allowlist auto-save ──────────────────────────────────────

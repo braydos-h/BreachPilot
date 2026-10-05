@@ -44,8 +44,14 @@ def apply_skills_cli_overrides(config: dict[str, Any], args: argparse.Namespace)
     - ``--skills-exclude`` -> append to ``exclude_names``
     - ``--no-skills-reselect`` -> ``reselect_mid_run=false``
     """
-    skills = dict(config.get("skills", {}) or {})
     mode = getattr(args, "skills", None)
+    includes = getattr(args, "skills_include", None) or []
+    excludes = getattr(args, "skills_exclude", None) or []
+    no_reselect = bool(getattr(args, "no_skills_reselect", False))
+    if mode is None and not includes and not excludes and not no_reselect:
+        return config
+
+    skills = dict(config.get("skills", {}) or {})
     if mode == "off":
         skills["enabled"] = False
     elif mode == "on":
@@ -59,7 +65,6 @@ def apply_skills_cli_overrides(config: dict[str, Any], args: argparse.Namespace)
         skills["inject_startup_context"] = False
         skills["allow_model_lookup"] = True
 
-    includes = getattr(args, "skills_include", None) or []
     if includes:
         existing = list(skills.get("default_enabled", []) or [])
         for name in includes:
@@ -68,7 +73,6 @@ def apply_skills_cli_overrides(config: dict[str, Any], args: argparse.Namespace)
                 existing.append(n)
         skills["default_enabled"] = existing
 
-    excludes = getattr(args, "skills_exclude", None) or []
     if excludes:
         existing = list(skills.get("exclude_names", []) or [])
         for name in excludes:
@@ -77,7 +81,7 @@ def apply_skills_cli_overrides(config: dict[str, Any], args: argparse.Namespace)
                 existing.append(n)
         skills["exclude_names"] = existing
 
-    if getattr(args, "no_skills_reselect", False):
+    if no_reselect:
         skills["reselect_mid_run"] = False
 
     config["skills"] = skills

@@ -66,6 +66,106 @@ def test_mcp_readiness_retries_until_listener_opens(monkeypatch, tmp_path: Path)
     )
 
 
+def test_mcp_readiness_requires_matching_child_identity(monkeypatch) -> None:
+    import tools.mcp_process as process_helpers
+
+    proofs = iter((False, True))
+    attempts: list[tuple[str, str]] = []
+    monkeypatch.setattr(ms, "port_is_open", lambda *_args: True)
+
+    async def _verify(url: str, identity_secret: str, **_kwargs: object) -> bool:
+        attempts.append((url, identity_secret))
+        return next(proofs)
+
+    monkeypatch.setattr(process_helpers, "_verify_mcp_http_identity", _verify)
+
+    asyncio.run(
+        process_helpers.wait_for_mcp_http_ready(
+            "http://127.0.0.1:8001/mcp",
+            timeout_seconds=1,
+            process=_RunningProcess(),
+            identity_secret="private-session-identity",
+            retry_initial_seconds=0,
+        )
+    )
+
+    assert attempts == [
+        ("http://127.0.0.1:8001/mcp", "private-session-identity"),
+        ("http://127.0.0.1:8001/mcp", "private-session-identity"),
+    ]
+
+
+def test_open_rogue_listener_never_passes_identity_gate(monkeypatch) -> None:
+    import tools.mcp_process as process_helpers
+
+    monkeypatch.setattr(ms, "port_is_open", lambda *_args: True)
+
+    async def _reject(_url: str, _identity_secret: str, **_kwargs: object) -> bool:
+        return False
+
+    monkeypatch.setattr(process_helpers, "_verify_mcp_http_identity", _reject)
+
+    with pytest.raises(RuntimeError, match="listener identity") as exc_info:
+        asyncio.run(
+            process_helpers.wait_for_mcp_http_ready(
+                "http://127.0.0.1:8001/mcp",
+                timeout_seconds=0,
+                process=_RunningProcess(),
+                identity_secret="must-not-appear",
+            )
+        )
+
+    assert "must-not-appear" not in str(exc_info.value)
+
+
+def test_http_identity_challenge_is_proven_without_weakening_mcp_auth() -> None:
+    import asyncio
+    import hashlib
+    import hmac
+
+    from tools.mcp_shared import _wrap_http_auth
+
+    called: list[bool] = []
+
+    async def _app(_scope, _receive, _send):
+        called.append(True)
+
+    wrapped = _wrap_http_auth(_app, "mcp-bearer", "private-identity")
+
+    async def _call(headers: list[tuple[bytes, bytes]], path: str):
+        events: list[dict[str, object]] = []
+
+        async def _receive():
+            return {"type": "http.request", "body": b"", "more_body": False}
+
+        async def _send(event):
+            events.append(dict(event))
+
+        await wrapped(
+            {"type": "http", "method": "GET", "path": path, "headers": headers},
+            _receive,
+            _send,
+        )
+        return events
+
+    challenge = b"fresh-random-challenge"
+    events = asyncio.run(_call([(b"x-breachpilot-challenge", challenge)], "/.well-known/breachpilot-mcp-identity"))
+    start = events[0]
+    response_headers = dict(start["headers"])
+    expected = hmac.new(b"private-identity", challenge, hashlib.sha256).hexdigest().encode("ascii")
+    assert start["status"] == 200
+    assert response_headers[b"x-breachpilot-proof"] == expected
+    assert called == []
+
+    unauthorized = asyncio.run(_call([], "/mcp"))
+    assert unauthorized[0]["status"] == 401
+    assert called == []
+
+    authorized = asyncio.run(_call([(b"authorization", b"Bearer mcp-bearer")], "/mcp"))
+    assert authorized == []
+    assert called == [True]
+
+
 def test_open_listener_does_not_wait_for_disposable_mcp_probe(monkeypatch) -> None:
     monkeypatch.setattr(ms, "port_is_open", lambda *_args: True)
 
@@ -139,6 +239,7 @@ def test_http_sessions_use_distinct_child_and_client_tokens(monkeypatch, tmp_pat
 
     server_tokens: list[str] = []
     client_tokens: list[str] = []
+    identity_secrets: list[str] = []
 
     class _Session:
         async def initialize(self) -> None:
@@ -157,6 +258,7 @@ def test_http_sessions_use_distinct_child_and_client_tokens(monkeypatch, tmp_pat
 
     def _start(**kwargs):
         server_tokens.append(kwargs["env"]["MCP_HTTP_TOKEN"])
+        identity_secrets.append(kwargs["env"]["MCP_HTTP_IDENTITY_SECRET"])
         log_handle = SimpleNamespace(name=str(tmp_path / "server.log"), close=lambda: None)
         return _RunningProcess(), log_handle
 
@@ -189,6 +291,7 @@ def test_http_sessions_use_distinct_child_and_client_tokens(monkeypatch, tmp_pat
     assert len(server_tokens) == len(client_tokens) == 2
     assert server_tokens == client_tokens
     assert len(set(server_tokens)) == 2
+    assert len(set(identity_secrets)) == 2
     assert "operator-configured-token" not in server_tokens
 
 
@@ -207,17 +310,45 @@ def test_occupied_port_is_rejected_without_spawning(tmp_path: Path) -> None:
             )
 
 
-def test_http_startup_failure_falls_back_to_stdio(monkeypatch, tmp_path: Path) -> None:
+def test_process_helper_uses_legacy_session_port_probe(monkeypatch, tmp_path: Path) -> None:
+    probes: list[tuple[str, int]] = []
+
+    def _occupied(host: str, port: int) -> bool:
+        probes.append((host, port))
+        return True
+
+    monkeypatch.setattr(ms, "port_is_open", _occupied)
+    with pytest.raises(RuntimeError, match="already in use"):
+        ms.start_exploit_http_server(
+            server_path=tmp_path / "mcp_exploit_server.py",
+            config_path=tmp_path / "config.yaml",
+            port=8001,
+            workspace=tmp_path / "workspace",
+            env={},
+        )
+
+    assert probes == [("127.0.0.1", 8001)]
+
+
+def test_snapshot_backed_session_uses_stdio_transport(monkeypatch, tmp_path: Path) -> None:
     calls: list[tuple[str, bool]] = []
+    config_paths: list[Path] = []
     fallback_session = object()
+    accepted_config = {"exploit": {"allowed_targets": ["192.0.2.10"]}}
+    from tools.kernel.config_fingerprint import config_fingerprint
+
+    accepted_fingerprint = config_fingerprint(accepted_config)
 
     @contextlib.asynccontextmanager
     async def _open_once(**kwargs):
         calls.append((kwargs["transport"], kwargs["startup_soft_fail"]))
-        if kwargs["transport"] == "http":
-            yield None
-        else:
-            yield fallback_session
+        config_path = kwargs["config_path"]
+        config_paths.append(config_path)
+        assert config_path.exists()
+        assert kwargs["config_fingerprint"] == accepted_fingerprint
+        assert kwargs["private_config_snapshot"] is True
+        assert kwargs["transport"] == "stdio"
+        yield fallback_session
 
     monkeypatch.setattr(ms, "_open_exploit_mcp_session_once", _open_once)
 
@@ -227,13 +358,19 @@ def test_http_startup_failure_falls_back_to_stdio(monkeypatch, tmp_path: Path) -
             config_path=Path("config.yaml"),
             target_ip="10.0.0.50",
             exploit_port=8001,
-            workspace=tmp_path,
+            workspace=tmp_path / "reports" / "run" / "workspace",
             soft_fail=False,
+            config_snapshot=accepted_config,
+            config_fingerprint=accepted_fingerprint,
+            snapshot_excluded_paths=(tmp_path / "reports",),
         ) as session:
             return session
 
     assert asyncio.run(_run()) is fallback_session
-    assert calls == [("http", True), ("stdio", False)]
+    assert calls == [("stdio", False)]
+    assert len(config_paths) == 1
+    assert not config_paths[0].exists()
+    assert not config_paths[0].parent.exists()
 
 
 def test_recon_soft_fail_yields_none_when_http_and_stdio_both_fail(monkeypatch, tmp_path: Path) -> None:
@@ -287,12 +424,18 @@ def test_attack_hard_fail_reports_http_and_stdio_startup_errors(monkeypatch, tmp
     assert "stdio init failed" in message
 
 
-def test_http_session_failure_after_yield_does_not_retry_over_stdio(monkeypatch, tmp_path: Path) -> None:
+def test_snapshot_stdio_session_failure_after_yield_is_not_retried(monkeypatch, tmp_path: Path) -> None:
     calls: list[str] = []
+    config_paths: list[Path] = []
+    accepted_config = {"exploit": {"allowed_targets": ["192.0.2.10"]}}
+    from tools.kernel.config_fingerprint import config_fingerprint
+
+    accepted_fingerprint = config_fingerprint(accepted_config)
 
     @contextlib.asynccontextmanager
     async def _open_once(**kwargs):
         calls.append(kwargs["transport"])
+        config_paths.append(kwargs["config_path"])
         yield object()
 
     monkeypatch.setattr(ms, "_open_exploit_mcp_session_once", _open_once)
@@ -303,13 +446,18 @@ def test_http_session_failure_after_yield_does_not_retry_over_stdio(monkeypatch,
             config_path=Path("config.yaml"),
             target_ip="10.0.0.50",
             exploit_port=8001,
-            workspace=tmp_path,
+            workspace=tmp_path / "workspace",
+            config_snapshot=accepted_config,
+            config_fingerprint=accepted_fingerprint,
         ):
+            assert config_paths[-1].exists()
             raise RuntimeError("tool call failed after startup")
 
     with pytest.raises(RuntimeError, match="tool call failed after startup"):
         asyncio.run(_run())
-    assert calls == ["http"]
+    assert calls == ["stdio"]
+    assert not config_paths[0].exists()
+    assert not config_paths[0].parent.exists()
 
 
 @pytest.mark.skipif(not hasattr(subprocess, "CREATE_NEW_PROCESS_GROUP"), reason="Windows only")

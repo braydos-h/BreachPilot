@@ -71,28 +71,22 @@ def get_packaged_config_path() -> Path | None:
 
 
 def get_webui_dist_dir() -> Path | None:
+    # A source checkout keeps Vite's build under webui/dist. Python wheels
+    # carry the same immutable files beneath tools/webui/dist so this lookup
+    # works from site-packages without relying on the checkout layout.
+    checkout_dist = _repo_root_from_this_file() / "webui" / "dist"
+    if (checkout_dist / "index.html").is_file():
+        return checkout_dist
+
     if _resources is not None:
-        for pkg in ("webui", "tools.webui"):
-            try:
-                traversable = _resources.files(pkg)  # type: ignore
+        try:
+            traversable = _resources.files("tools").joinpath("webui", "dist")  # type: ignore[attr-defined]
+            if traversable.joinpath("index.html").is_file():
                 candidate = Path(str(traversable))
                 if candidate.is_dir():
                     return candidate
-                dist = candidate / "dist"
-                if dist.is_dir():
-                    return dist
-            except Exception:
-                continue
-        try:
-            traversable = _resources.files("tools").joinpath("webui/dist")  # type: ignore
-            candidate = Path(str(traversable))
-            if candidate.is_dir():
-                return candidate
-        except Exception:
+        except (ModuleNotFoundError, OSError, TypeError):
             pass
-    candidate = _repo_root_from_this_file() / "webui" / "dist"
-    if candidate.is_dir():
-        return candidate
     return None
 
 

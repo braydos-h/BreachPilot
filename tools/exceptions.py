@@ -12,7 +12,7 @@ from __future__ import annotations
 import asyncio
 import sys
 import traceback
-from typing import TypeGuard
+from typing import Callable, TypeGuard
 
 
 def _is_exception_group(exc: BaseException) -> TypeGuard[BaseExceptionGroup]:
@@ -47,19 +47,26 @@ def _reraise_if_cancelled(exc: BaseException) -> None:
         raise cancellation from exc
 
 
-def _log_nested_exceptions(exc: BaseException, *, prefix: str = "") -> None:
+def _log_nested_exceptions(
+    exc: BaseException,
+    *,
+    prefix: str = "",
+    redact: Callable[[str], str] | None = None,
+) -> None:
     """Recursively log every exception inside an ExceptionGroup / BaseExceptionGroup."""
     if _is_exception_group(exc):
         for i, nested in enumerate(exc.exceptions):
-            _log_nested_exceptions(nested, prefix=f"{prefix}  [{i}] ")
+            _log_nested_exceptions(nested, prefix=f"{prefix}  [{i}] ", redact=redact)
     else:
         try:
             lines = traceback.format_exception(type(exc), exc, exc.__traceback__)
         except Exception as fmt_exc:
-            print(f"{prefix}<unformattable exception {type(exc).__name__}: {fmt_exc!r}>")
+            detail = redact(str(fmt_exc)) if redact is not None else repr(fmt_exc)
+            print(f"{prefix}<unformattable exception {type(exc).__name__}: {detail}>")
             return
         for line in lines:
-            print(f"{prefix}{line.rstrip()}")
+            rendered = line.rstrip()
+            print(f"{prefix}{redact(rendered) if redact is not None else rendered}")
 
 
 if sys.version_info >= (3, 11):

@@ -99,6 +99,86 @@ def test_preview_preserves_fast():
     assert d["mode"] == "fast"
 
 
+@pytest.mark.asyncio
+async def test_fast_recon_opens_mcp_child_with_accepted_config_fingerprint(tmp_path, monkeypatch):
+    from contextlib import asynccontextmanager
+    from unittest.mock import MagicMock
+
+    from tools.fast_recon import FastReconResult
+    from tools.goal_engine import GoalEngine
+    from tools.goal_suggester import ReconAssessment
+    from tools.run_service import AssessmentService
+    from tools.run_service.models import RunRequest
+    from tools.run_service.providers import CancellationToken
+    from tools.run_service.service import Callables
+
+    accepted_fingerprint = "c" * 64
+    assessment = ReconAssessment(
+        target_ip="10.0.0.50",
+        os_verdict="LINUX",
+        open_ports=[22],
+        services=[{"port": 22, "name": "ssh", "service": "ssh"}],
+    )
+    fast_result = FastReconResult(
+        target="10.0.0.50",
+        recon_complete=True,
+        assessment=assessment,
+        summary_text="fixture recon result",
+    )
+
+    class _Coordinator:
+        def __init__(self, **_kwargs):
+            pass
+
+        async def run(self, _session, _target):
+            return fast_result
+
+    monkeypatch.setattr("tools.fast_recon.FastReconCoordinator", _Coordinator)
+    session_arguments = {}
+
+    @asynccontextmanager
+    async def _open_session(**kwargs):
+        session_arguments.update(kwargs)
+        yield MagicMock()
+
+    service = AssessmentService(callables=Callables(open_session=_open_session))
+    reports_dir = tmp_path / "reports"
+    reports_dir.mkdir()
+    accepted_config = {
+        "mcp": {"http_port": 8001},
+        "exploit": {"workspace_dir": str(tmp_path / "workspace")},
+    }
+
+    class _Sink:
+        async def emit(self, *_args, **_kwargs):
+            return None
+
+    await service._fast_recon(
+        request=RunRequest(
+            target="10.0.0.50", mode="fast", goal_name="recon_only", config_path=tmp_path / "config.yaml"
+        ),
+        config=accepted_config,
+        config_path=tmp_path / "config.yaml",
+        target_ip="10.0.0.50",
+        original_target="10.0.0.50",
+        resolved_ip=None,
+        resolved_domain=None,
+        reports_dir=reports_dir,
+        model_client=MagicMock(),
+        model_alias="glm",
+        risk_profile="high_authorized_testing",
+        goal_engine=GoalEngine(),
+        decision_provider=MagicMock(),
+        event_sink=_Sink(),
+        cancellation=CancellationToken(),
+        config_fingerprint=accepted_fingerprint,
+    )
+
+    assert session_arguments["config_fingerprint"] == accepted_fingerprint
+    assert session_arguments["config_snapshot"] == accepted_config
+    assert session_arguments["snapshot_excluded_paths"] == (reports_dir,)
+
+
 # ---------------------------------------------------------------------------
 # Orchestration — parallel stage A, CVE bounded, dedup, timeout, cancellation
 # ---------------------------------------------------------------------------
