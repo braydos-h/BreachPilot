@@ -62,18 +62,12 @@ from tools.kernel.workspace import (
 )
 from tools.reliability import RateLimiter
 
-# Canonical homes (not the tools.web_researcher compat shim): the shim's
-# re-exports resolve at runtime, but mypy's full-build pass does not see
-# through the second re-export hop for SerpAPIResearchSettings.
+# Runtime builders import construction dependencies only when invoked. Keep
+# their return-annotation types here so importing shared MCP helpers stays light.
 if TYPE_CHECKING:  # pragma: no cover - typing only, keeps cold import light
-    from tools.cve_lookup import CVESearchSettings, NVDClient
+    from tools.cve_lookup import NVDClient
     from tools.exploit_search import ExploitSearch
     from tools.research.facade import WebResearcher
-    from tools.research.models import (
-        OllamaResearchSettings,
-        SerpAPIResearchSettings,
-        WebResearcherSettings,
-    )
 
 __all__ = [  # re-exports for backwards compat (F401 suppression via __all__)
     "_MSF_LHOST_RE",
@@ -224,6 +218,8 @@ def build_cve_search(config: Mapping[str, object]) -> NVDClient:
     NVDClient hammering at its own per-instance gap. ``rate_limit_seconds``
     remains the per-instance FALLBACK used only when no shared limiter is
     passed (e.g. vuln_agent constructing NVDClient directly)."""
+    from tools.cve_lookup import CVESearchSettings, NVDClient
+
     cve_cfg_raw = config.get("cve_lookup", {})
     cve_cfg: Mapping[str, object] = cve_cfg_raw if isinstance(cve_cfg_raw, Mapping) else {}
     settings = CVESearchSettings(
@@ -248,6 +244,9 @@ def build_cve_search(config: Mapping[str, object]) -> NVDClient:
 
 def build_researcher(config: Mapping[str, object]) -> WebResearcher:
     """Build a web researcher from the ``research`` config block."""
+    from tools.research.facade import WebResearcher
+    from tools.research.models import OllamaResearchSettings, SerpAPIResearchSettings, WebResearcherSettings
+
     research_cfg_raw = config.get("research", {})
     research_cfg: Mapping[str, object] = research_cfg_raw if isinstance(research_cfg_raw, Mapping) else {}
     ollama_cfg_raw = research_cfg.get("ollama", {})
