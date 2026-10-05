@@ -27,6 +27,7 @@ from tools.exceptions import _EXC_GROUP_CATCH, _is_exception_group, _log_nested_
 from tools.exploit_agent import ExploitSettings
 from tools.goal_engine import AttackGoal, GoalEngine
 from tools.goal_suggester import ReconAssessment
+from tools.kernel.redaction import sanitize_message
 from tools.kernel.workspace_isolation import resolve_run_workspace
 from tools.run_service.models import (
     EVENT_ARTIFACT,
@@ -45,6 +46,17 @@ from tools.run_service.providers import (
 from tools.swarm_bridge import SwarmMcpBridge
 
 ui = get_ui()
+
+
+def _write_recon_error_log(reports_dir: Path, exc: BaseException) -> Path:
+    """Persist a redacted traceback for a recon fallback, best-effort."""
+    log_path = reports_dir / "recon_first_error.log"
+    try:
+        traceback_text = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
+        log_path.write_text(sanitize_message(traceback_text), encoding="utf-8")
+    except OSError:
+        pass
+    return log_path
 
 
 async def _emit_service_deep_error(
@@ -169,16 +181,10 @@ class TasksMixin:
                         reports_dir=reports_dir,
                     )
         except _EXC_GROUP_CATCH as exc:
-            log_path = reports_dir / "recon_first_error.log"
-            try:
-                log_path.write_text(
-                    "".join(traceback.format_exception(type(exc), exc, exc.__traceback__)), encoding="utf-8"
-                )
-            except OSError:
-                pass
-            ui.warning(f"Recon-first session hit an unexpected error: {exc}")
+            log_path = _write_recon_error_log(reports_dir, exc)
+            ui.warning(f"Recon-first session hit an unexpected error: {sanitize_message(str(exc))}")
             if _is_exception_group(exc):
-                _log_nested_exceptions(exc)
+                _log_nested_exceptions(exc, redact=sanitize_message)
             # Deep Run Logs: a failed recon-first degrades to UNKNOWN and the
             # run continues — persist the traceback so the fixer-agent sees WHY
             # recon produced no services/CVEs. Fail-open, never gates.
@@ -361,16 +367,10 @@ class TasksMixin:
                         if fast_result.cache_hit:
                             ui.info(f"FAST RECON CACHE HIT: loaded assessment (age < {fast_cfg.cache_ttl_seconds}s)")
             except _EXC_GROUP_CATCH as exc:
-                log_path = reports_dir / "recon_first_error.log"
-                try:
-                    log_path.write_text(
-                        "".join(traceback.format_exception(type(exc), exc, exc.__traceback__)), encoding="utf-8"
-                    )
-                except OSError:
-                    pass
-                ui.warning(f"Fast recon hit an unexpected error: {exc}")
+                log_path = _write_recon_error_log(reports_dir, exc)
+                ui.warning(f"Fast recon hit an unexpected error: {sanitize_message(str(exc))}")
                 if _is_exception_group(exc):
-                    _log_nested_exceptions(exc)
+                    _log_nested_exceptions(exc, redact=sanitize_message)
                 # Deep Run Logs: same as recon-first above — the UNKNOWN
                 # fallback hides the cause; keep the traceback in errors.jsonl.
                 await _emit_service_deep_error(
