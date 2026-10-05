@@ -56,6 +56,7 @@ from tools.run_service.providers import (
     DecisionProvider,
     EventSink,
 )
+from tools.run_service.witness import start_witness, stop_witness
 from tools.swarm_bridge import SwarmMcpBridge
 
 if TYPE_CHECKING:
@@ -233,14 +234,13 @@ class ExecuteMixin:
         # sink. Advisory ONLY: the witness never gates the run, and its
         # failure never propagates into the run's result path. See
         # tools/swarm/agents/witness_agent.py.
-        witness_agent: Any | None = None
-        witness_task: asyncio.Task[None] | None = None
-        if bool((config.get("witness", {}) or {}).get("enabled", False)):
-            witness_agent, witness_task = self._start_witness(
-                config=config,
-                reports_dir=reports_dir,
-                event_sink=event_sink,
-            )
+        witness_agent, witness_task = start_witness(
+            config=config,
+            reports_dir=reports_dir,
+            event_sink=event_sink,
+            agent_factory=self._c.witness_agent_factory,
+            warn=ui.warning,
+        )
 
         # Write session_state.json for --resume.
         try:
@@ -734,26 +734,7 @@ class ExecuteMixin:
             # so the tail the poll interval did not cover is still read. The
             # whole block is best-effort — a broken witness must never raise
             # into the result path.
-            if witness_agent is not None:
-                try:
-                    _wit_audit = str(result.get("audit_path", "") or "") if isinstance(result, dict) else ""
-                    if _wit_audit and witness_agent.add_audit_path(_wit_audit):
-                        witness_agent.scan_once()
-                except _EXC_GROUP_CATCH:
-                    # _EXC_GROUP_CATCH is (Exception, BaseExceptionGroup): it
-                    # already covers AttributeError/TypeError/RuntimeError, so
-                    # no explicit tuple prefix is needed here.
-                    pass
-                try:
-                    witness_agent.stop()
-                except _EXC_GROUP_CATCH:
-                    pass
-            if witness_task is not None:
-                witness_task.cancel()
-                try:
-                    await asyncio.wait_for(witness_task, timeout=0.5)
-                except (asyncio.TimeoutError, asyncio.CancelledError):
-                    pass
+            await stop_witness(witness_agent, witness_task, result)
             ticker_task.cancel()
             try:
                 await asyncio.wait_for(ticker_task, timeout=0.1)
@@ -943,64 +924,3 @@ class ExecuteMixin:
             pass
         RunLog.detach()
         return _final_run_result
-
-    # ------------------------------------------------------------------
-    # Witness side task (advisory; never gates the run)
-    # ------------------------------------------------------------------
-
-    def _start_witness(
-        self,
-        config: dict[str, Any],
-        reports_dir: Path,
-        event_sink: EventSink,
-    ) -> tuple[Any | None, asyncio.Task[None] | None]:
-        """Start the advisory witness watcher for this run.
-
-        Constructs the agent through the ``Callables.witness_agent_factory``
-        seam (tests stub it there) and spawns a side task that polls
-        ``scan_once()`` every ``witness.poll_interval_seconds``. Returns
-        ``(None, None)`` — current behavior, byte-identical — when
-        ``witness.enabled`` is false or the agent cannot be constructed.
-
-        The witness's ``event_callback`` is a SYNC callable but
-        ``event_sink.emit`` is a coroutine, so escalation bridges through the
-        running loop captured here (``loop.create_task(event_sink.emit(...))``
-        from inside the sync callback). A broken sink must never kill the
-        witness, and the witness must never break the run — hence the guards.
-        """
-        witness_cfg = config.get("witness", {}) or {}
-        if not bool(witness_cfg.get("enabled", False)):
-            return None, None
-        loop = asyncio.get_running_loop()
-        escalate = bool(witness_cfg.get("escalate_to_event_broker", True))
-
-        def _on_witness_flag(event: str, payload: dict[str, Any]) -> None:
-            try:
-                loop.create_task(event_sink.emit(event, payload))
-            except _EXC_GROUP_CATCH:
-                pass
-
-        try:
-            interval = float(witness_cfg.get("poll_interval_seconds", 5.0) or 5.0)
-        except (TypeError, ValueError):
-            interval = 5.0
-
-        try:
-            agent = self._c.witness_agent_factory(
-                config,
-                audit_paths=[reports_dir / "activity.jsonl"],
-                event_callback=_on_witness_flag if escalate else None,
-            )
-        except _EXC_GROUP_CATCH as exc:
-            ui.warning(f"Witness watcher unavailable (advisory, run continues): {exc}")
-            return None, None
-
-        async def _witness_poll() -> None:
-            while True:
-                await asyncio.sleep(interval)
-                try:
-                    agent.scan_once()
-                except _EXC_GROUP_CATCH:
-                    pass
-
-        return agent, asyncio.create_task(_witness_poll())
