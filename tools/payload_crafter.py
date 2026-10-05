@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from tools.experience_store import ExperienceStore
+from tools.kernel.workspace import write_workspace_file
 
 
 @dataclass
@@ -859,7 +860,8 @@ Return ONLY the complete fixed Python script. NO markdown fences, NO explanation
         return None
 
     def _save_script(self, generation_id: str, script: str, parent_id: str | None, strategy: str) -> None:
-        path = self._mutations_dir / f"{generation_id}.py"
+        if not re.fullmatch(r"(?:gen|mut)-[0-9]+-[0-9a-f]{8}", generation_id):
+            raise ValueError("invalid generated exploit id")
         metadata = {
             "generation_id": generation_id,
             "parent_id": parent_id,
@@ -867,4 +869,4 @@ Return ONLY the complete fixed Python script. NO markdown fences, NO explanation
             "timestamp": time.time(),
         }
         content = f"# METADATA: {json.dumps(metadata)}\n{script}"
-        path.write_text(content, encoding="utf-8")
+        write_workspace_file(self._workspace, f"mutations/{generation_id}.py", content.encode("utf-8"))

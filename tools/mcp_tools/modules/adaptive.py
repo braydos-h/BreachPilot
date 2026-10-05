@@ -3,15 +3,47 @@
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 from db import get_default_db
 from tools.experience_store import ExperienceStore
 from tools.exploit_mutator import ExploitMutator
+from tools.kernel.workspace import read_workspace_bytes, write_workspace_file
 from tools.mcp_tools.registry import ToolContext, _get_model_client
 from tools.payload_crafter import CraftedPayload
 from tools.validation_utils import validate_target_or_ip
+
+_GENERATION_ID_RE = re.compile(r"(?:gen|mut)-[0-9]+-[0-9a-f]{8}\Z")
+_MAX_SCRIPT_BYTES = 1024 * 1024
+_MAX_SIDECAR_BYTES = 64 * 1024
+_MAX_LINEAGE_DEPTH = 64
+
+
+def _read_generation(workspace: Path, generation_id: str) -> tuple[str, dict[str, Any]]:
+    """Read a generated payload using workspace containment and no-follow I/O."""
+    if not _GENERATION_ID_RE.fullmatch(generation_id):
+        raise ValueError("invalid generation id")
+    _, script_bytes = read_workspace_bytes(workspace, f"exploits/{generation_id}.py", limit=_MAX_SCRIPT_BYTES)
+    _, sidecar_bytes = read_workspace_bytes(workspace, f"exploits/{generation_id}.json", limit=_MAX_SIDECAR_BYTES)
+    script = script_bytes.decode("utf-8")
+    sidecar = json.loads(sidecar_bytes.decode("utf-8"))
+    if not isinstance(sidecar, dict):
+        raise ValueError("generation sidecar must be a JSON object")
+    if sidecar.get("generation_id", generation_id) != generation_id:
+        raise ValueError("generation sidecar id does not match its filename")
+    return script, sidecar
+
+
+def _write_generation_file(workspace: Path, generation_id: str, suffix: str, content: bytes) -> Path:
+    """Create a generation artifact without following worker-created links."""
+    if not _GENERATION_ID_RE.fullmatch(generation_id):
+        raise ValueError("invalid generated generation id")
+    if suffix not in {".py", ".json"}:
+        raise ValueError("invalid generation artifact type")
+    return write_workspace_file(workspace, f"exploits/{generation_id}{suffix}", content)
 
 
 def register_adaptive_tools(mcp: Any, *, ctx: ToolContext) -> None:
@@ -91,8 +123,9 @@ def register_adaptive_tools(mcp: Any, *, ctx: ToolContext) -> None:
             )
 
             # Save script
-            script_path = exploits_dir / f"{payload.generation_id}.py"
-            script_path.write_text(payload.script, encoding="utf-8")
+            script_path = _write_generation_file(
+                workspace, payload.generation_id, ".py", payload.script.encode("utf-8")
+            )
 
             # Save sidecar metadata
             sidecar = {
@@ -103,8 +136,9 @@ def register_adaptive_tools(mcp: Any, *, ctx: ToolContext) -> None:
                 "metadata": payload.metadata,
                 "created_at": datetime.now(timezone.utc).isoformat(),
             }
-            sidecar_path = exploits_dir / f"{payload.generation_id}.json"
-            sidecar_path.write_text(json.dumps(sidecar, indent=2, default=str), encoding="utf-8")
+            sidecar_path = _write_generation_file(
+                workspace, payload.generation_id, ".json", json.dumps(sidecar, indent=2, default=str).encode("utf-8")
+            )
 
             lines = [
                 "CRAFT_EXPLOIT_RESULT: generated",
@@ -146,8 +180,8 @@ def register_adaptive_tools(mcp: Any, *, ctx: ToolContext) -> None:
         Example:
             mutate_exploit("gen-1712345678-abc12345", "ConnectionResetError: target closed connection")
         """
-        if not script_id or not script_id.strip():
-            return "ERROR: script_id is required."
+        if not script_id or not _GENERATION_ID_RE.fullmatch(script_id):
+            return "ERROR: script_id must be a valid generated exploit id."
         if not failure_output or not failure_output.strip():
             return "ERROR: failure_output is required."
 
@@ -160,17 +194,10 @@ def register_adaptive_tools(mcp: Any, *, ctx: ToolContext) -> None:
             exploits_dir = workspace / "exploits"
             exploits_dir.mkdir(parents=True, exist_ok=True)
 
-            # Look up script and sidecar
-            script_path = exploits_dir / f"{script_id}.py"
-            sidecar_path = exploits_dir / f"{script_id}.json"
-
-            if not script_path.exists():
-                return f"ERROR: Script '{script_id}.py' not found in {exploits_dir}."
-            if not sidecar_path.exists():
-                return f"ERROR: Sidecar metadata '{script_id}.json' not found in {exploits_dir}."
-
-            script_text = script_path.read_text(encoding="utf-8")
-            sidecar = json.loads(sidecar_path.read_text(encoding="utf-8"))
+            # Workspace contents are writable from the sandbox. Read scripts
+            # and metadata via descriptor-relative no-follow opens so a worker
+            # cannot substitute a symlink to host files.
+            script_text, sidecar = _read_generation(workspace, script_id)
 
             # Reconstruct CraftedPayload
             previous_payload = CraftedPayload(
@@ -184,22 +211,26 @@ def register_adaptive_tools(mcp: Any, *, ctx: ToolContext) -> None:
 
             # Determine attempt number from lineage
             attempt_number = 1
-            lineage_dir = exploits_dir
             current_id = script_id
-            while current_id:
-                sc_path = lineage_dir / f"{current_id}.json"
-                if sc_path.exists():
-                    try:
-                        sc = json.loads(sc_path.read_text(encoding="utf-8"))
-                        current_id = sc.get("parent_id", "")
-                        if current_id:
-                            attempt_number += 1
-                        else:
-                            break
-                    except Exception:  # ponytail: bare except intentional
-                        break
-                else:
+            seen_ids = {script_id}
+            while len(seen_ids) < _MAX_LINEAGE_DEPTH:
+                parent_id = sidecar.get("parent_id")
+                if not isinstance(parent_id, str) or not _GENERATION_ID_RE.fullmatch(parent_id):
                     break
+                if parent_id in seen_ids:
+                    break
+                try:
+                    _parent_script, parent_sidecar = _read_generation(workspace, parent_id)
+                except (OSError, UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
+                    raise ValueError("exploit lineage is incomplete or unsafe") from exc
+                seen_ids.add(parent_id)
+                attempt_number += 1
+                sidecar = parent_sidecar
+            # If the chain is longer than the bounded walk, fail closed rather
+            # than undercounting attempts and bypassing the mutation ceiling.
+            if len(seen_ids) == _MAX_LINEAGE_DEPTH and isinstance(sidecar.get("parent_id"), str):
+                if _GENERATION_ID_RE.fullmatch(sidecar["parent_id"]):
+                    return "ERROR: Exploit lineage exceeds the supported depth."
 
             # Build experience store
             experience_store: ExperienceStore | None = None
@@ -236,8 +267,9 @@ def register_adaptive_tools(mcp: Any, *, ctx: ToolContext) -> None:
                 )
 
             # Save mutated script
-            new_script_path = exploits_dir / f"{mutated.generation_id}.py"
-            new_script_path.write_text(mutated.script, encoding="utf-8")
+            new_script_path = _write_generation_file(
+                workspace, mutated.generation_id, ".py", mutated.script.encode("utf-8")
+            )
 
             # Save updated sidecar
             new_sidecar = {
@@ -248,8 +280,12 @@ def register_adaptive_tools(mcp: Any, *, ctx: ToolContext) -> None:
                 "metadata": mutated.metadata,
                 "created_at": datetime.now(timezone.utc).isoformat(),
             }
-            new_sidecar_path = exploits_dir / f"{mutated.generation_id}.json"
-            new_sidecar_path.write_text(json.dumps(new_sidecar, indent=2, default=str), encoding="utf-8")
+            new_sidecar_path = _write_generation_file(
+                workspace,
+                mutated.generation_id,
+                ".json",
+                json.dumps(new_sidecar, indent=2, default=str).encode("utf-8"),
+            )
 
             lines = [
                 "MUTATE_EXPLOIT_RESULT: mutated",
