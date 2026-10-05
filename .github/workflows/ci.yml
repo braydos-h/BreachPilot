@@ -521,7 +521,9 @@ jobs:
       - name: pip-audit (fail on known vulnerabilities)
         run: |
           python -m pip install pip-audit
-          python -m pip_audit --desc --local
+          # This job installs BreachPilot itself as the only editable package;
+          # skip that unpublishable local project and audit every third-party dependency.
+          python -m pip_audit --desc --local --skip-editable
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
