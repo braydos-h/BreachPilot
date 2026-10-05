@@ -12,7 +12,6 @@ export function BenchmarkRunHeader({ page }: { page: BenchmarkRunState }) {
     displayTrials,
     summary,
     env,
-    manifest,
     isActiveRun,
     headerBadge,
     onCancel,

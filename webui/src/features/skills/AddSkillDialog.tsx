@@ -15,7 +15,28 @@ import { SKILL_TEMPLATE } from "./skillsConfig";
 import { SkillDraftEditor } from "./SkillDraftEditor";
 import type { SkillsPageState } from "./useSkillsPage";
 
-export function AddSkillDialog({ page }: { page: SkillsPageState }) {
+type AddSkillDialogPageState = Omit<
+  Pick<
+    SkillsPageState,
+    | "addOpen"
+    | "setAddOpen"
+    | "draftName"
+    | "setDraftName"
+    | "draftMarkdown"
+    | "setDraftMarkdown"
+    | "draftError"
+    | "setDraftError"
+    | "previewTab"
+    | "setPreviewTab"
+    | "install"
+    | "onInstall"
+  >,
+  "install"
+> & {
+  install: Pick<SkillsPageState["install"], "isPending">;
+};
+
+export function AddSkillDialog({ page }: { page: AddSkillDialogPageState }) {
   const {
     addOpen,
     setAddOpen,
