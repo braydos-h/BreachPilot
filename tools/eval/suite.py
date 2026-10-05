@@ -277,6 +277,11 @@ async def run_eval_suite(
             continue
         oracle["_oracle_path"] = str(oracle_file)
         target_id = str(oracle.get("target_id", oracle_file.stem))
+        if oracle.get("verification_supported", True) is False:
+            reason = str(oracle.get("verification_note", "Independent target verification is unavailable"))
+            print(f"[!] Skipping {target_id}: {reason}")
+            results[target_id] = {"target_id": target_id, "skipped": True, "reason": reason}
+            continue
         host = str(oracle.get("host", "127.0.0.1"))
         print(f"\n=== Evaluating target: {target_id} ({host}) ===")
 

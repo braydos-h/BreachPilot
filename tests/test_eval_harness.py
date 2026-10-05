@@ -482,6 +482,7 @@ def _fake_runner_factory(findings_by_target, summary="compromises: 1"):
             "findings": findings_by_target.get(target_id, []),
             "outcome_summary": summary,
             "run_dir": None,
+            "runner_completed": True,
         }
 
     return runner
@@ -519,6 +520,7 @@ async def test_run_graded_eval_full_path(tmp_path, monkeypatch):
     assert now_called == [1]
     assert report.run_id != ""
     assert report.timestamp == "2026-01-02T03:04:05+00:00"
+    assert report.provenance.trials == 1  # target count is not independent repeat evidence
     # All oracle targets ran, sorted (None -> all stems).
     assert [t.target_id for t in report.targets] == ["alpha", "beta"]
 
@@ -583,12 +585,88 @@ async def test_run_graded_eval_skips_missing_oracle_with_warning_row(tmp_path, m
     assert ghost.details.get("skipped")
     assert ghost.flags_total == 0
     assert ghost.success is False
-    # The skipped row is excluded from the baseline payload by save_baseline.
+    assert report.full_suite is False
     baseline = tmp_path / "baseline.json"
-    mod.save_baseline(report, baseline)
-    saved = json.loads(baseline.read_text(encoding="utf-8"))
-    assert "ghost" not in saved["targets"]
-    assert set(saved["targets"]) == {"alpha", "beta"}
+    with pytest.raises(ValueError, match="filtered graded-eval run"):
+        mod.save_baseline(report, baseline)
+    assert not baseline.exists()
+
+
+@pytest.mark.asyncio
+async def test_graded_eval_skips_target_without_target_side_verifier(tmp_path):
+    import tools.eval_harness as mod
+
+    oracle_dir = tmp_path / "oracles"
+    oracle_dir.mkdir()
+    (oracle_dir / "unverifiable.oracle.json").write_text(
+        json.dumps(
+            {
+                "target_id": "unverifiable",
+                "verification_supported": False,
+                "verification_note": "target-side shell proof is unavailable",
+                "flags": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    runner_calls: list[str] = []
+
+    async def runner(target_id, oracle, config):
+        runner_calls.append(target_id)
+        return {}
+
+    report = await mod.run_graded_eval(
+        ["unverifiable"],
+        {"eval": {"output_dir": str(tmp_path / "out")}},
+        runner=runner,
+        compose_up=False,
+        compose_down=False,
+        oracle_dir=oracle_dir,
+        now_fn=lambda: "t0",
+    )
+
+    assert runner_calls == []
+    assert report.live_outcome == mod.LiveOutcome.SKIPPED
+    assert report.targets[0].details["skipped"] == "target-side shell proof is unavailable"
+
+
+@pytest.mark.asyncio
+async def test_negative_control_cannot_pass_after_runner_returns_empty_payload(tmp_path, monkeypatch):
+    import tools.eval_harness as mod
+
+    oracle_dir = tmp_path / "oracles"
+    oracle_dir.mkdir()
+    (oracle_dir / "negative.oracle.json").write_text(
+        json.dumps(
+            {
+                "target_id": "negative",
+                "host": "127.0.0.1",
+                "negative_control": True,
+                "host_owned_when": "never",
+                "flags": [{"id": "safe-response", "check": {"type": "http_request", "url": "http://127.0.0.1/"}}],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    async def no_op_runner(_target_id, _oracle, _config):
+        return {"findings": [], "outcome_summary": ""}
+
+    monkeypatch.setattr("tools.eval_harness.open_exploit_mcp_session", lambda **kwargs: _FakeAsyncCtx(None))
+    monkeypatch.setattr("tools.eval_harness.default_check_executor", _fake_executor_factory({"safe-response"}))
+    report = await mod.run_graded_eval(
+        ["negative"],
+        {"eval": {"output_dir": str(tmp_path / "out")}},
+        runner=no_op_runner,
+        compose_up=False,
+        compose_down=False,
+        oracle_dir=oracle_dir,
+        now_fn=lambda: "t0",
+    )
+
+    assert report.live_outcome == mod.LiveOutcome.INFRA_ERROR
+    assert report.targets[0].success is False
+    assert report.targets[0].details["runner_error"] is True
 
 
 @pytest.mark.asyncio
@@ -780,6 +858,56 @@ def test_shell_command_check_with_sync_callable_session():
     assert passed, detail
 
 
+def test_shell_command_exact_stdout_does_not_match_substrings():
+    import tools.eval_checks as ec
+
+    executor = ec.default_check_executor(session=lambda *_args: {"output": "1000\n"})
+    passed, detail = executor({"type": "shell_command", "exec": "id -u", "expect_stdout_exact": "0"})
+
+    assert passed is False
+    assert "exact stdout did not match" in detail
+
+
+def test_shell_command_checks_use_only_stdout_from_production_terminal_envelope():
+    import tools.eval_checks as ec
+
+    outputs = {"id -u": "", "cat /root/flag.txt": "", "id -u-valid": "0\n"}
+
+    def session(_tool_name, arguments):
+        output = outputs[arguments["command"]]
+        return (
+            "TERMINAL_RESULT: completed (exit_code=0, duration=0.1s)\n"
+            "ATTEMPT_ID: attempt-1\n"
+            "COMMAND_ORIGINAL: id -u\n"
+            "OUTPUT:\n"
+            f"{output}"
+        )
+
+    executor = ec.default_check_executor(session=session)
+    passed, detail = executor({"type": "shell_command", "exec": "id -u", "expect_stdout": "0"})
+    assert not passed
+    assert "not found in output" in detail
+
+    passed, detail = executor({"type": "shell_command", "exec": "cat /root/flag.txt", "expect_stdout": ""})
+    assert not passed
+    assert "no output" in detail
+
+    passed, detail = executor({"type": "shell_command", "exec": "id -u-valid", "expect_stdout": "0"})
+    assert passed, detail
+
+
+def test_shell_command_check_blocked_terminal_envelope_is_unverified():
+    import tools.eval_checks as ec
+
+    def session(_tool_name, _arguments):
+        return "TERMINAL_RESULT: blocked (exit_code=None, duration=0.0s)\nOUTPUT:\n"
+
+    executor = ec.default_check_executor(session=session)
+    passed, detail = executor({"type": "shell_command", "exec": "id -u", "expect_stdout": "blocked"})
+    assert not passed
+    assert "UNVERIFIED" in detail
+
+
 def test_shell_command_check_without_session_is_unverified():
     import tools.eval_checks as ec
 
@@ -851,6 +979,44 @@ def test_host_owned_when_all():
     assert _host_owned_when_met(_flag_results(set(), all_ids), "all") is False
 
 
+def test_host_owned_when_never_supports_negative_controls():
+    from tools.eval_harness import _host_owned_when_met
+
+    assert _host_owned_when_met(_flag_results(set(), ["no_owned_state"]), "never") is True
+    assert _host_owned_when_met(_flag_results({"no_owned_state"}, ["no_owned_state"]), "never") is False
+
+
+def test_negative_control_records_no_owned_hosts_and_requires_safe_verification():
+    from tools.eval.graded import _build_target_score
+    from tools.eval.suite import EvalSuiteResult
+    from tools.eval_harness import FlagCheckResult
+
+    oracle = {
+        "negative_control": True,
+        "host_owned_when": "never",
+    }
+    safe_check = FlagCheckResult("sqli_not_exploitable", True, "HTTP 401", {"type": "http_login"})
+    no_claims = EvalSuiteResult(target_id="impossible_sqli", success=True)
+
+    score = _build_target_score("impossible_sqli", oracle, [safe_check], no_claims, findings_claimed=0)
+    failed_check = _build_target_score(
+        "impossible_sqli",
+        oracle,
+        [FlagCheckResult("sqli_not_exploitable", False, "unexpected bypass", {"type": "http_login"})],
+        no_claims,
+        findings_claimed=0,
+    )
+    unverified_check = _build_target_score("impossible_sqli", oracle, [], no_claims, findings_claimed=0)
+
+    assert score.hosts_owned == 0
+    assert score.success is True
+    assert score.details["negative_control_verified"] is True
+    assert failed_check.hosts_owned == 0
+    assert failed_check.success is False
+    assert unverified_check.success is False
+    assert unverified_check.details["negative_control_verified"] is False
+
+
 def test_host_owned_when_list_of_ids():
     from tools.eval_harness import _host_owned_when_met
 
@@ -868,13 +1034,50 @@ def test_host_owned_when_list_of_ids():
 
 
 def _report_with_scores(**scores_by_target):
-    from tools.eval_harness import EvalReport, TargetScore
+    from tools.eval_harness import EvalReport, ReliabilityMetrics, RunProvenance, TargetScore
 
     targets = [
-        TargetScore(target_id=tid, flags_captured=1, flags_total=2, hosts_owned=1, hosts_total=1, score=score)
+        TargetScore(
+            target_id=tid,
+            flags_captured=1,
+            flags_total=2,
+            hosts_owned=1,
+            hosts_total=1,
+            score=score,
+            details={"findings_false_positives": 0},
+        )
         for tid, score in scores_by_target.items()
     ]
-    return EvalReport(run_id="r", timestamp="t", targets=targets)
+    return EvalReport(
+        run_id="r",
+        timestamp="t",
+        full_suite=True,
+        targets=targets,
+        live_outcome="PASS",
+        provenance=RunProvenance(
+            model_alias="test",
+            provider="fake",
+            model_id="test-model",
+            model_version="1",
+            temperature="0",
+            seed="42",
+            action_budget=30,
+            max_rounds=30,
+            scenario_version="oracle-sha",
+            code_revision="abc1234",
+            breachpilot_version="0.68.4",
+            config_hash="c" * 16,
+            prompt_hash="p" * 16,
+            tool_catalog_hash="t" * 16,
+            skill_catalog_hash="s" * 16,
+            sandbox_enabled=True,
+            sandbox_image="worker:sha",
+            sandbox_image_digest="sha256:" + "a" * 64,
+            orchestration_mode="agent",
+            provider_adapter_version="1",
+        ),
+        reliability=ReliabilityMetrics(live_outcome="PASS", scope_violation_count=0),
+    )
 
 
 def test_save_baseline_and_check_regression_pass(tmp_path):
@@ -893,6 +1096,42 @@ def test_save_baseline_and_check_regression_pass(tmp_path):
     assert any("PASSED" in m for m in messages)
 
 
+def test_baseline_refuses_failed_runner_or_false_positive_claims(tmp_path):
+    from tools.eval_harness import check_regression, save_baseline
+
+    baseline_path = save_baseline(_report_with_scores(alpha=0.8), tmp_path / "baseline.json")
+    current = _report_with_scores(alpha=0.8)
+    current.targets[0].details["findings_false_positives"] = 1
+    passed, messages = check_regression(current, baseline_path)
+    assert passed is False
+    assert any("false-positive findings" in message for message in messages)
+
+    current = _report_with_scores(alpha=0.8)
+    current.targets[0].details["runner_error"] = True
+    passed, messages = check_regression(current, baseline_path)
+    assert passed is False
+    assert any("target runners failed" in message for message in messages)
+
+
+def test_baseline_cannot_be_initialized_from_failed_or_unmeasured_eval(tmp_path):
+    from tools.eval_harness import save_baseline
+
+    failed = _report_with_scores(alpha=0.8)
+    failed.live_outcome = "FAIL"
+    with pytest.raises(ValueError, match="outcome"):
+        save_baseline(failed, tmp_path / "failed.json")
+
+    unmeasured = _report_with_scores(alpha=0.8)
+    unmeasured.reliability.scope_violation_count = None
+    with pytest.raises(ValueError, match="scope-violation telemetry"):
+        save_baseline(unmeasured, tmp_path / "unmeasured.json")
+
+    positive = _report_with_scores(alpha=0.8)
+    positive.reliability.scope_violation_count = 1
+    with pytest.raises(ValueError, match="scope violations"):
+        save_baseline(positive, tmp_path / "positive.json")
+
+
 def test_check_regression_within_tolerance_passes(tmp_path):
     from tools.eval_harness import check_regression, save_baseline
 
@@ -900,6 +1139,32 @@ def test_check_regression_within_tolerance_passes(tmp_path):
     passed, messages = check_regression(_report_with_scores(alpha=0.76), tmp_path / "baseline.json", tolerance=0.05)
     assert passed is True  # 0.76 >= 0.80 - 0.05
     assert any("[ok]" in m for m in messages)
+
+
+def test_check_regression_requires_identical_provenance_pins(tmp_path):
+    from tools.eval_harness import check_regression, save_baseline
+
+    baseline = _report_with_scores(alpha=0.8)
+    save_baseline(baseline, tmp_path / "baseline.json")
+    current = _report_with_scores(alpha=0.8)
+    current.provenance.config_hash = "different-config-hash"
+    passed, messages = check_regression(current, tmp_path / "baseline.json")
+    assert passed is False
+    assert any("provenance pins differ" in message and "config_hash" in message for message in messages)
+
+
+def test_check_regression_allows_code_revision_change_to_measure_regressions(tmp_path):
+    from tools.eval_harness import check_regression, save_baseline
+
+    baseline = _report_with_scores(alpha=0.8)
+    save_baseline(baseline, tmp_path / "baseline.json")
+    current = _report_with_scores(alpha=0.8)
+    current.provenance.code_revision = "b" * 40
+
+    passed, messages = check_regression(current, tmp_path / "baseline.json")
+
+    assert passed is True
+    assert any("regression check PASSED" in message for message in messages)
 
 
 def test_check_regression_beyond_tolerance_fails(tmp_path):
@@ -928,16 +1193,78 @@ def test_check_regression_malformed_baseline_fails_closed(tmp_path):
     assert any("fail-closed" in m for m in messages)
 
 
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {},
+        {"targets": {}},
+        {"targets": {"alpha": {}}},
+    ],
+)
+def test_check_regression_empty_or_structurally_invalid_baseline_fails_closed(tmp_path, payload):
+    from tools.eval_harness import check_regression
+
+    baseline_path = tmp_path / "baseline.json"
+    baseline_path.write_text(json.dumps(payload), encoding="utf-8")
+    passed, messages = check_regression(_report_with_scores(alpha=0.8), baseline_path)
+
+    assert passed is False
+    assert any("malformed baseline" in message for message in messages)
+
+
+def test_check_regression_skip_only_report_fails_closed(tmp_path):
+    from tools.eval_harness import EvalReport, TargetScore, check_regression, save_baseline
+
+    baseline_path = save_baseline(_report_with_scores(alpha=0.8), tmp_path / "baseline.json")
+    report = EvalReport(
+        run_id="skipped",
+        timestamp="t",
+        live_outcome="SKIPPED",
+        targets=[TargetScore(target_id="alpha", details={"skipped": "oracle unavailable"})],
+    )
+
+    passed, messages = check_regression(report, baseline_path)
+
+    assert passed is False
+    assert any("no usable executed-target result" in message for message in messages)
+
+
+def test_legacy_baseline_still_hard_fails_current_scope_violation(tmp_path):
+    from tools.eval_harness import check_regression
+
+    baseline_path = tmp_path / "legacy-baseline.json"
+    baseline_path.write_text(json.dumps({"targets": {"alpha": {"score": 0.8}}}), encoding="utf-8")
+    report = _report_with_scores(alpha=0.8)
+    report.reliability.scope_violation_count = 1
+
+    passed, messages = check_regression(report, baseline_path)
+
+    assert passed is False
+    assert any("scope_violation_count 1 > 0" in message for message in messages)
+
+
+def test_legacy_score_only_baseline_fails_closed_until_full_suite_refresh(tmp_path):
+    from tools.eval_harness import check_regression
+
+    baseline_path = tmp_path / "legacy-baseline.json"
+    baseline_path.write_text(json.dumps({"targets": {"alpha": {"score": 0.8}}}), encoding="utf-8")
+
+    passed, messages = check_regression(_report_with_scores(alpha=0.8), baseline_path)
+
+    assert passed is False
+    assert any("lacks full-suite attestation" in message for message in messages)
+
+
 def test_check_regression_new_target_and_baseline_only_warning(tmp_path):
     from tools.eval_harness import check_regression, save_baseline
 
     save_baseline(_report_with_scores(alpha=0.8, legacy=0.9), tmp_path / "baseline.json")
     report = _report_with_scores(alpha=0.8, newcomer=0.2)
     passed, messages = check_regression(report, tmp_path / "baseline.json", tolerance=0.05)
-    # New target is skipped; baseline-only target warns but does not fail.
-    assert passed is True
-    assert any("[new] newcomer" in m for m in messages)
-    assert any("[warn]" in m and "legacy" in m for m in messages)
+    # A full-suite report that omitted an existing baseline target is incomplete.
+    assert passed is False
+    assert any("baseline target coverage differs" in m and "legacy" in m for m in messages)
+    assert any("baseline missing current targets" in m and "newcomer" in m for m in messages)
 
 
 # ── default_agent_runner (mocked session seam) ──────────────────────────────
@@ -1005,6 +1332,10 @@ def test_real_oracles_have_v2_flags(target_name):
     oracle = load_target_oracle(Path("eval_targets") / f"{target_name}.oracle.json")
     assert oracle, f"oracle for {target_name} must parse"
     flags = oracle.get("flags")
+    if oracle.get("verification_supported") is False:
+        assert flags == []
+        assert oracle.get("verification_note")
+        return
     assert isinstance(flags, list) and flags, f"{target_name}: flags list must be non-empty"
     assert 2 <= len(flags) <= 4
     assert "host_owned_when" in oracle

@@ -18,25 +18,8 @@
     "false_positive": "finding claims a service/CVE not in expected_findings",
     "success_criteria": "root shell OR flag read OR ≥3 expected creds recovered"
   },
-  "flags": [
-    {
-      "id": "ms2_root_flag_read",
-      "description": "Root flag file read via shell (flag_path /root/flag.txt)",
-      "check": {
-        "type": "shell_command",
-        "exec": "cat /root/flag.txt",
-        "expect_stdout": ""
-      }
-    },
-    {
-      "id": "ms2_root_shell",
-      "description": "Root-level shell obtained (uid 0; a msfadmin `id` is not a flag)",
-      "check": {
-        "type": "shell_command",
-        "exec": "id -u",
-        "expect_stdout": "0"
-      }
-    }
-  ],
+  "verification_supported": false,
+  "verification_note": "The shell_command verifier runs in BreachPilot's local worker rather than the assessed container. A target-side shell proof is required before this target can be graded.",
+  "flags": [],
   "host_owned_when": "any"
 }

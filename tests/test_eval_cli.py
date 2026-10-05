@@ -91,6 +91,22 @@ def test_legacy_eval_target_routes_to_run_eval(monkeypatch, tmp_path):
     assert len(calls) == 1
 
 
+@pytest.mark.parametrize("baseline_flag", ["--check-regression", "--save-baseline"])
+def test_legacy_eval_rejects_unsupported_baseline_flags(monkeypatch, tmp_path, capsys, baseline_flag):
+    import main as main_mod
+
+    async def _must_not_run(args):  # noqa: ANN001
+        raise AssertionError("unsupported baseline flags must stop before the legacy eval runs")
+
+    monkeypatch.setattr("tools.eval_harness.run_eval", _must_not_run)
+
+    rc = main_mod.main(["--eval", "--target", "10.0.0.5", baseline_flag, "--config", str(tmp_path / "config.yaml")])
+
+    assert rc == 2
+    captured = capsys.readouterr()
+    assert "require the graded --eval path" in captured.out + captured.err
+
+
 # --- graded suite path ---
 
 
@@ -150,6 +166,17 @@ def test_check_regression_failure_exits_nonzero(monkeypatch, tmp_path):
 
     rc = main_mod.main(["--eval", "--check-regression", "--config", str(tmp_path / "config.yaml")])
     assert rc == 1
+
+
+def test_failed_regression_check_does_not_replace_baseline(monkeypatch, tmp_path):
+    import main as main_mod
+
+    seen = _patch_graded(monkeypatch, regression=(False, ["regressed: dvwa 0.20 < 0.50 - 0.05"]))
+
+    rc = main_mod.main(["--eval", "--check-regression", "--save-baseline", "--config", str(tmp_path / "config.yaml")])
+
+    assert rc == 1
+    assert "baseline_saved" not in seen
 
 
 def test_save_baseline_composes_with_eval(monkeypatch, tmp_path):

@@ -157,16 +157,69 @@ def test_target_score_composite_math():
     assert score.score == 1.0
 
 
+def test_target_state_without_a_verified_agent_finding_is_not_success():
+    oracle = {"target_id": "t9", "host_owned_when": "any"}
+    flags = [eh.FlagCheckResult(flag_id="f", passed=True, detail="ok", check={})]
+    suite_result = eh.EvalSuiteResult(
+        target_id="t9", true_positives=0, false_positives=0, expected_total=1, success=False
+    )
+
+    score = _graded._build_target_score("t9", oracle, flags, suite_result, findings_claimed=0)
+
+    assert score.hosts_owned == 1
+    assert score.success is False
+    assert score.details["success_requires_verified_agent_finding"] is True
+
+
 def test_baseline_save_and_regression(tmp_path: Path):
-    report = eh.EvalReport(run_id="base", timestamp="t")
+    def report_for(run_id: str, score: float) -> eh.EvalReport:
+        report = eh.EvalReport(
+            run_id=run_id,
+            timestamp="t",
+            full_suite=True,
+            live_outcome=eh.LiveOutcome.PASS,
+            provenance=eh.RunProvenance(
+                model_alias="test",
+                provider="fake",
+                model_id="test-model",
+                model_version="1",
+                temperature="0",
+                seed="42",
+                action_budget=30,
+                max_rounds=30,
+                scenario_version="oracle-sha",
+                code_revision="abc1234",
+                breachpilot_version="0.68.4",
+                config_hash="c" * 16,
+                prompt_hash="p" * 16,
+                tool_catalog_hash="t" * 16,
+                skill_catalog_hash="s" * 16,
+                sandbox_enabled=True,
+                sandbox_image="worker:sha",
+                sandbox_image_digest="sha256:" + "a" * 64,
+                orchestration_mode="agent",
+                provider_adapter_version="1",
+            ),
+        )
+        report.reliability.scope_violation_count = 0
+        report.targets.append(
+            eh.TargetScore(
+                target_id="t1",
+                score=score,
+                flags_total=1,
+                hosts_total=1,
+                details={"findings_false_positives": 0},
+            )
+        )
+        return report
+
+    report = report_for("base", 0.5)
     baseline = tmp_path / "baseline.json"
     eh.save_baseline(report, baseline)
     passed, _messages = eh.check_regression(report, baseline)
     assert passed is True
-    worse = eh.EvalReport(run_id="worse", timestamp="t")
-    worse.targets.append(eh.TargetScore(target_id="t1", score=0.9, flags_total=1, hosts_total=1, findings_claimed=1))
-    first = eh.EvalReport(run_id="first", timestamp="t")
-    first.targets.append(eh.TargetScore(target_id="t1", score=0.1, flags_total=1, hosts_total=1, findings_claimed=1))
+    worse = report_for("worse", 0.9)
+    first = report_for("first", 0.1)
     eh.save_baseline(worse, baseline)
     passed, messages = eh.check_regression(first, baseline)
     assert passed is False

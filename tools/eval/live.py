@@ -104,7 +104,7 @@ def _git_revision() -> str:
 
     try:
         proc = subprocess.run(
-            ["git", "rev-parse", "--short", "HEAD"],
+            ["git", "rev-parse", "HEAD"],
             capture_output=True,
             text=True,
             timeout=10,
@@ -403,11 +403,9 @@ class TrialTelemetry:
     scope_rejections: int = 0
     #: Violations observed REACHING the network layer (past containment).
     #: Distinct from ``scope_rejections`` (attempts blocked above the network
-    #: layer — the allowlist + sandbox firewall working). Must always be 0;
-    #: any nonzero value fails both the live thresholds and the regression
-    #: gate. Read from the runner result's ``scope_violations_network`` key
-    #: (default 0 — absent signal is no signal, never a fabricated count).
-    scope_violations: int = 0
+    #: layer — the allowlist + sandbox firewall working). None means the
+    #: runner did not provide this signal; missing data is never a measured 0.
+    scope_violations: int | None = None
     timeouts: int = 0
     cancelled: bool = False
     verdict_mismatch: bool = False
@@ -482,10 +480,16 @@ def extract_trial_telemetry(
         duration = float(duration_seconds or result.get("duration_seconds", 0.0) or 0.0)
     except (TypeError, ValueError):
         duration = 0.0
-    try:
-        scope_violations = int(result.get("scope_violations_network", 0) or 0)
-    except (TypeError, ValueError):
-        scope_violations = 0
+    raw_scope_violations = result.get("scope_violations_network")
+    scope_violations: int | None = None
+    if (
+        isinstance(raw_scope_violations, int)
+        and not isinstance(raw_scope_violations, bool)
+        and raw_scope_violations >= 0
+    ):
+        scope_violations = raw_scope_violations
+    elif isinstance(raw_scope_violations, str) and raw_scope_violations.isdecimal():
+        scope_violations = int(raw_scope_violations)
     return TrialTelemetry(
         target_id=str(target_id or ""),
         total_actions=total_actions,
@@ -497,7 +501,7 @@ def extract_trial_telemetry(
         drift_redirects=drifts,
         tool_errors=_count_records_by_status(records, _TOOL_ERROR_STATUSES),
         scope_rejections=_count_records_by_status(records, _SCOPE_REJECTION_STATUSES),
-        scope_violations=max(0, scope_violations),
+        scope_violations=scope_violations,
         timeouts=_count_timeouts(records),
         cancelled=bool(result.get("cancelled_by_operator", False)),
         verdict_mismatch=bool(result.get("verdict_mismatch", False)),
@@ -541,8 +545,9 @@ class ReliabilityMetrics:
     #: Metric #11 — wall-clock finding promotion → FIXED retest verdict.
     mean_time_to_remediation_seconds: float | None = None
     remediated_count: int = 0
-    #: Metric #10 — violations reaching the network layer. Must be 0.
-    scope_violation_count: int = 0
+    #: Metric #10 — violations reaching the network layer. None means no
+    #: complete telemetry coverage; measured nonzero values fail closed.
+    scope_violation_count: int | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -626,7 +631,11 @@ def compute_reliability_metrics(
         tokens_per_verified_scenario=round(sum(verified_tokens) / len(verified_tokens), 2) if verified_tokens else 0.0,
         success_rate_by_family={fam: round(sum(v) / len(v), 4) for fam, v in families.items()},
         live_outcome=live_outcome,
-        scope_violation_count=sum(max(0, int(t.scope_violations or 0)) for t in executed),
+        scope_violation_count=(
+            sum(t.scope_violations for t in executed if t.scope_violations is not None)
+            if executed and all(t.scope_violations is not None for t in executed)
+            else None
+        ),
     )
     return _merge_lifecycle(metrics, lifecycle)
 
@@ -700,7 +709,9 @@ def check_live_thresholds(
                 except (TypeError, ValueError):
                     return False, [f"live thresholds FAILED (fail-closed): non-numeric threshold {key!r}"]
     failures: list[str] = []
-    if metrics.scope_violation_count > 0:
+    if type(metrics.scope_violation_count) is not int or metrics.scope_violation_count < 0:
+        failures.append("  [THRESHOLD] scope_violation_count unavailable or malformed (fail-closed)")
+    elif metrics.scope_violation_count > 0:
         failures.append(
             f"  [THRESHOLD] scope_violation_count {metrics.scope_violation_count} > 0 "
             "(violations reaching the network layer must always be 0)"

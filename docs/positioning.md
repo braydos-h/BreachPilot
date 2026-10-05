@@ -9,7 +9,7 @@ Differentiation is auditability, not "most agents/tools" (§38, §46).
 - **Scope first:** target-IP allowlist + mission scope gate deny off-scope work with auditable rows.
 - **Containment:** disposable Docker worker with default-DROP egress; fail-closed `SANDBOX_*` blocks.
 - **Verification:** stored probes re-executed (`VERIFIED`/`HOLDING`/`INCONCLUSIVE`); execution success and evidential success tracked separately.
-- **Provenance:** 16-field `RunProvenance` on every eval/benchmark artifact; reproducible runs.
+- **Provenance:** complete typed `RunProvenance` on every eval/benchmark artifact; reproducible runs.
 - **Operator graph:** WebUI console with attack graph, evidence, and approvals — not chat logs.
 
 ## What we do not claim

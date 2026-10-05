@@ -79,6 +79,13 @@ def test_oracle_files_parse(oracle_name):
     assert "scoring" in oracle
 
 
+def test_kubernetes_placeholder_oracle_is_explicitly_unverifiable():
+    oracle = load_target_oracle(Path("eval_targets/vulnerable_k8s.oracle.json"))
+
+    assert oracle["verification_supported"] is False
+    assert "HTTP echo stub" in oracle["verification_note"]
+
+
 def test_metasploitable2_oracle_has_expected_creds():
     oracle = load_target_oracle("eval_targets/metasploitable2.oracle.json")
     creds = oracle["expected_findings"]["weak_credentials"]
@@ -323,3 +330,41 @@ async def test_run_eval_suite_scores_against_oracles(tmp_path, monkeypatch):
     assert "b" in report["targets"]
     assert report["targets"]["a"]["true_positives"] == 0
     assert report["aggregate"]["targets_run"] == 2
+
+
+@pytest.mark.asyncio
+async def test_run_eval_suite_skips_targets_without_independent_verification(tmp_path, monkeypatch):
+    oracle_dir = tmp_path / "targets"
+    oracle_dir.mkdir()
+    (oracle_dir / "unsupported.oracle.json").write_text(
+        json.dumps(
+            {
+                "target_id": "unsupported",
+                "host": "127.0.0.1",
+                "verification_supported": False,
+                "verification_note": "the local runner cannot prove this target outcome",
+            }
+        ),
+        encoding="utf-8",
+    )
+    called = False
+
+    async def _unexpected_run_eval(_args):
+        nonlocal called
+        called = True
+        return 0
+
+    monkeypatch.setattr("tools.eval_harness.run_eval", _unexpected_run_eval)
+    monkeypatch.chdir(tmp_path)
+
+    from argparse import Namespace
+
+    report = await run_eval_suite(
+        Namespace(target="127.0.0.1", config=tmp_path / "config.yaml"),
+        compose_up=False,
+        compose_down=False,
+        oracle_dir=oracle_dir,
+    )
+
+    assert called is False
+    assert report["targets"]["unsupported"]["skipped"] is True

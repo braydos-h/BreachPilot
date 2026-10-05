@@ -25,7 +25,8 @@ Semantics shared by all types:
   flag file yields empty stdout, which *does* fail an any-output expect).
 - **Empty ``expect_stdout`` = any output.** A check expecting any output passes
   when the executor produced non-empty text; an explicit ``expect_stdout``
-  substring must appear in the output.
+  substring must appear in the output. ``expect_stdout_exact`` compares the
+  trimmed output exactly.
 
 This module is deliberately separate from :mod:`tools.eval_harness` to keep the
 harness under the CI god-file budget (no new file >1000 LOC / 72kB).
@@ -142,6 +143,36 @@ def _mcp_result_text(result: Any) -> str:
     return str(result)
 
 
+def _terminal_command_output(result_text: str) -> str | None:
+    """Extract stdout from a completed terminal envelope, excluding metadata.
+
+    The production terminal tool returns status, command, attempt ID, and
+    sandbox metadata alongside stdout. Those fields are not command evidence:
+    in particular, exit_code=0 must never satisfy a check expecting stdout 0.
+    Legacy injected test/executor strings without the envelope remain readable.
+    """
+    if not result_text.startswith("TERMINAL_RESULT:"):
+        return result_text
+    header, separator, _rest = result_text.partition("\n")
+    if not separator:
+        return None
+    status = header.removeprefix("TERMINAL_RESULT:").strip().split(" ", 1)[0].lower()
+    if status not in {"completed", "failed"}:
+        return None
+    code_marker = "exit_code="
+    if code_marker not in header:
+        return None
+    raw_code = header.split(code_marker, 1)[1].split(",", 1)[0].rstrip(")")
+    try:
+        int(raw_code)
+    except ValueError:
+        return None
+    output_marker = "\nOUTPUT:\n"
+    if output_marker not in result_text:
+        return None
+    return result_text.split(output_marker, 1)[1]
+
+
 def _shell_via_session(session: Any, command: str, loop: Any, timeout: float) -> str | None:
     """Run ``command`` through the injected session; ``None`` = UNVERIFIED.
 
@@ -159,7 +190,8 @@ def _shell_via_session(session: Any, command: str, loop: Any, timeout: float) ->
     """
     try:
         if callable(session) and not callable(getattr(session, "call_tool", None)):
-            return _mcp_result_text(session("run_exploit_terminal", {"command": command}))
+            result = session("run_exploit_terminal", {"command": command})
+            return _terminal_command_output(_mcp_result_text(result))
         call_tool = getattr(session, "call_tool", None)
         if call_tool is None:
             return None
@@ -167,8 +199,9 @@ def _shell_via_session(session: Any, command: str, loop: Any, timeout: float) ->
             if loop is None:
                 return None  # async session with no bound loop -> cannot bridge safely
             future = asyncio.run_coroutine_threadsafe(call_tool("run_exploit_terminal", {"command": command}), loop)
-            return _mcp_result_text(future.result(timeout=timeout))
-        return _mcp_result_text(call_tool("run_exploit_terminal", {"command": command}))
+            return _terminal_command_output(_mcp_result_text(future.result(timeout=timeout)))
+        result = call_tool("run_exploit_terminal", {"command": command})
+        return _terminal_command_output(_mcp_result_text(result))
     except Exception:  # noqa: BLE001 -- any executor failure degrades to UNVERIFIED, never raises
         return None
 
@@ -282,6 +315,12 @@ def _check_shell_command(check: dict[str, Any], session: Any, loop: Any, timeout
     if output is None:
         return False, "UNVERIFIED: shell_command executor failed (or async session without a bound loop)"
     expect_stdout = check.get("expect_stdout")
+    expect_stdout_exact = check.get("expect_stdout_exact")
+    if expect_stdout_exact is not None:
+        expected = str(expect_stdout_exact).strip()
+        if output.strip() == expected:
+            return True, "shell_command: exact stdout matched"
+        return False, "shell_command: exact stdout did not match"
     if expect_stdout is None or str(expect_stdout) == "":
         # Empty expect = any output. Nonzero exit is tolerated; only evidence
         # of output counts (a missing flag file cats nothing).

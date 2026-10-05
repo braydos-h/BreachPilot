@@ -10,21 +10,27 @@ on:
   schedule:
     - cron: "17 3 * * *"
   workflow_dispatch:
+    inputs:
+      baseline_mode:
+        description: "Use the existing baseline or initialize it from this full-suite run"
+        type: choice
+        options:
+          - check
+          - initialize
+        default: check
+        required: true
   push:
     paths:
+      - "tools/eval/**"
       - "tools/eval_harness.py"
       - "tools/eval_checks.py"
       - "eval_targets/**"
       - "tests/test_eval_*.py"
   pull_request:
-    paths:
-      - "tools/eval_harness.py"
-      - "tools/eval_checks.py"
-      - "eval_targets/**"
-      - "tests/test_eval_*.py"
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
   eval-unit:
@@ -51,9 +57,8 @@ jobs:
     name: Nightly graded eval (live targets)
     runs-on: ubuntu-latest
     timeout-minutes: 60
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
     env:
-      OLLAMA_API_KEY: ${{ secrets.OLLAMA_API_KEY }}
       EXPLOIT_ALLOWED_TARGETS: 127.0.0.1
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
@@ -64,8 +69,18 @@ jobs:
           cache-dependency-path: |
             pyproject.toml
             requirements.txt
+      - name: Check whether live eval credentials are configured
+        id: credentials
+        env:
+          OLLAMA_API_KEY: ${{ secrets.OLLAMA_API_KEY }}
+        run: |
+          if [[ -n "$OLLAMA_API_KEY" ]]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+          fi
       - name: Record explicit SKIPPED report without OLLAMA_API_KEY
-        if: env.OLLAMA_API_KEY == ''
+        if: steps.credentials.outputs.available != 'true'
         run: |
           python -m pip install --upgrade pip
           python -m pip install -e ".[dev]"
@@ -78,24 +93,63 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
           echo "OLLAMA_API_KEY not set; wrote SKIPPED eval report (see artifact)."
       - name: Install project + dev dependencies
-        if: env.OLLAMA_API_KEY != ''
+        if: steps.credentials.outputs.available == 'true'
         run: |
           python -m pip install --upgrade pip
           python -m pip install -e ".[dev]"
+      - name: Restore the latest successful eval baseline
+        id: baseline
+        if: steps.credentials.outputs.available == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASELINE_MODE: ${{ github.event_name == 'workflow_dispatch' && inputs.baseline_mode || 'check' }}
+        run: |
+          mkdir -p reports/eval
+          if [[ "$BASELINE_MODE" == "initialize" ]]; then
+            echo "restored=false" >> "$GITHUB_OUTPUT"
+            echo "Baseline initialization requested; this run will establish the trusted baseline."
+            exit 0
+          fi
+          while IFS= read -r run_id; do
+            [[ -n "$run_id" ]] || continue
+            candidate_dir="$(mktemp -d)"
+            if gh run download "$run_id" --name eval-reports --dir "$candidate_dir" >/dev/null 2>&1; then
+              baseline_file="$(find "$candidate_dir" -type f -name baseline.json -print -quit)"
+              if [[ -n "$baseline_file" ]]; then
+                cp "$baseline_file" reports/eval/baseline.json
+                echo "restored=true" >> "$GITHUB_OUTPUT"
+                echo "Restored baseline from successful eval run $run_id."
+                exit 0
+              fi
+            fi
+            rm -rf "$candidate_dir"
+          done < <(gh run list --workflow eval.yml --branch main --status success --limit 20 --json databaseId --jq '.[].databaseId')
+          echo "restored=false" >> "$GITHUB_OUTPUT"
+          echo "No prior successful eval artifact contains a baseline; the regression gate will fail closed."
       - name: Start eval target suite (docker compose)
-        if: env.OLLAMA_API_KEY != ''
+        if: steps.credentials.outputs.available == 'true'
         run: docker compose -f eval_targets/docker-compose.yml up -d
-      - name: Run graded eval suite
-        if: env.OLLAMA_API_KEY != ''
-        run: python main.py --eval --save-baseline
-      - name: Hermetic benchmark repeats (min n=5 per target)
-        if: env.OLLAMA_API_KEY != ''
-        run: python main.py --benchmark xben --trials 5
-      - name: Regression gate (fail on hard regressions vs baseline)
-        if: env.OLLAMA_API_KEY != ''
-        run: python main.py --eval --check-regression
+      - name: Build required sandbox worker image
+        if: steps.credentials.outputs.available == 'true'
+        run: docker build -t breachpilot-sandbox:latest docker/sandbox
+      - name: Run graded eval and regression gate
+        if: steps.credentials.outputs.available == 'true'
+        env:
+          OLLAMA_API_KEY: ${{ secrets.OLLAMA_API_KEY }}
+          BASELINE_MODE: ${{ github.event_name == 'workflow_dispatch' && inputs.baseline_mode || 'check' }}
+        run: |
+          if [[ "$BASELINE_MODE" == "initialize" ]]; then
+            python main.py --eval --save-baseline
+          else
+            python main.py --eval --save-baseline --check-regression
+          fi
+      - name: Single-trial XBEN lab smoke (host targets do not support automatic reset)
+        if: steps.credentials.outputs.available == 'true'
+        env:
+          OLLAMA_API_KEY: ${{ secrets.OLLAMA_API_KEY }}
+        run: python main.py --benchmark xben --trials 1
       - name: Stop eval target suite
-        if: always() && env.OLLAMA_API_KEY != ''
+        if: always() && steps.credentials.outputs.available == 'true'
         run: docker compose -f eval_targets/docker-compose.yml down
       - name: Upload eval reports
         if: always()

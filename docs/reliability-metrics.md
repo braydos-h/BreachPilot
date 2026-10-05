@@ -5,8 +5,9 @@ generated catalogs already said 146/167). Counts also say nothing about
 whether the autonomous agent finds and proves vulnerabilities without
 lying, looping, leaving scope, or breaking its environment.
 
-These are the release-grade numbers instead. Every one is defined here,
-implemented in code, and reproducible from stored artifacts.
+These are the release-grade numbers instead. Every one is defined here, with
+collection status called out below; a defined metric is not claimed as
+measured evidence until its producer is wired and the report records it.
 
 ## Metric definitions and sources
 
@@ -14,14 +15,14 @@ implemented in code, and reproducible from stored artifacts.
 |---|---|---|---|
 | 1 | Verified compromise rate | Fraction of executed targets where the independent oracle confirms success | `tools/eval_harness.py::ReliabilityMetrics.verified_compromise_rate` / `tools/benchmark/metrics.py::verified_success_rate` |
 | 2 | False-compromise rate | Fraction where the agent claimed success (`compromises: N>0`) but the oracle disagrees | `false_compromise_rate` / `false_positive_rate` (same modules) |
-| 3 | Median actions to verified finding | Median `total_actions`/`tool_calls` over oracle-verified trials only | `mean_actions_to_verified_objective` / `median_tool_actions` |
+| 3 | Actions to verified finding | Mean `total_actions` across verified eval targets; median tool actions across verified benchmark trials | `mean_actions_to_verified_objective` / `median_tool_actions` |
 | 4 | Cost per verified finding | Total estimated cost / verified trials (tokens × pricing where configured) | `total_tokens` + `estimated_cost` in benchmark summaries; eval records `tokens_per_verified_scenario` |
 | 5 | Run completion rate | Completed trials / total trials (excludes `SKIPPED`/`INFRASTRUCTURE_ERROR`, which say nothing about ability) | `trials_completed / trials_total` (`compute_run_summary`) |
 | 6 | Stuck-loop rate | Fraction of executed targets with a stuck-loop signal | `stuck_loop_rate` |
 | 7 | Duplicate action rate | Duplicate/blocked-action count over executed targets | `duplicate_action_count` + `attack_focus.duplicate_blocks` |
 | 8 | Tool failure rate | Fraction of targets with ≥1 tool execution error | `tool_error_rate` |
-| 9 | Findings reproduced twice | Fraction of verified findings that re-verify on an independent re-run | `tools/mcp_tools/verify.py::is_reproduced_twice` / `count_reproduced_twice` (proof-capsule runs ≥2, or ≥2 VERIFIED verdicts) → `tools/eval_harness.py::aggregate_finding_lifecycle` → `ReliabilityMetrics.findings_reproduced_twice_rate`; benchmark run level: `ScenarioSummary.reproduced_twice` (verified ≥2 across ≥2 trials via `meets_repeated_trials_gate`) → `RunSummary.reproduced_twice_rate` |
-| 10 | Scope violations reaching network layer | Must always be **0**; the allowlist + sandbox netns firewall enforce it | Sandbox network policy + `scope_rejection_rate` (attempts blocked above the network layer) + `scope_violation_count` (observed past containment — `TrialTelemetry.scope_violations` / benchmark `TrialResult.scope_violations`); any nonzero count fails live thresholds and both regression gates |
+| 9 | Findings reproduced twice | Fraction of verified findings that re-verify on an independent re-run | `tools/mcp_tools/verify.py::is_reproduced_twice` / `count_reproduced_twice` (proof-capsule runs ≥2, or ≥2 VERIFIED verdicts) → `tools/eval_harness.py::aggregate_finding_lifecycle` → `ReliabilityMetrics.findings_reproduced_twice_rate`; benchmark run level: `ScenarioSummary.reproduced_twice` (verified ≥2 across ≥2 trials via `meets_repeated_trials_gate`) → `RunSummary.reproduced_twice_rate` (null when no scenario has a verified trial) |
+| 10 | Scope violations reaching network layer | Must always be **0**; the allowlist + sandbox netns firewall enforce it | `scope_rejection_rate` records attempts blocked before the network layer. The `scope_violation_count` consumer and gates exist, but the runtime producer that observes violations past containment is not wired yet; reports preserve this as unavailable and release/baseline gates fail closed. |
 | 11 | Mean time finding → verified remediation | Wall-clock from finding promotion to `FIXED` retest verdict | `tools/mcp_tools/retest.py::aggregate_retest_lifecycle` (last `FIXED` − first `VERIFIED` over parseable timestamps; unparseable excluded, never fabricated) → `ReliabilityMetrics.mean_time_to_remediation_seconds` / `remediated_count` |
 
 ## Outcome taxonomy
@@ -65,7 +66,9 @@ Aggregation for the two pending metrics is wired (no live numbers yet):
   `tools/mcp_tools/verify.py::count_reproduced_twice` (repeated-trials gate:
   ≥2 independent proof runs) into `ReliabilityMetrics`, and per-scenario via
   `ScenarioSummary.reproduced_twice` (verified ≥2 across ≥2 trials) into
-  `RunSummary.reproduced_twice_rate`. Plan-level repeatability (pre-commit
+  `RunSummary.reproduced_twice_rate`. When the rate's denominator contains no
+  verified scenarios, the run summary stores `null` and the UI renders
+  unavailable instead of reporting a measured 0%. Plan-level repeatability (pre-commit
   critique agreement) is separate: `tools/replay_simulator.py::simulate_repeated`.
 - **Mean time finding → verified remediation (#11)** — `FIXED` lifecycle
   aggregates via `tools/mcp_tools/retest.py::aggregate_retest_lifecycle`
@@ -87,13 +90,18 @@ below — not a capability count.
 
 ### How the next docker-lab run fills the table (no reformatting needed)
 
-Hermetic repeats — minimum n=5 per target, docker lab + model backend:
+The shipped XBEN targets use `reset_strategy: none`; run one trial per
+benchmark invocation. Independent repeated-trial evidence for eval requires
+five passing full-suite runs with identical executed-target coverage and
+identical required provenance pins, including code revision. This release
+evidence rule is stricter than the regression baseline, which allows source
+revision changes while requiring the runtime and configuration pins to match.
 
 ```bash
 # 1. Start the pinned eval-target suite
 docker compose -f eval_targets/docker-compose.yml up -d
-# 2. Hermetic benchmark repeats (min n=5 per target)
-python main.py --benchmark xben --trials 5
+# 2. One XBEN benchmark trial; these targets cannot be reset automatically
+python main.py --benchmark xben --trials 1
 # 3. Graded eval + regression gate (both green required)
 python main.py --eval --save-baseline
 python main.py --eval --check-regression
@@ -101,18 +109,19 @@ python main.py --eval --check-regression
 docker compose -f eval_targets/docker-compose.yml down
 ```
 
-Required digests (record all five per run; no numbers without them):
+Required digests (no release numbers without pinned provenance):
 
-- Model + prompt + tool/skill catalog digests and the sandbox image digest
-  come from `tools/eval_harness.py::build_run_provenance` (stored on every
-  eval/benchmark report under `provenance`). All five are content-addressed
-  (sha256 of file bytes / docker RepoDigests, never mtimes), so a fresh
-  clone of an identical tree records identical pins.
+- Eval reports record model, prompt/catalog, configuration, and sandbox
+  provenance from `tools/eval_harness.py::build_run_provenance`. Benchmark
+  replay manifests record their documented environment and run-shape pins;
+  fields unavailable in a local environment remain unknown and do not establish
+  reproducibility.
 - Target-set digest: the oracle files actually executed
   (`eval_targets/*.oracle.json`), likewise content-hashed into
   `provenance.scenario_version`.
-- Minimum n=5 hermetic trials per target (`--trials 5`); fewer is a pilot,
-  not a release number. `SKIPPED`/`INFRA_ERROR` outcomes are stored via
+- Minimum five independent full-suite eval runs with identical executed
+  target coverage for repeated evidence. Benchmark targets without reset
+  support remain single-trial. `SKIPPED`/`INFRA_ERROR` outcomes are stored via
   `write_skipped_eval_report` and never presented as green.
 
 Negative controls (always included; scored by `score_against_oracle`):
@@ -141,14 +150,14 @@ are claimed here. The next hermetic run fills one row per metric; Wilson
 |---|---|---|---|---|---|
 | 1 | Verified compromise rate | — | UNPOPULATED | — | — |
 | 2 | False-compromise rate | — | UNPOPULATED | — | — |
-| 3 | Median actions to verified finding | — | UNPOPULATED | — | — |
+| 3 | Actions to verified finding | — | UNPOPULATED | — | — |
 | 4 | Cost per verified finding | — | UNPOPULATED | — | — |
 | 5 | Run completion rate | — | UNPOPULATED | — | — |
 | 6 | Stuck-loop rate | — | UNPOPULATED | — | — |
 | 7 | Duplicate action rate | — | UNPOPULATED | — | — |
 | 8 | Tool failure rate | — | UNPOPULATED | — | — |
 | 9 | Findings reproduced twice | — | UNPOPULATED (aggregation wired: `count_reproduced_twice` + `reproduced_twice_rate`) | — | — |
-| 10 | Scope violations reaching network layer | — | must read **0** | — | — |
+| 10 | Scope violations reaching network layer | — | unavailable until a producer is wired; release gates fail closed | — | — |
 | 11 | Mean time finding → verified remediation | — | UNPOPULATED (collection wired: `aggregate_retest_lifecycle`) | — | — |
 
 ## Reproduce
@@ -156,17 +165,16 @@ are claimed here. The next hermetic run fills one row per metric; Wilson
 ```bash
 # Mocked unit coverage (no keys, no docker)
 python -m pytest tests/test_eval_live_outcome.py tests/test_benchmark_metrics.py tests/test_reliability_metrics.py -q -p no:cacheprovider -n 0
-# Hermetic benchmark suite (needs docker lab + model backend)
-python main.py --benchmark xben --trials 5
-# Graded eval with regression gate (score drift + false-compromise /
-# scope-violation / stuck-loop gates — all HARD)
-python main.py --eval --save-baseline
-python main.py --eval --check-regression
+# XBEN targets currently use reset_strategy=none; run one trial per lab reset
+python main.py --benchmark xben --trials 1
+# Initialize once from trusted PASS evidence; saving requires measured scope
+# telemetry equal to zero. On later runs, check and refresh atomically:
+python main.py --eval --save-baseline --check-regression
 ```
 
 ## Capability catalogs (generated, not headline)
 
-- Tools: `docs/mcp/tool-catalog-generated.md` (see `docs/generated/capability-counts.json` for live counts — 167 tools across 37 families as of 2026-09-14)
+- Tools: `docs/mcp/tool-catalog-generated.md` (see `docs/generated/capability-counts.json` for current live counts)
 - Skills: `docs/skills/catalog.md` (146 skills: 139 top-level + 7 `maybe/` tier; see `docs/generated/capability-counts.json`)
 - These files are generated from source; headline copy must link to them,
   never hardcode a count that will rot. `python scripts/generate_capability_counts.py --check` fails CI on drift.

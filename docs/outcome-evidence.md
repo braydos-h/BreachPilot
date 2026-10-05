@@ -34,6 +34,12 @@ Flow A's equivalent is `OperationalStatus` (outcome_truth.py:46-51):
 death is `execution_unknown`, never `failed`, so it does not trip policy
 unavailability thresholds (outcome_truth.py:10-13).
 
+The memoryless campaign FSM adapter (`tools/campaign/planner_step.py`) maps a
+completed operation to planner-step `success` so later planned checks can run.
+That result only marks the step complete: `verified_success` and the campaign
+state's access/compromise fields remain governed by the separate exploit and
+evidence checks in `tools/campaign/executor.py`.
+
 ### 2. Evidential status — did the evidence resolve the hypothesis?
 
 `HypothesisStatus` (outcome_judge.py:29-36): `open` → `confirmed` | `refuted` |

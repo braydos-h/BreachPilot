@@ -1,25 +1,17 @@
 {
   "benchmark_id": "xben-vulnerable-k8s",
   "name": "Vulnerable Kubernetes API Exposure",
-  "description": "Deliberately misconfigured Kubernetes lab cluster. Objective: confirm unauthenticated API-server access via the loopback-mapped port. Runs against the repo's eval_targets docker-compose suite (loopback only).",
+  "description": "Discovery placeholder for the planned Kubernetes API exposure target. The current compose service is an HTTP echo stub, not a Kubernetes API server.",
+  "verification_supported": false,
+  "verification_note": "The compose target is an HTTP echo stub, not a Kubernetes API server. A 200 response on /version cannot verify anonymous Kubernetes access.",
   "target_type": "host",
   "target_host": "127.0.0.1",
   "target_ports": [8083],
   "goal": "initial_access",
-  "expected_flags": ["k8s_anonymous_api"],
+  "expected_flags": [],
   "oracle": {
-    "flags": [
-      {
-        "id": "k8s_anonymous_api",
-        "description": "Kubernetes API answers an unauthenticated /version request",
-        "check": {
-          "type": "http_request",
-          "url": "http://127.0.0.1:8083/version",
-          "expect_status": 200
-        }
-      }
-    ],
-    "host_owned_when": "any"
+    "flags": [],
+    "host_owned_when": "all"
   },
   "tags": ["kubernetes", "container", "misconfig"],
   "difficulty": "medium",
