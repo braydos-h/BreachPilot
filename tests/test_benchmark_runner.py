@@ -151,8 +151,11 @@ async def test_verify_propagates_cancellation_group_from_session_start(monkeypat
 
     from tools.benchmark.models import TrialResult
 
+    seen_workspaces: list[Path] = []
+
     @asynccontextmanager
-    async def cancelled_session(**_kwargs):
+    async def cancelled_session(*, workspace: Path, **_kwargs):
+        seen_workspaces.append(workspace)
         raise BaseExceptionGroup("verifier startup", [asyncio.CancelledError("run cancelled")])
         yield None  # pragma: no cover
 
@@ -168,7 +171,9 @@ async def test_verify_propagates_cancellation_group_from_session_start(monkeypat
             SimpleNamespace(target_host="192.0.2.10", scenario_id="s1"),
             TrialResult(trial_id="trial-1", scenario_id="s1"),
             EventLogger(),
+            workspace=tmp_path,
         )
+    assert seen_workspaces == [tmp_path]
 
 
 def test_failed_trial_no_exploit_path(tmp_path, runner_cls_patched):

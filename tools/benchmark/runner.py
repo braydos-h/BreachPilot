@@ -544,7 +544,7 @@ class BenchmarkRunner:
             },
         )
         try:
-            outcome = await self._verify(scenario, trial, event_logger)
+            outcome = await self._verify(scenario, trial, event_logger, workspace=workspace)
             trial.flags = outcome.to_dict_list()
             trial.flags_captured = outcome.flags_captured
             trial.flags_total = outcome.flags_total
@@ -586,7 +586,9 @@ class BenchmarkRunner:
         trial.ended_at = datetime.now(timezone.utc).isoformat()
         return trial
 
-    async def _verify(self, scenario: Any, trial: TrialResult, event_logger: BenchmarkEventLogger) -> Any:
+    async def _verify(
+        self, scenario: Any, trial: TrialResult, event_logger: BenchmarkEventLogger, *, workspace: Path
+    ) -> Any:
         """Verify with a dedicated soft-fail session (never the agent's session)."""
         session = None
         cm = None
@@ -599,6 +601,7 @@ class BenchmarkRunner:
                 config_path=self.config_path,
                 target_ip=scenario.target_host,
                 exploit_port=int(self.config.get("mcp", {}).get("http_port", 8001) or 8001),
+                workspace=workspace,
                 soft_fail=True,
             )
             session = await cm.__aenter__()
@@ -628,7 +631,7 @@ class BenchmarkRunner:
             verifier = (
                 self._verifier_factory(scenario)
                 if self._verifier_factory is not None
-                else IndependentVerifier(scenario, session=session, workspace=trial.workspace or None, loop=loop)
+                else IndependentVerifier(scenario, session=session, workspace=workspace, loop=loop)
             )
             return await verifier.verify()
         finally:
