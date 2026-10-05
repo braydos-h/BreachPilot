@@ -6,14 +6,16 @@ and is tracked as EXTERNAL in `scripts/release_gate.py` until applied.
 ## Required ruleset for `main`
 
 - No force pushes; no deletion.
-- PR required before merging (required human approvals: 0 is acceptable solo —
-  the rule that matters is *code doesn't land without automated verification*).
+- PR required before merging with at least one human approval and resolved
+  review threads.
 - Required status checks (must all be green):
   - `CI success` (the `ci` aggregator: tests, sandbox, browser, coverage,
     lint, types, package, webui, audit)
   - `Eval unit tests` (`eval-unit`)
   - CodeQL (`codeql`)
   - Dependency review (`dependency-review`)
+- No ruleset bypass actors. Solo review count may remain zero, as above; all
+  required automated checks and force-push/deletion protections still apply.
 - Dismiss stale approvals on new pushes (when approvals are required).
 
 ## Apply (maintainer, one time)
@@ -32,11 +34,16 @@ gh api repos/OWNER/REPO/rulesets -X POST -f - <<'JSON'
     {"type": "required_status_checks",
      "parameters": {"required_status_checks": [
        {"context": "CI success"},
-       {"context": "Eval unit tests (mocked, no API key)"}
-     ], "strict": true}},
-    {"type": "pull_request", "parameters": {"required_approving_review_count": 0,
-      "dismiss_stale_reviews_on_push": true, "require_code_owner_review": false}}
-  ]
+       {"context": "Eval unit tests (mocked, no API key)"},
+       {"context": "CodeQL / Analyze (python)"},
+       {"context": "CodeQL / Analyze (javascript)"},
+       {"context": "Dependency Review / dependency-review"}
+  ], "strict_required_status_checks_policy": true}},
+    {"type": "pull_request", "parameters": {"required_approving_review_count": 1,
+      "dismiss_stale_reviews_on_push": true, "required_review_thread_resolution": true,
+      "require_code_owner_review": false}}
+  ],
+  "bypass_actors": []
 }
 JSON
 ```
@@ -53,7 +60,8 @@ python scripts/release_gate.py --branch-rules-file branch-rules.json
 ```
 
 The gate passes `branch-rules-applied` when the JSON names `main`, shows
-active enforcement, and requires CI checks. Commit the file as a release
+active enforcement, requires fresh listed checks, a pull request with approval
+and resolved review threads, blocks deletion/force-push, and has no bypass actors. Commit the file as a release
 artifact (or pass it between `release.yml` jobs); missing file stays
 EXTERNAL, malformed file FAILs. See `docs/release.md` for the full
 artifact table.

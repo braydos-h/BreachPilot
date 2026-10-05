@@ -443,7 +443,7 @@ Keys consumed by the run service / API layer (`config.yaml`, see
 | `api.allowed_origins` | `[]` | Extra loopback origins for CORS/WS (`auth.py:89-118`) |
 | `api.event_buffer_size` | `256` | In-memory ring per run (`event_broker.py:29-37`) |
 | `api.shutdown_timeout_seconds` | `15` | Cancel wait before `504 cancel_timeout` (`run_manager.py:319-324`) |
-| `api.serve_webui` | `false` | Mount `webui/dist/` at `/` (`--web` sets in-memory) |
+| `api.serve_webui` | `false` | Mount checkout `webui/dist/` or installed `tools/webui/dist/` at `/` (`--web` sets in-memory) |
 | `long_session.request_timeout_seconds` | n/a | Model request timeout when `long_session` active (`service.py:337-343`) |
 
 **Env overrides:** `BREACHPILOT_API_TOKEN` (token, precedes token_file),

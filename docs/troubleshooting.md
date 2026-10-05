@@ -345,14 +345,15 @@ an exact fix. When in doubt, start with the diagnostics table below — the
 
 - **Symptom:** `--web` fails with `Node/npm not found on PATH` or
   `npm install exited 1`, or the SPA shows old content.
-- **Cause:** first `--web` run builds `webui/dist/`; it needs Node.js + npm
-  (`main.py:436`). The build is skipped when `dist/index.html` exists.
+- **Cause:** in a source checkout, first `--web` run builds `webui/dist/` and
+  needs Node.js + npm (`main.py:436`). An installed wheel uses
+  `tools/webui/dist/` and does not need Node.js to serve the UI.
 - **Check:** `Test-Path webui\dist\index.html` (Windows) /
   `test -f webui/dist/index.html` (Linux)
 - **Fix:**
   ```bash
   cd webui
-  npm install
+  npm ci
   npm run build
   cd ..
   python main.py --web

@@ -199,15 +199,20 @@ Data residency: loopback Ollama keeps prompts on-box (`local`); Ollama Cloud, Op
 
 ### Reliability over capability counts
 
-BreachPilot is graded on verified performance, not on how many tools or skills it ships. The headline numbers are the five release-grade rates in the [live reliability table](docs/reliability-metrics.md#live-results-unpopulated--awaiting-docker-lab-run) — verified compromise rate, false-compromise rate, scope violations reaching the network layer (must read 0), median actions to a verified finding, and findings reproduced twice — each with its reproduction command. No live numbers are claimed until hermetic trials produce them (minimum n=5 per target with pinned digests); until then the honest headline is the contract plus the commands, not a count.
+BreachPilot is graded on verified performance, not on how many tools or skills it ships. The headline numbers are the five release-grade rates in the [live reliability table](docs/reliability-metrics.md#live-results-unpopulated--awaiting-docker-lab-run) — verified compromise rate, false-compromise rate, scope violations reaching the network layer (must read 0), median actions to a verified finding, and findings reproduced twice — each with its reproduction command. No live numbers are claimed until hermetic trials produce them. The shipped XBEN targets currently have no reset mechanism and support one independent trial per scenario; repeated-trial reliability claims need reset-capable target infrastructure.
 
 ```bash
 docker compose -f eval_targets/docker-compose.yml up -d
-python main.py --benchmark xben --trials 5
+python main.py --benchmark xben --trials 1
+# These eval baseline commands currently fail closed until live scope telemetry is wired.
 python main.py --eval --save-baseline
 python main.py --eval --check-regression
 docker compose -f eval_targets/docker-compose.yml down
 ```
+
+For benchmark runs, `--timeout-seconds <SECONDS>` overrides the per-trial mission
+timeout (minimum 30 seconds); otherwise BreachPilot uses `benchmark.timeout_seconds`
+from the effective configuration.
 
 Inventory counts never appear in headlines: tool and skill totals live only in the generated catalogs — the [MCP tool catalog](docs/mcp/tool-catalog-generated.md) and [skill catalog](docs/skills/catalog.md), with live numbers in [`docs/generated/capability-counts.json`](docs/generated/capability-counts.json) (`python scripts/generate_capability_counts.py --check` fails CI on drift).
 

@@ -72,7 +72,7 @@ above follow `docs/architecture.md` and `CLAUDE.md`.
 | System | Primary implementation | Documentation |
 |---|---|---|
 | Attack module base, ranking registry, module families | `tools/attack_modules/base.py`, `tools/attack_modules/registry.py`, `tools/attack_modules/modules/`, `tools/attack_modules/graph.py`, `tools/attack_modules/artifacts.py` | [attack-modules.md](../attack-modules.md), [components/tools/attack-modules/overview.md](../components/tools/attack-modules/overview.md), [components/tools/attack-modules/registry.md](../components/tools/attack-modules/registry.md) |
-| Autonomous campaign engine (state, executor, phases, batch, preflight, persistence) | `tools/campaign/orchestrator.py`, `tools/campaign/state.py`, `tools/campaign/executor.py`, `tools/campaign/phases.py`, `tools/campaign/batch.py`, `tools/campaign/preflight.py`, `tools/campaign/state_store.py`, `tools/campaign/service_tasks.py`, `tools/autonomous_orchestrator.py` | [architecture.md](../architecture.md), [runtime-flows.md](../runtime-flows.md) |
+| Autonomous campaign engine (state, executor, planner adapter, phases, batch, preflight, persistence) | `tools/campaign/orchestrator.py`, `tools/campaign/state.py`, `tools/campaign/executor.py`, `tools/campaign/planner_step.py`, `tools/campaign/phases.py`, `tools/campaign/batch.py`, `tools/campaign/preflight.py`, `tools/campaign/state_store.py`, `tools/campaign/service_tasks.py`, `tools/autonomous_orchestrator.py` | [architecture.md](../architecture.md), [runtime-flows.md](../runtime-flows.md) |
 | Attack planner, payload crafter, exploit mutator | `tools/attack_planner.py`, `tools/payload_crafter.py`, `tools/exploit_mutator.py`, `tools/exploit_search.py` | [attack-modules.md](../attack-modules.md) |
 
 ## Exploit agent runner, policy, and swarm
@@ -101,7 +101,7 @@ individually re-read for this table.
 
 | System | Primary implementation | Documentation |
 |---|---|---|
-| Kernel (audit chain, allowlist, orchestration vocabulary, workspace, config) | `tools/kernel/audit.py`, `tools/kernel/allowlist.py`, `tools/kernel/orchestration.py`, `tools/kernel/workspace.py`, `tools/kernel/config.py`, `tools/kernel/parse.py`, `tools/kernel/discovered.py` | [components/tools/kernel/overview.md](../components/tools/kernel/overview.md), [safety-model.md](../safety-model.md) |
+| Kernel (audit chain, allowlist, orchestration vocabulary, workspace, config) | `tools/kernel/audit.py`, `tools/kernel/segmented_audit.py`, `tools/kernel/allowlist.py`, `tools/kernel/orchestration.py`, `tools/kernel/workspace.py`, `tools/kernel/config.py`, `tools/kernel/parse.py`, `tools/kernel/discovered.py` | [components/tools/kernel/overview.md](../components/tools/kernel/overview.md), [safety-model.md](../safety-model.md) |
 | Sandbox (manager, Docker backend/lifecycle, network, policy) | `tools/sandbox/manager.py`, `tools/sandbox/docker_backend.py`, `tools/sandbox/docker_lifecycle.py`, `tools/sandbox/network.py`, `tools/sandbox/policy.py`, `tools/sandbox/mcp_bridge.py`, `tools/sandbox/models.py` | [sandbox.md](../sandbox.md), [safety-model.md](../safety-model.md) |
 | Scope, safety review, killchain, snapshots, verification | `scope_gate.py`, `tools/safety_reviewer.py`, `tools/killchain/`, `tools/snapshots.py`, `tools/verification/`, `tools/command_analyzer.py`, `tools/validation_utils.py` | [safety-model.md](../safety-model.md) |
 
@@ -131,7 +131,7 @@ the implementation paths above were verified to exist.
 |---|---|---|
 | Decision log and run log | `tools/decision_log.py`, `tools/run_log.py`, `tools/activity_log.py` | [api/persistence.md](../api/persistence.md), [outcome-evidence.md](../outcome-evidence.md) |
 | Flow B SQLite schema (missions, tasks, evidence, findings, audit) | `db.py`, `memory.py`, `evidence.py` | [database-mission.md](../database-mission.md), [components/flow-b/db-mission.md](../components/flow-b/db-mission.md), [components/flow-b/evidence-memory-graph.md](../components/flow-b/evidence-memory-graph.md) |
-| API persistence, run manager, event and decision brokers | `tools/api/persistence.py`, `tools/api/run_manager.py`, `tools/api/event_broker.py`, `tools/api/decision_broker.py` | [api/persistence.md](../api/persistence.md), [api/event-broker.md](../api/event-broker.md), [api/run-manager.md](../api/run-manager.md) |
+| API persistence, run manager, event and decision brokers | `tools/api/persistence.py`, `tools/api/run_manager.py`, `tools/api/event_broker.py`, `tools/api/event_log.py`, `tools/api/plugin_event_dispatcher.py`, `tools/api/decision_broker.py` | [api/persistence.md](../api/persistence.md), [api/event-broker.md](../api/event-broker.md), [api/run-manager.md](../api/run-manager.md) |
 | Sessions, resume, goal and experience state | `tools/session_manager.py`, `tools/persistent_session_manager.py`, `tools/resume_state.py`, `tools/goal_engine.py`, `tools/experience_store.py`, `tools/semantic_memory.py`, `tools/attack_memory.py` | [api/persistence.md](../api/persistence.md) |
 
 ## WebUI

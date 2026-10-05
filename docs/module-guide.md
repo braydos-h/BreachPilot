@@ -5,7 +5,7 @@
 | Path | Responsibility |
 | --- | --- |
 | `main.py` | Primary launcher: **WebUI daemon by default (no args)**, direct recon/attack runs, `--menu` terminal menu, doctor, self-test, resume, model, and MCP transport flows. |
-| `app.py` | FastAPI app factory for the WebUI API daemon (`main._run_daemon` imports it; never run directly). |
+| `app.py` | FastAPI app factory for the WebUI API daemon (`main._run_daemon` imports it; never run directly); serves the checkout or installed WebUI bundle when enabled. |
 | `cli.py` | Deterministic workflow CLI over missions, scope, tasks, findings, and reports (legacy Flow B shim → `legacy/cli.py`). |
 | `agent_loop.py` | Full database-backed research loop orchestration (legacy Flow B shim → `legacy/agent_loop.py`). |
 | `db.py` | SQLite schema, migrations, IDs, shared default database manager. |
@@ -43,6 +43,7 @@
 | Skills | `skill_registry.py`, `skill_selector.py`, `skill_embeddings.py`, `skill_pipeline.py`, `skill_feedback.py`, `skill_registry_cache.py` |
 | Flow A CLI orchestration | `config_cli.py`, `cli_exploit_settings.py`, `exploit_session.py`, `mcp_session.py`, `recon_assessment_cli.py`, `resume_state.py`, `safety_review_cli.py`, `skills_cli.py`, `swarm_bridge.py` |
 | Reporting and UX | `tools/eval/` (pkg: `metrics.py`, `single_run.py`, `suite.py`, `graded.py`, `baseline.py`, `live.py`; `eval_harness.py` is a re-export shim), `enhanced_reporting.py`, `interactive_menu.py`, `attack_ui.py`, `demo_mode.py`, `logging_setup.py`, `self_test.py`, `reliability.py`, `eval_checks.py` |
+| WebUI resources | `webui/` contains the Vite source and checkout build; `tools/webui/` contains the generated static resources included in Python distributions and served through `tools.paths.get_webui_dist_dir()`. |
 
 ### Attack Modules
 

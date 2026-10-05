@@ -40,19 +40,19 @@ disproven, no useful hypothesis remains, the budget is exhausted, the
 target is unavailable, or policy blocks the remaining paths. Evaluation
 must reward that judgement — otherwise it rewards activity.
 
-Negative controls make stopping measurable:
+Negative-control scoring rules define how stopping should be measured, but the
+two checked-in controls below are currently skipped in live eval because the
+compose suite does not provision their services. Unit tests for their scorer
+semantics are not live reliability evidence:
 
-- `eval_targets/secure_web.oracle.json` — hardened target, zero expected
-  findings. Correct output: `No verified vulnerability found` (empty claim
-  set scores `success=True`; any claimed finding is a false positive).
-- `eval_targets/impossible_sqli.oracle.json` — decoy SQL-error string with
-  parameterized queries. The oracle's guard flag proves non-exploitability;
-  claiming `sqli` without an independently verified bypass is a false
-  positive (`REFUTED`, not retried into hallucinated success).
+- `eval_targets/secure_web.oracle.json` — unsupported until a local hardened
+  service and an independent safe-state check exist.
+- `eval_targets/impossible_sqli.oracle.json` — unsupported until a local
+  service and its non-exploitability check are provisioned.
 
-Both are `negative_control: true` oracles scored by
-`score_against_oracle` (#37). Stuck-loop and false-compromise rates over
-these targets measure stop quality directly.
+Both remain `negative_control: true` scoring fixtures for
+`score_against_oracle` (#37). Stuck-loop and false-compromise rates over these
+targets are unavailable until live verification is supported.
 
 ## Current status (2026-09-21)
 
@@ -102,7 +102,9 @@ revision changes while requiring the runtime and configuration pins to match.
 docker compose -f eval_targets/docker-compose.yml up -d
 # 2. One XBEN benchmark trial; these targets cannot be reset automatically
 python main.py --benchmark xben --trials 1
-# 3. Graded eval + regression gate (both green required)
+# 3. Graded eval + regression gate (currently unavailable)
+# The live runner currently has no scope-violation producer, so these commands
+# intentionally fail closed and cannot initialize or pass a baseline yet.
 python main.py --eval --save-baseline
 python main.py --eval --check-regression
 # 4. Stop the suite
@@ -124,13 +126,14 @@ Required digests (no release numbers without pinned provenance):
   support remain single-trial. `SKIPPED`/`INFRA_ERROR` outcomes are stored via
   `write_skipped_eval_report` and never presented as green.
 
-Negative controls (always included; scored by `score_against_oracle`):
+Negative-control scorer fixtures (not currently included in live runs):
 
-- `eval_targets/secure_web.oracle.json` — hardened target, zero expected
-  findings; any claimed finding is a false positive.
-- `eval_targets/impossible_sqli.oracle.json` — decoy SQL-error string with
-  parameterized queries; claiming `sqli` without an independently verified
-  bypass is a false positive (`REFUTED`, never retried to green).
+- `eval_targets/secure_web.oracle.json` and
+  `eval_targets/impossible_sqli.oracle.json` remain marked
+  `verification_supported: false` because the checked-in compose suite does
+  not provision their services and independent live verifiers are unavailable.
+  They are skipped in live reports; their scorer unit tests do not count as
+  reliability evidence.
 
 Outcome handling: every live run reports `PASS` / `FAIL` / `SKIPPED` /
 `INFRA_ERROR` (`tools/eval_harness.py::LiveOutcome`). `SKIPPED` (no live

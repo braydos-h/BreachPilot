@@ -339,7 +339,7 @@ verify: every flag exists in tools/cli_args.py:parse_args at time of generation 
 
 > Verified against `tools/cli_args.py:parse_args` (`tools/cli_args.py:{start}-{end}`, re-exported by `main`). No invented flags. Run `python main.py --help` to cross-check. Dispatch order is in `main()`.
 
-- **Default no-args** → **WebUI daemon** (`--web`: build `webui/dist/` if needed, serve `http://127.0.0.1:8765/`, open a browser) via `main._run_daemon`. `--menu` forces the legacy interactive terminal menu instead.
+- **Default no-args** → **WebUI daemon** (`--web`: build `webui/dist/` from a source checkout if needed, or use the installed wheel's `tools/webui/dist/`; serve `http://127.0.0.1:8765/`, open a browser) via `main._run_daemon`. `--menu` forces the legacy interactive terminal menu instead.
 - **API-key bootstrap** → `tools/config_cli.bootstrap_startup_api_keys` with `prompt = --menu` only.
 - **Daemon guard** — `--demon/--daemon/--web` refuse `target/mode/goal/custom_goal/menu/doctor/demo/self_test/eval/benchmark/skills_list/list_plugins/setup_api_keys` → exit 2.
 - **Dispatch** — `setup_api_keys` solo exit → daemon/web → `--doctor` → `--self-test` → `--eval-list` → `--save-baseline/--check-regression` gate → `--benchmark` → `--eval` (graded without `--target`, legacy with `--target`) → `--ctf` → `--demo` → `--skills-list` → `--list-plugins` → `--menu` → no-args web → `async_main`.

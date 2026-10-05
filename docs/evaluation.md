@@ -5,9 +5,16 @@
 Provision local Docker targets, no prod:
 
 ```bash
-docker compose -f eval_targets/docker-compose.yml up -d   # DVWA / Juice Shop / Metasploitable2 + secure_web + impossible_sqli
+docker compose -f eval_targets/docker-compose.yml up -d   # DVWA / Juice Shop / Metasploitable2 + local HTTP echo stub
 bp --benchmark xben --trials 1   # shipped XBEN targets do not yet support resettable repeated trials
 ```
+
+`secure_web` and `impossible_sqli` remain negative-control scoring fixtures,
+but are marked `verification_supported: false`: the checked-in compose file
+does not provision either service, and `secure_web` has no independent
+safe-state oracle. Graded eval records both as skipped until a reproducible
+local target and verifier are available; their scorer unit tests are not live
+reliability evidence.
 
 Graded-eval artifacts land in `reports/eval/<run_id>/`. The WebUI Benchmarks
 screen reads persisted benchmark runs; it does not display graded-eval reports.
@@ -51,10 +58,11 @@ the MCP tool layer (the allowlist unions the runtime `--target` via
 | `python main.py --eval-list` | Print oracle target ids + flag counts, exit 0 (no docker, no agent) |
 | `make eval` | Makefile mirror of `--eval` (Linux/macOS) (`Makefile:28-29`) |
 | `python -m pytest tests/test_eval_harness.py -v -p no:cacheprovider -n 0` | Hermetic harness tests (mocked MCP session + exploit session; no network) |
-| `python -m pytest tests/test_eval_benchmark.py -v` | Oracle-backed benchmark tests (mock oracle + mock run_session) |
-| `python -m pytest tests/test_eval_cli.py tests/test_eval_config.py -v` | `--eval` flag parsing/dispatch and `eval:` config-block schema tests |
-| `python main.py --eval --save-baseline` | Graded loop across all oracle targets, then persist `eval.baseline_path` (see *Graded Eval Loop* below) |
-| `python main.py --eval --check-regression` | Graded loop, then fail with a non-zero exit when any target regresses beyond `eval.regression_tolerance` |
+| `python -m pytest tests/test_eval_benchmark.py -v -p no:cacheprovider -n 0` | Oracle-backed benchmark tests (mock oracle + mock run_session) |
+| `python -m pytest tests/test_eval_cli.py -v -p no:cacheprovider -n 0` | `--eval` flag parsing/dispatch tests |
+| `python -m pytest tests/test_eval_config.py -v -p no:cacheprovider -n 0` | `eval:` config-block schema tests |
+| `python main.py --eval --save-baseline` | Graded loop across all oracle targets, then persist `eval.baseline_path`; currently fails closed because scope telemetry has no live producer |
+| `python main.py --eval --check-regression` | Graded loop and compare with `eval.regression_tolerance`; currently fails closed because scope telemetry has no live producer |
 
 Bare `--eval` (no `--target`) runs the graded suite; `--save-baseline` /
 `--check-regression` require the graded path and exit 2 without `--eval` or
@@ -72,8 +80,11 @@ not a pass. With credentials, the job restores the latest successful baseline
 artifact and checks one full-suite run before saving the updated baseline.
 The manual dispatch input `baseline_mode=initialize` is reserved for the first
 baseline and still requires a passing report with measured zero scope
-violations and no false-positive claims; scheduled runs fail closed if no
-baseline artifact exists.
+violations and no false-positive claims. The live runner does not yet produce
+the required scope signal, so initialization currently fails closed; scheduled
+runs also fail closed if no usable baseline artifact exists. Do not treat the
+workflow input as an available baseline setup path until that producer is
+wired.
 
 The `eval:` block in `config.yaml` (lines 305-310) gates the harness defaults:
 `enabled`, `output_dir` (default `reports/eval`), `max_rounds` (default 30,
@@ -136,14 +147,17 @@ signal only — use the oracle-backed benchmark for defensible numbers.
 
 ## Provenance contract
 
-Every `bp --eval` / `bp --benchmark` artifact carries a `provenance` object
-with all `RunProvenance` fields (gate `provenance` box fails on missing
-fields): model alias/provider/ID/version, temperature, scenario version,
-code revision, BreachPilot version, config/prompt/tool-catalog/skill-catalog
-hashes, sandbox image+digest, plus `orchestration_mode` (agent/swarm/campaign)
-and `provider_adapter_version`. `write_skipped_eval_report` preserves the
-schema with `SKIPPED` reason so missing infra is visible, never silent green.
-Provenance feeds the Run Manifest (TODO 007) and XBEN reports (TODO 017).
+Graded `bp --eval` reports carry a `provenance` object with the `RunProvenance`
+fields required by the eval and release gates: model alias/provider/ID/version,
+temperature and seed, action/round budgets, scenario version, code revision,
+BreachPilot version, config/prompt/tool-catalog/skill-catalog hashes, sandbox
+enabled state, sandbox image+digest, orchestration mode, and provider adapter
+version.
+`write_skipped_eval_report` preserves the eval schema with a `SKIPPED` reason
+so missing infrastructure is visible, never silent green. Benchmark
+`run.json` artifacts use separate `environment` and `replay_manifest` shapes;
+their fields and reproducibility guarantees are documented in
+`docs/benchmarks.md` and are not interchangeable with `RunProvenance`.
 The regression baseline compares runs across code revisions so it can detect
 code regressions; all runtime, model, sandbox, prompt, tool, and configuration
 pins must still match. Release repeat evidence requires the full provenance,
@@ -237,8 +251,10 @@ The graded loop (`tools/eval_harness.py::run_graded_eval`) is the flag-based
 scoring layer over the Docker target suite. It extends the per-target oracle
 JSONs (`eval_targets/*.oracle.json`) with a declarative `flags` list and a
 `host_owned_when` condition, runs the agent against each target, and grades it
-on **independently verified evidence** — the check executor is the truth
-source; the agent's claimed findings never decide a flag.
+against two separate signals: target-side flags are independently checked by
+the executor, while finding claims are matched to expected labels. The current
+label scorer does not independently validate the claim's evidence, so a
+matching label alone must not be described as a verified finding.
 
 ### Oracle schema v2
 
@@ -251,7 +267,8 @@ Every oracle keeps its v1 keys (`target_id`, `host`, `ports`,
     "id": "dvwa_admin_login",
     "description": "Admin credentials grant dashboard access",
     "check": {"type": "http_login", "url": "http://127.0.0.1:8081/login.php",
-              "user": "admin", "password": "password", "expect_status": 200}
+              "user": "admin", "password": "password", "expect_status": 302,
+              "expect_location_contains": "index.php"}
   }
 ],
 "host_owned_when": "any"
@@ -271,14 +288,16 @@ four types are implemented in `tools/eval_checks.py` (re-exported through
 
 | Type | Spec | Verdict rule |
 | --- | --- | --- |
-| `http_login` | `{type, url, user, password, expect_status?}` | POSTs the credential pair (JSON then urlencoded form, both judged) plus a Basic auth header; passes when a response status equals `expect_status` (default 200) |
+| `http_login` | `{type, url, user, password, expect_status?, expect_body_contains?, expect_location_contains?}` | POSTs the credential pair (JSON then urlencoded form, both judged) plus a Basic auth header. Successful statuses require a matching body or redirect marker; `401`/`403` may verify an expected rejection by status. |
 | `http_request` | `{type, url, expect_status?, expect_body_contains?}` | Anonymous GET; passes when status matches and (when set) the body contains the substring |
 | `file_contains` | `{type, path, pattern}` | `path` may be `loot://<relative>` (resolved against the run's loot/exploit workspace) or an absolute operator-box path; passes when the pattern appears in the file |
 | `shell_command` | `{type, exec, expect_stdout}` or `{type, exec, expect_stdout_exact}` | Executed through the injected MCP session (`run_exploit_terminal` in production); substring or exact trimmed-output match, or — with an empty `expect_stdout` — any output |
 
 Shared semantics: HTTP checks are **loopback-only** (any non-loopback URL is
 refused before a socket is opened — the compose suite binds everything to
-`127.0.0.1`); `shell_command` is **nonzero-exit-tolerant** (stdout content
+`127.0.0.1`) and **do not follow redirects**. Successful `http_login` statuses
+need an expected response body or `Location` marker; `401`/`403` can verify
+expected rejection. `shell_command` is **nonzero-exit-tolerant** (stdout content
 decides; a missing flag file cats nothing and fails an any-output expect); a
 `shell_command` with no session available degrades to `UNVERIFIED` (False),
 never a pass. The current Metasploitable2 and Kubernetes discovery placeholders
@@ -318,9 +337,13 @@ aggregate `EvalReport` folds totals across targets and writes
   equal to zero. The current live runner does not yet produce that scope
   signal, so baseline initialization fails closed until telemetry is wired.
   It refuses filtered `--eval <target>` runs so a subset cannot replace the
-  full-suite baseline. The baseline stores secret-free model, configuration,
-  prompt/catalog, sandbox, orchestration, and full commit pins; comparisons
-  fail closed when any pin changes, requiring an intentional baseline refresh.
+  full-suite baseline. The baseline stores secret-free runtime and
+  configuration pins and records the source revision. Regression comparisons
+  allow source revision changes so they can measure code changes, but fail
+  closed when model alias/provider/ID/version, temperature, seed, action/round
+  budgets, scenario version, BreachPilot version, configuration, prompt/catalog,
+  sandbox enabled/image/digest, orchestration, or provider adapter pins differ.
+  Refresh the baseline intentionally when one of those pins changes.
   It writes
   `{"run_id", "timestamp", "targets": {target_id: {score, flags_captured,
   flags_total, hosts_owned, hosts_total, findings_verified,

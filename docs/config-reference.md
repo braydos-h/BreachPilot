@@ -325,12 +325,12 @@ Semantic-memory consumer for the autonomous orchestrator. When true, the orchest
 
 ### `fsm:` (config.yaml) — FSM / planner-executor split (opt-in, default off)
 
-When `enabled`, campaign code may route plan execution through the FSM phase guard + memoryless step executor (`tools/attack_planner.py`: `planner_context` / `step_context_for` / `record_step_result` / `fsm_advance`, `AttackModuleExecutor.execute_plan_step`) instead of the LLM-does-everything loop. No command-content gates — only the target-IP allowlist at the MCP layer; recon stays `read_only`.
+When `enabled`, campaign code may route plan execution through the FSM phase guard + memoryless step executor (`tools/attack_planner.py`: `planner_context` / `step_context_for` / `record_step_result` / `fsm_advance`, `AttackModuleExecutor.execute_plan_step`) instead of the LLM-does-everything loop. FSM step `success` means the requested operation completed; it does not assert compromise or set access state. Verified compromise remains separately gated by target-bound evidence. No command-content gates — only the target-IP allowlist at the MCP layer; recon stays `read_only`.
 
 | Key | Type | Default | Controls | Consumed at |
 |-----|------|---------|----------|-------------|
-| `enabled` | bool | `false` | Route plan execution through the FSM guard + memoryless executors | attack_planner.py:482 (`fsm_settings`) |
-| `max_retries_per_step` | int | `3` | Same-`failure_class` failures before the stuck-loop breaker blocks the step and forces a replan | attack_planner.py:438 (`record_step_result`) |
+| `enabled` | bool | `false` | Route plan execution through the FSM guard + memoryless executors | attack_planner.py:497 (`fsm_settings`) |
+| `max_retries_per_step` | int | `3` | Same-`failure_class` failures before the stuck-loop breaker blocks the step and forces a replan | attack_planner.py:453 (`record_step_result`) |
 
 ### `recon:` (config.yaml:251-274) — recon coverage & depth
 
@@ -386,7 +386,7 @@ See [docs/benchmarks.md](benchmarks.md). Defaults in `tools/config/schema.py`; v
 | `trials` | int | `3` | Default repeated trials per scenario (1-20; CLI `--trials` overrides) | tools/benchmark_cli.py, service.py |
 | `timeout_seconds` | int | `1800` | Per-trial mission timeout | tools/benchmark/runner.py |
 | `sandbox_required` | bool | `true` | When true, runs without `sandbox.enabled` are `INFRASTRUCTURE_ERROR` (no host-execution fallback) | tools/benchmark/runner.py |
-| `baseline_path` | str | `reports/benchmarks/baseline.json` | Baseline file written by `--save-baseline` / read by `--check-regression` | tools/benchmark/regression.py |
+| `baseline_path` | str | `reports/benchmarks/baseline.json` | Baseline file written by `--save-baseline` / read by `--check-regression`; relative paths resolve under `benchmark.output_dir`, and the default resolves to `<output_dir>/baseline.json` | tools/benchmark/paths.py |
 | `regression.success_rate_tolerance` | float | `0.02` | Verified-success-rate drop beyond this is a HARD regression (CI exit 1) | tools/benchmark/regression.py |
 | `regression.false_positive_tolerance` | float | `0.01` | False-positive-rate rise beyond this is a HARD regression | tools/benchmark/regression.py |
 | `regression.stuck_loop_tolerance` | float | `0.05` | Stuck-loop-rate rise beyond this is a HARD regression | tools/benchmark/regression.py |

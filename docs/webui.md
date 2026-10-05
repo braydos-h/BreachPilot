@@ -5,8 +5,9 @@ A Vite + React + TypeScript SPA under `webui/`, served by the local API daemon
 and talking to the same `/api/v1` REST + WebSocket surface documented in
 [api.md](api.md).
 
-> Source: `webui/src/`. Built output: `webui/dist/` (gitignored, created on
-> first `--web` run). App config lives in `config.yaml`, not in the webui tree.
+> Source: `webui/src/`. Checkout build: `webui/dist/` (gitignored, created on
+> first `--web` run). Python distributions include a copy at
+> `tools/webui/dist/`. App config lives in `config.yaml`, not in the webui tree.
 
 ---
 
@@ -39,8 +40,8 @@ guided wizard, streams run events in real time, surfaces pending decisions
 (start-confirm, goal-select, tool-approval), and gives access to artifacts,
 audit, logs, loot, and system config.
 
-- **Stack:** Vite 5.4, React 18.3, TypeScript 5.6, TanStack Query 5.59,
-  react-router-dom 6.27, Tailwind 3.4, Radix UI primitives (shadcn/ui style),
+- **Stack:** Vite 6.4, React 18.3, TypeScript 5.6, TanStack Query 5.59,
+  react-router-dom 7.18, Tailwind 4.3, Radix UI primitives (shadcn/ui style),
   lucide-react icons, react-markdown + remark-gfm.
 - **Theme:** dark only (`<html class="dark">`, HSL CSS vars in `index.css`).
 - **Target browser:** evergreen Chromium/Firefox/Safari. Build target
@@ -62,8 +63,10 @@ operator input and renders server state.
 python main.py --web
 ```
 
-- Builds `webui/dist/` on first run (runs `npm install && npm run build`;
-  requires Node.js + npm on `PATH`).
+- In a source checkout, builds `webui/dist/` on first run (`npm ci && npm run
+  build` when the lockfile exists; otherwise `npm install && npm run build`),
+  which requires Node.js + npm on `PATH`. Installed wheels use the built-in
+  `tools/webui/dist/` bundle and do not need Node.js to serve the UI.
 - Sets `api.serve_webui: true` **in memory only** (never written to
   `config.yaml`), mounts `dist/` at `/` with a deep-link SPA fallback, and
   opens a browser at `http://127.0.0.1:8765/`.

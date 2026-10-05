@@ -60,7 +60,7 @@ operator ── python main.py --target <ip> --mode attack
            │            --transport http --host 127.0.0.1 --port <8001>
            │            --config config.yaml --workspace exploit_workspace
            │            (mcp_session.py:635-651, stdout→mcp_exploit_server.log)
-           │       └─ wait_for_mcp_http_ready       (owned-child TCP listener)
+           │       └─ wait_for_mcp_http_ready       (TCP + child identity proof)
            │       └─ _streamable_http_transport    (mcp_session.py:718; Bearer token)
            │       └─ ClientSession.initialize()    (mcp_session.py:486-497)
            │       └─ yield session  →  run_exploit_agent(tools/exploit_agent/runner/_impl.py) → call_tool
@@ -110,11 +110,14 @@ directly.
 `main.py` → `AssessmentService.execute` → `_run_session`
 (`service.py:1044-1067`) → `tools/exploit_session.run_exploit_session`
 (`exploit_session.py:70`) → `open_exploit_mcp_session`
-(`exploit_session.py:186-196`). The transport is **always `"http"`** here —
+(`exploit_session.py:186-196`). The standalone CLI transport is **always
+`"http"`** here —
 `service.py:1059` hardcodes it so the target-IP lock (env vars) reaches the
 server process; `--mcp-transport` on `main.py:353` is documented as ignored
-on the run path. The port comes from `mcp.http_port` (default 8001,
-`config_manager.py:81`).
+on the CLI run path. The port comes from `mcp.http_port` (default 8001,
+`config_manager.py:81`). API runs with an accepted config snapshot are forced
+to stdio by `open_exploit_mcp_session`; the target lock environment reaches
+that dedicated child without an HTTP listener.
 
 `open_exploit_mcp_session` (`tools/mcp_session.py:117-196`) tries the
 requested transport first; **only HTTP-startup failures fall back to stdio**
@@ -126,12 +129,29 @@ has been yielded — that could repeat a partially completed tool call.
 The `--web`/`--daemon`/`--demon` daemon (`main.py:509-560`) serves the FastAPI
 app on loopback (`--api-host` must be 127.0.0.1/localhost/::1, `main.py:516`).
 A run started via `POST /runs` executes through the same
-`AssessmentService` (`tools/api/run_manager.py:202-258`), which opens the MCP
-session exactly as the CLI run path does (HTTP transport, `service.py:1059`).
+`AssessmentService` (`tools/api/run_manager.py:202-258`), which opens a private
+stdio MCP session because the API attaches an accepted config snapshot and
+digest.
 The manual tool gateway reuses the live session:
 `POST /runs/{id}/tools/{name}/calls` → policy gate → `session.call_tool`
 (`run_manager.py:358-387`). The session/schemas/policy reach the manager via
 the `session_attach` callback (`run_manager.py:227-229`, `395-403`).
+
+#### Accepted API config snapshot
+
+API run and benchmark MCP children receive the config accepted with the run,
+not a later read of the mutable `config.yaml`. The launcher writes that
+snapshot to a private service-owned temporary directory (directory mode
+`0700`, YAML mode `0600` on POSIX), outside the run workspace and reports
+directory. Literal `recon.shodan_api_key` and `webhook_notify.url` values are
+stored as environment references in the YAML; the values travel only in the
+child environment and are resolved before the child verifies the accepted
+config digest. Snapshot-backed sessions always use stdio; they do not open an
+HTTP listener or send a bearer token over a replacement loopback connection.
+The temporary file remains available for the full client context, then is
+removed on normal close, startup failure, or cancellation. Standalone CLI
+launches omit the snapshot flag and continue loading the configured file
+directly.
 
 ### From the swarm
 
@@ -216,7 +236,8 @@ main-loop-bound MCP `ClientSession`:
 `_open_exploit_mcp_session_once` copies the parent env and injects
 (`tools/mcp_session.py:254-270`); both stdio and HTTP children inherit it
 (`StdioServerParameters(env=env)` `mcp_session.py:288-297`; `Popen(env=env)`
-`mcp_session.py:635-651`):
+`mcp_session.py:635-651`). Snapshot-backed API sessions use stdio; the
+HTTP-only entries below apply to private standalone HTTP sessions:
 
 | Env var | Set where | Consumed where |
 |---|---|---|
@@ -228,6 +249,7 @@ main-loop-bound MCP `ClientSession`:
 | `AI_NMAP_MULTI_MODEL_ENABLED` | `mcp_session.py:268` | `tools/mcp_tools/registry.py:220` |
 | `AI_NMAP_ACTIVE_MODEL_ALIAS` | `mcp_session.py:270` | `tools/mcp_tools/registry.py:201`, `mcp_tools/peer_models.py:80` |
 | `MCP_HTTP_TOKEN` | fresh random token for each private session launched by `mcp_session.py`; operator value for standalone public binds | server: `run_mcp_http_server`; client: `_streamable_http_transport` |
+| `MCP_HTTP_IDENTITY_SECRET` | fresh parent/child-only key for each private HTTP session | server: `_wrap_http_auth` identity route; parent: `wait_for_mcp_http_ready` |
 | `MCP_ALLOW_PUBLIC_BIND` | operator env (optional) | `assert_loopback_bind` `mcp_shared.py:1022` |
 
 The allowlist lock unions the env vars with `exploit.allowed_targets` at check
@@ -241,18 +263,17 @@ All three servers share `run_mcp_http_server` (`tools/mcp_shared.py:1064-1084`):
 1. **Loopback gate** — `assert_loopback_bind` (`mcp_shared.py:1014-1030`)
    refuses any non-loopback host unless BOTH `--allow-public-bind` AND
    `MCP_ALLOW_PUBLIC_BIND=1` are set (two-person rule).
-2. **Bearer auth on public binds** — a non-loopback bind is refused unless
-   `MCP_HTTP_TOKEN` is set; loopback may omit it. When configured, the ASGI app
-   is wrapped by `_wrap_http_auth`: a pure-ASGI middleware requiring
-   `Authorization: Bearer <token>`, compared with `hmac.compare_digest`.
-   Requests without a valid token receive 401.
-3. **The client side sends the token** — `_streamable_http_transport`
-   (`mcp_session.py:717-737`) builds an httpx client with the Bearer header
-   when `MCP_HTTP_TOKEN` is configured. The session launcher replaces any
-   inherited value with a fresh token for its local child, so a client that
-   reaches another run's listener fails authentication. It sets
-   `trust_env=False` because this is always a loopback connection and must not
-   be routed through an OS proxy.
+2. **Bearer auth** — a non-loopback bind is refused unless `MCP_HTTP_TOKEN` is
+   set; loopback may omit it. When configured, `_wrap_http_auth` requires
+   `Authorization: Bearer <token>` on MCP requests and compares it with
+   `hmac.compare_digest`. Requests without a valid token receive 401.
+3. **Verify the child before sending its token** — private exploit sessions
+   receive a separate random `MCP_HTTP_IDENTITY_SECRET`. The parent sends a
+   fresh challenge to `/.well-known/breachpilot-mcp-identity` and verifies the
+   response HMAC before opening the MCP transport. A process that wins the
+   check-to-bind race cannot receive the bearer token or impersonate the child
+   without that key. The client sets `trust_env=False` so loopback traffic is
+   never routed through an OS proxy.
 
 ## Exception-Group Handling (AGENTS.md rule 1)
 

@@ -14,7 +14,7 @@ status: maintained
 
 ## Purpose
 
-Creates the FastAPI ASGI app served by `main._run_daemon` (`--daemon` (legacy alias: `--demon`)/`--web`). Wires bearer auth, persistence, event broker, run manager, routers, CORS, error handlers, lifespan, and optional bundled WebUI SPA. Stays thin — all orchestration lives in `tools/api/` and `tools/run_service/`.
+Creates the FastAPI ASGI app served by `main._run_daemon` (`--daemon` (legacy alias: `--demon`)/`--web`). Wires bearer auth, persistence, event broker, run manager, routers, CORS, error handlers, lifespan, and optional checkout or packaged WebUI SPA. Stays thin — all orchestration lives in `tools/api/` and `tools/run_service/`.
 
 ## Source Files
 
@@ -30,7 +30,7 @@ Creates the FastAPI ASGI app served by `main._run_daemon` (`--daemon` (legacy al
 - Create `RunManager(persistence, event_registry, config, config_path, callables)` (`app.py:91`).
 - Configure CORS (loopback-only + `api.allowed_origins` validated via `is_loopback_origin`) and install error/middleware (`app.py:120`, `app.py:129`).
 - Configure route modules: `system`, `runs`, `decisions`, `events`, `graph`, `graph_explorer`, optionally `users` when `api.multi_operator` (`app.py:133`).
-- Optionally serve `webui/dist/` SPA at `/` when `api.serve_webui` true (`app.py:162`): mount `/assets`, add `/{full_path:path}` catch-all returning `index.html` with traversal guard, patch `app.openapi` to hide webui routes.
+- Optionally serve the checkout `webui/dist/` or installed `tools/webui/dist/` SPA at `/` when `api.serve_webui` is true (`app.py`): mount `/assets`, add `/{full_path:path}` catch-all returning `index.html` with traversal guard, patch `app.openapi` to hide webui routes.
 
 ## Public Interfaces
 
@@ -70,7 +70,7 @@ No other public symbols — `app.py` is import-only via `main._run_daemon` / tes
 
 - `reports/api_runtime.db` via `ApiPersistence` — runs + decisions (separate from Flow B `research.db`).
 - `EventBrokerRegistry` — per-run JSONL + ring buffer (`api.event_buffer_size`, default 256) + WebSocket pub/sub.
-- `webui/dist/` — built SPA; served read-only, never mutated.
+- `webui/dist/` or `tools/webui/dist/` — built SPA; served read-only, never mutated.
 - Lifespan `recover_interrupted()` re-marks interrupted runs so UI shows them as failed rather than stuck.
 
 ## Configuration
@@ -83,7 +83,7 @@ No other public symbols — `app.py` is import-only via `main._run_daemon` / tes
 | `api.token_file` | `.webui_secret_key` | Bearer token path (gitignored) |
 | `api.event_buffer_size` | `256` | Must be ≥1 |
 | `api.allowed_origins` | `[]` | Only loopback HTTP(S) origins (`is_loopback_origin`) |
-| `api.serve_webui` | `false` | When true, serves `webui/dist/` |
+| `api.serve_webui` | `false` | When true, serves the checkout or installed WebUI bundle |
 | `api.multi_operator` | `false` | When true, mounts `users` routes |
 | `reports_dir` | `reports` | Persistence root |
 

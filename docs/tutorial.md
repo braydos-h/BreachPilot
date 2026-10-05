@@ -511,9 +511,10 @@ python main.py --web
 
 ### 6.1 First build
 
-On the first run, if `webui/dist/index.html` is missing, `main.py` builds it
-(`main.py:436`): `npm install && npm run build` in `webui/` (needs Node.js +
-npm on `PATH`; ~1–2 minutes, 600s timeout). You'll see:
+In a source checkout, if `webui/dist/index.html` is missing, `main.py` builds
+it with `npm ci && npm run build` when the lockfile exists (needs Node.js +
+npm on `PATH`; ~1–2 minutes, 600s timeout). Installed wheels include the
+prebuilt SPA under `tools/webui/dist/` and serve it without Node.js. You'll see:
 
 ```text
 [STATUS] Building the WebUI (first run only)...
@@ -522,7 +523,7 @@ npm on `PATH`; ~1–2 minutes, 600s timeout). You'll see:
 [STATUS] WebUI build complete.
 ```
 
-Subsequent `--web` runs reuse the built `dist/`. If npm isn't installed it
+Subsequent source-checkout `--web` runs reuse the built `dist/`. If npm isn't installed it
 prints the manual fallback commands instead.
 
 ### 6.2 Token and endpoints

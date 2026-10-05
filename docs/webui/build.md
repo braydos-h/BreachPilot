@@ -10,6 +10,8 @@ sources:
   - webui/tailwind.config.ts
   - webui/postcss.config.js
   - webui/index.html
+  - webui/scripts/assert-generated-css.mjs
+  - webui/scripts/tailwind-theme-alpha-fallback.mjs
   - webui/scripts/bundle-report.mjs
 tests:
   - webui/src/test/setup.ts
@@ -25,7 +27,7 @@ subsystem: webui
 | Script | Command | Purpose |
 |--------|---------|---------|
 | `dev` | `vite` | dev server `http://127.0.0.1:5173 strictPort` + `/api` proxy (`VITE_API_URL` or `DEFAULT_API http://127.0.0.1:8765`) |
-| `build` | `tsc -b && vite build` | typecheck both project refs then bundle to `webui/dist/` (`outDir dist`, no sourcemap, target `es2020`) |
+| `build` | `tsc -b && vite build && node scripts/assert-generated-css.mjs` | typecheck both project refs, bundle to `webui/dist/`, then assert theme opacity fallbacks in emitted CSS |
 | `preview` | `vite preview --port 5173 --strictPort` | serves `dist` with same `/api` proxy as dev |
 | `bundle-report` | `node scripts/bundle-report.mjs` | post-build chunk analysis (read `dist` files) |
 | `test` | `vitest run` | `environment node` by default, per-file jsdom opt-in |
@@ -43,7 +45,13 @@ preview{same proxy}, build{outDir:"dist", sourcemap:false, target:"es2020"}
 
 `target` env: `loadEnv(mode, cwd, "VITE_")` (`vite.config.ts:10`) → `VITE_API_URL` overrides `DEFAULT_API`. The `ws:true` flag proxies WebSocket upgrades for `useRunEvents`.
 
-Production serving: `python main.py --web` auto-builds `webui/dist/` if missing (`npm install && npm run build`, requires Node+npm) and mounts it at `/` with SPA fallback in the `create_app` factory (`docs/api.md: api.serve_webui`).
+Production serving: in a source checkout, `python main.py --web` builds
+`webui/dist/` if missing (`npm ci && npm run build` when the lockfile exists;
+otherwise `npm install && npm run build`) and mounts it at `/` with SPA
+fallback. Package and release jobs copy that build into `tools/webui/dist/`
+before building the Python sdist and wheel, so an installed wheel serves the
+bundled SPA without requiring Node.js. The `create_app` factory selects the
+checkout or installed bundle through `tools.paths.get_webui_dist_dir()`.
 
 ## TypeScript (`webui/tsconfig.json`, `tsconfig.app.json`, `tsconfig.node.json`)
 
@@ -54,36 +62,48 @@ Production serving: `python main.py --web` auto-builds `webui/dist/` if missing 
 | `tsconfig.app.json:2` | `target ES2021`, `useDefineForClassFields`, `lib [ES2023, DOM, DOM.Iterable]`, `module ESNext`, `skipLibCheck`, `moduleResolution Bundler`, `allowImportingTsExtensions`, `isolatedModules`, `moduleDetection force`, `noEmit`, `jsx react-jsx`, `strict`, `noUnusedLocals/Parameters`, `noFallthroughCasesInSwitch`, `baseUrl .`, `paths {"@/*":["src/*"]}`, `include ["src"]` | strict tree used for bundle; `baseUrl/paths` mirrors vite alias |
 | `tsconfig.node.json` | includes `vite.config.ts`, `vitest.config.ts`, `postcss.config.js`, `tailwind.config.ts`; `composite`, `allowSyntheticDefaultImports`, `module ESNext` | node tooling only |
 
-CI scoped checks: `ruff`/`mypy` scopes listed in `README §CI`; `tsc -b` is the only typed build gate for the SPA.
+CI runs the TypeScript/Vite/CSS-assertion build and the Vitest suite. The
+dependency audit also runs against the npm lockfile.
 
 ## Tailwind (`webui/tailwind.config.ts:1`)
 
 | Field | Value |
 |-------|-------|
 | import | `type Config` + `typography(@tailwindcss/typography)`, `animate(tailwindcss-animate)` |
-| `darkMode` | `["class"]` (`index.html:class="dark"` toggled by `lib/useTheme.ts` via `localStorage breachpilot.theme`) |
+| dark mode | `@custom-variant dark (&:where(.dark, .dark *))` in `src/index.css`; `lib/useTheme.ts` toggles the `dark` class from `localStorage breachpilot.theme` |
 | `content` | `["./index.html","./src/**/*.{ts,tsx}"]` |
 | `theme.container` | `center true, padding 1rem` |
 | `theme.extend.typography.invert.css` | prose vars `prose-body/headings/links/code/pre-bg/pre-code/bullets/quotes/quote-borders → hsl(var(--*))` for `SkillMarkdown` in `SkillsPage.tsx` + `docs/api.md` pages |
-| `theme.extend.colors` | `border|input|ring|background|foreground|primary(+foreground)|secondary|destructive|muted|accent|popover|card` mapped to `hsl(var(--*))` from `index.css` HSL vars |
+| `theme.extend.colors` | `border|input|ring|background|foreground|primary(+foreground)|secondary|destructive|muted|accent|popover|card` mapped to `hsl(var(--*) / <alpha-value>)` from `index.css` HSL vars |
 | `theme.extend.borderRadius` | `lg:var(--radius)` (0.5rem) etc. (`radius: 0.5rem` in `index.css:27`) |
 | `theme.extend.fontFamily.mono` | `ui-monospace,SFMono-Regular,Menlo,Consolas,monospace` |
 | plugins | `[typography, animate]` |
 
-`postcss.config.js` — `{plugins:{tailwindcss:{}, autoprefixer:{}}}`.
+`postcss.config.js` runs `@tailwindcss/postcss` and the local
+`tailwind-theme-alpha-fallback.mjs` compatibility pass. Tailwind v4 can emit
+`color-mix()` for slash-opacity utilities whose colors use HSL channel vars;
+the pass emits native `hsl(var(--token) / alpha)` rules outside the support
+block so browsers that lack `color-mix()` retain the intended opacity. The
+build assertion checks representative background and primary opacity rules.
 
-`src/index.css` (`@tailwind base/components/utilities` + `@layer base` vars `:root` light + `.dark` dark (`:6`/`:29`), `@layer utilities` `bg-grid/grid-sm/radial-fade/glow-primary/skeleton/scrollbar-thin/animate-*`). `index.html` has `color-scheme dark light` + `referrer no-referrer` + inline `localStorage "breachpilot.theme"` script to remove `dark` on light preference before paint.
+`src/index.css` imports Tailwind v4 with `@import "tailwindcss"`, loads the
+legacy JS config through `@config`, defines the class-based dark variant, then
+declares the `@layer base` vars (`:root` light + `.dark` dark) and project
+utilities (`bg-grid/grid-sm/radial-fade/glow-primary/skeleton/scrollbar-thin/
+animate-*`). `index.html` has `color-scheme dark light` + `referrer no-referrer`
++ inline `localStorage "breachpilot.theme"` script to remove `dark` on light
+preference before paint.
 
 Deps (`package.json:13`):
 
 | Family | Packages |
 |--------|----------|
-| UI primitives | `@radix-ui/react-{checkbox,dialog,label,popover,scroll-area,select,separator,slot,switch,tabs,toast,tooltip}` + `class-variance-authority@0.7.0`, `clsx 2.1.1`, `tailwind-merge 2.5.4` |
+| UI primitives | `@radix-ui/react-{checkbox,dialog,label,popover,scroll-area,select,separator,slot,switch,tabs,toast,tooltip}` + `class-variance-authority@0.7.0`, `clsx 2.1.1`, `tailwind-merge 3.7.0` |
 | Graph | `reactflow@11.11.4` |
 | Data | `@tanstack/react-query@5.59.16`, `@tanstack/react-virtual@3.14.10` |
 | Markdown | `react-markdown@9.0.1`, `remark-gfm@4.0.0`, `@tailwindcss/typography@0.5.15` |
-| Icons/routing | `lucide-react@0.454.0`, `react-router-dom@6.27.0` |
-| Dev | `typescript 5.6.3`, `vite 5.4.10`, `@vitejs/plugin-react 4.3.3`, `tailwindcss 3.4.14`, `autoprefixer 10.4.20`, `vitest 2.1.8`, `@testing-library/{react,dom,user-event}`, `jsdom 29.1.1`, `@types/*`, `tailwindcss-animate 1.0.7` |
+| Icons/routing | `lucide-react@0.454.0`, `react-router-dom@7.18.4` |
+| Dev | `typescript 5.6.3`, `vite 6.4.3`, `@vitejs/plugin-react 4.3.3`, `tailwindcss 4.3.3`, `@tailwindcss/postcss 4.3.3`, `vitest 4.1.11`, `@testing-library/{react,dom,user-event}`, `jsdom 29.1.1`, `@types/*`, `tailwindcss-animate 1.0.7` |
 
 ## Vitest (`webui/vitest.config.ts:1`)
 

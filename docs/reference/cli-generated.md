@@ -3,14 +3,14 @@ title: CLI Reference (Generated)
 description: Complete matrix for every python main.py flag — flag, aliases, type, default, conflicts, runtime path, examples, config keys, exit behavior. Verified against tools/cli_args.py:parse_args (re-exported by main).
 source: [tools/cli_args.py]
 generated_from: tools/cli_args.py:parse_args
-verify: every flag exists in tools/cli_args.py:parse_args at time of generation (2026-09-22)
+verify: every flag exists in tools/cli_args.py:parse_args at time of generation (2026-10-05)
 ---
 
 # CLI Reference (Generated)
 
-> Verified against `tools/cli_args.py:parse_args` (`tools/cli_args.py:23-332`, re-exported by `main`). No invented flags. Run `python main.py --help` to cross-check. Dispatch order is in `main()`.
+> Verified against `tools/cli_args.py:parse_args` (`tools/cli_args.py:23-339`, re-exported by `main`). No invented flags. Run `python main.py --help` to cross-check. Dispatch order is in `main()`.
 
-- **Default no-args** → **WebUI daemon** (`--web`: build `webui/dist/` if needed, serve `http://127.0.0.1:8765/`, open a browser) via `main._run_daemon`. `--menu` forces the legacy interactive terminal menu instead.
+- **Default no-args** → **WebUI daemon** (`--web`: build `webui/dist/` from a source checkout if needed, or use the installed wheel's `tools/webui/dist/`; serve `http://127.0.0.1:8765/`, open a browser) via `main._run_daemon`. `--menu` forces the legacy interactive terminal menu instead.
 - **API-key bootstrap** → `tools/config_cli.bootstrap_startup_api_keys` with `prompt = --menu` only.
 - **Daemon guard** — `--demon/--daemon/--web` refuse `target/mode/goal/custom_goal/menu/doctor/demo/self_test/eval/benchmark/skills_list/list_plugins/setup_api_keys` → exit 2.
 - **Dispatch** — `setup_api_keys` solo exit → daemon/web → `--doctor` → `--self-test` → `--eval-list` → `--save-baseline/--check-regression` gate → `--benchmark` → `--eval` (graded without `--target`, legacy with `--target`) → `--ctf` → `--demo` → `--skills-list` → `--list-plugins` → `--menu` → no-args web → `async_main`.
@@ -68,22 +68,23 @@ Exit codes: `0` success/clean abort, `1` run/config/auth failure (or `--check-re
 | `--scenario` | — | `append` (`metavar ID`, `default None`) | `None` | — (read only on `--benchmark` path) | `tools/cli_args.py:221` | `python main.py --benchmark xben --scenario S1 --scenario S2` | — | — |
 | `--tag` | — | `append` (`metavar TAG`, `default None`) | `None` | — (read only on `--benchmark` path) | `tools/cli_args.py:228` | `python main.py --benchmark xben --tag web` | — | — |
 | `--trials` | — | `int` \| `None` | `None` | — (read only on `--benchmark` path) | `tools/cli_args.py:235` | `python main.py --benchmark xben --trials 3` | `benchmark.trials` (1-20) | — |
-| `--ctf` | — | `store_true` | `False` | — | `tools/cli_args.py:244` ctf → `tools/ctf_mode.run_ctf` target-locked via allowlist | `python main.py --target 10.0.0.50 --ctf --ctf-flag-path /root/flag.txt` | `exploit.allowed_targets` | — |
-| `--ctf-flag-path` | — | `str` (`dest ctf_flag_path`) | `""` | — | `tools/cli_args.py:250` ctf | `python main.py --target 10.0.0.50 --ctf --ctf-flag-path /flag.txt` | — | — |
-| `--ctf-root-shell` | — | `store_true` (`dest ctf_root_shell`) | `False` | — | `tools/cli_args.py:256` ctf → `default False` (uid=0 heuristic) | `python main.py --target 10.0.0.50 --ctf --ctf-root-shell` | — | — |
-| `--ctf-port` | — | `int` (`dest ctf_port`) | `0` | — | `tools/cli_args.py:263` ctf | `python main.py --target 10.0.0.50 --ctf --ctf-port 80 --ctf-marker FLAG_` | — | — |
-| `--ctf-marker` | — | `str` (`dest ctf_marker`) | `""` | — | `tools/cli_args.py:266` ctf | same | — | — |
-| `--skills` | — | `choices: on \| off \| hints \| lookup` \| `None` | `None` (→ hints default) | — | `tools/cli_args.py:271` skills → `apply_skills_cli_overrides` mutates `config["skills"]` in-memory (handles `on/hints/lookup/off`) | `python main.py --target 10.0.0.50 --skills on`<br>`--skills off` disables | `skills.enabled`, `inject_startup_context`, `allow_model_lookup` | — |
-| `--skills-list` | — | `store_true` | `False` | daemon/web | `tools/cli_args.py:278` skills → `print_skills_catalog` read-only then exit | `python main.py --skills-list` | `skills.*` (catalog) | 0 + stdout |
-| `--skills-include` | — | `append` (`metavar NAME`, `default None`) | `None` | — | `tools/cli_args.py:281` skills → repeatable force-include | `python main.py --target 10.0.0.50 --skills-include my-skill --skills-include other` | `skills.exclude_names` inverse; sticky across re-selection | — |
-| `--skills-exclude` | — | `append` | `None` | — | `tools/cli_args.py:288` skills | `python main.py --target 10.0.0.50 --skills-exclude noisy-skill` | `skills.exclude_names`, `include_tags` | — |
-| `--no-skills-reselect` | — | `store_true` | `False` | — | `tools/cli_args.py:295` skills → disables `skills.reselect_mid_run` | `python main.py --target 10.0.0.50 --no-skills-reselect` | `skills.reselect_*` | — |
-| `--list-plugins` | — | `store_true` (`dest list_plugins`) | `False` | daemon/web | `tools/cli_args.py:300` plugins → `plugins.print_plugin_catalog` or `tools/plugins` list then exit | `python main.py --list-plugins` | `plugins.enabled/disabled/search_paths/entry_points` | 0 |
-| `--demon` / `--daemon` | `--daemon` alias (`dest daemon`) | `store_true` | `False` | `target/mode/goal/custom_goal/menu/doctor/demo/eval/self_test/skills_list/list_plugins/setup_api_keys` → 2 | `tools/cli_args.py:308` webui → `main._run_daemon` → `app.create_app` → `uvicorn.run` loopback-only | `python main.py --demon`<br>`python main.py --daemon --api-port 9000` | `api.host/port/token_file/allowed_origins/event_buffer_size/shutdown_timeout_seconds/serve_webui` | 2 on conflict; 1 if uvicorn missing |
-| `--web` | — | `store_true` (`dest web`) | `False` | same as daemon + implies `api.serve_webui=True` in-memory; also builds `webui/dist/` | `tools/cli_args.py:315` webui → `_ensure_webui_build` (`npm install && npm run build`), sets `api.serve_webui` in-memory, `_run_daemon`, opens browser | `python main.py --web` | `api.serve_webui`, `webui/dist` build | — |
-| `--rebuild` | `-rebuild` | `store_true` (`dest rebuild`) | n/a | — | `tools/cli_args.py:321` | — | — | — |
-| `--api-host` | — | `str` \| `None` | `None` → `api.host` (default `127.0.0.1`) | daemon/web only (ignored otherwise) | `tools/cli_args.py:329` webui → `_run_daemon` validates loopback (`127.0.0.1/localhost/::1` else 2) | `python main.py --demon --api-host 127.0.0.1` | `api.host` (loopback-only) | 2 on non-loopback |
-| `--api-port` | — | `int` \| `None` | `None` → `api.port` (default `8765`) | — | `tools/cli_args.py:330` webui | `python main.py --demon --api-port 8765` | `api.port` | — |
+| `--timeout-seconds` | — | `int` \| `None` | `None` | — | `tools/cli_args.py:242` | — | — | — |
+| `--ctf` | — | `store_true` | `False` | — | `tools/cli_args.py:251` ctf → `tools/ctf_mode.run_ctf` target-locked via allowlist | `python main.py --target 10.0.0.50 --ctf --ctf-flag-path /root/flag.txt` | `exploit.allowed_targets` | — |
+| `--ctf-flag-path` | — | `str` (`dest ctf_flag_path`) | `""` | — | `tools/cli_args.py:257` ctf | `python main.py --target 10.0.0.50 --ctf --ctf-flag-path /flag.txt` | — | — |
+| `--ctf-root-shell` | — | `store_true` (`dest ctf_root_shell`) | `False` | — | `tools/cli_args.py:263` ctf → `default False` (uid=0 heuristic) | `python main.py --target 10.0.0.50 --ctf --ctf-root-shell` | — | — |
+| `--ctf-port` | — | `int` (`dest ctf_port`) | `0` | — | `tools/cli_args.py:270` ctf | `python main.py --target 10.0.0.50 --ctf --ctf-port 80 --ctf-marker FLAG_` | — | — |
+| `--ctf-marker` | — | `str` (`dest ctf_marker`) | `""` | — | `tools/cli_args.py:273` ctf | same | — | — |
+| `--skills` | — | `choices: on \| off \| hints \| lookup` \| `None` | `None` (→ hints default) | — | `tools/cli_args.py:278` skills → `apply_skills_cli_overrides` mutates `config["skills"]` in-memory (handles `on/hints/lookup/off`) | `python main.py --target 10.0.0.50 --skills on`<br>`--skills off` disables | `skills.enabled`, `inject_startup_context`, `allow_model_lookup` | — |
+| `--skills-list` | — | `store_true` | `False` | daemon/web | `tools/cli_args.py:285` skills → `print_skills_catalog` read-only then exit | `python main.py --skills-list` | `skills.*` (catalog) | 0 + stdout |
+| `--skills-include` | — | `append` (`metavar NAME`, `default None`) | `None` | — | `tools/cli_args.py:288` skills → repeatable force-include | `python main.py --target 10.0.0.50 --skills-include my-skill --skills-include other` | `skills.exclude_names` inverse; sticky across re-selection | — |
+| `--skills-exclude` | — | `append` | `None` | — | `tools/cli_args.py:295` skills | `python main.py --target 10.0.0.50 --skills-exclude noisy-skill` | `skills.exclude_names`, `include_tags` | — |
+| `--no-skills-reselect` | — | `store_true` | `False` | — | `tools/cli_args.py:302` skills → disables `skills.reselect_mid_run` | `python main.py --target 10.0.0.50 --no-skills-reselect` | `skills.reselect_*` | — |
+| `--list-plugins` | — | `store_true` (`dest list_plugins`) | `False` | daemon/web | `tools/cli_args.py:307` plugins → `plugins.print_plugin_catalog` or `tools/plugins` list then exit | `python main.py --list-plugins` | `plugins.enabled/disabled/search_paths/entry_points` | 0 |
+| `--demon` / `--daemon` | `--daemon` alias (`dest daemon`) | `store_true` | `False` | `target/mode/goal/custom_goal/menu/doctor/demo/eval/self_test/skills_list/list_plugins/setup_api_keys` → 2 | `tools/cli_args.py:315` webui → `main._run_daemon` → `app.create_app` → `uvicorn.run` loopback-only | `python main.py --demon`<br>`python main.py --daemon --api-port 9000` | `api.host/port/token_file/allowed_origins/event_buffer_size/shutdown_timeout_seconds/serve_webui` | 2 on conflict; 1 if uvicorn missing |
+| `--web` | — | `store_true` (`dest web`) | `False` | same as daemon + implies `api.serve_webui=True` in-memory; builds checkout UI or uses installed bundle | `tools/cli_args.py:322` webui → `_ensure_webui_build` (`npm ci && npm run build` when the lockfile exists), sets `api.serve_webui` in-memory, `_run_daemon`, opens browser | `python main.py --web` | `api.serve_webui`, `webui/dist` or `tools/webui/dist` | — |
+| `--rebuild` | `-rebuild` | `store_true` (`dest rebuild`) | n/a | — | `tools/cli_args.py:328` | — | — | — |
+| `--api-host` | — | `str` \| `None` | `None` → `api.host` (default `127.0.0.1`) | daemon/web only (ignored otherwise) | `tools/cli_args.py:336` webui → `_run_daemon` validates loopback (`127.0.0.1/localhost/::1` else 2) | `python main.py --demon --api-host 127.0.0.1` | `api.host` (loopback-only) | 2 on non-loopback |
+| `--api-port` | — | `int` \| `None` | `None` → `api.port` (default `8765`) | — | `tools/cli_args.py:337` webui | `python main.py --demon --api-port 8765` | `api.port` | — |
 
 ### Flow B legacy (`python cli.py`) — not `main.parse_args`, included for completeness
 

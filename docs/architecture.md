@@ -75,8 +75,9 @@ follow new paths (`mypy --follow-imports=skip tools` extended).
 ### `main.py`
 
 The main launcher. **With no arguments it starts the WebUI daemon** (builds
-`webui/dist/` if needed, serves it at `http://127.0.0.1:8765/`, opens a
-browser). It also handles direct recon/attack runs, `--menu` (the legacy
+`webui/dist/` from a source checkout if needed; installed wheels use their
+bundled `tools/webui/dist/`), serves it at `http://127.0.0.1:8765/`, and opens
+a browser. It also handles direct recon/attack runs, `--menu` (the legacy
 questionary terminal menu), doctor, self-test, eval, benchmark, demo, resume, CTF
 autopilot, swarm, and model selection flows. It loads `config.yaml`, starts or connects to MCP transport, routes model calls through the configured provider (`models.provider: opencode_go` default — built-ins `ollama`|`opencode_go`|`chatgpt` via `tools/providers/registry.py` — see [providers.md](providers.md)), and runs recon/attack sessions.
 
@@ -309,13 +310,13 @@ delegates to the canonical layer.
 **Decision:**
 
 1. **Flow B is frozen as `legacy` namespace.** New code MUST NOT add features to Flow B files. Root shims (`agent_loop.py`, `executor.py`, `planner.py`, `observer.py`, `task_queue.py`, `cli.py`, `mission.py`, etc.) remain for one release and emit `DeprecationWarning` (`import legacy.agent_loop`), preserving the ~250-file test suite. Canonical location is `legacy/` (physical move completed 2026-08-24).
-2. **Shared kernel stays at repo root / `tools/kernel/`.** `db.py`, `mission.py`, `scope_gate.py` remain at the root because both flows import them (see `legacy/README.md`). They are not moved in Phase 2. `tools/kernel/` (`allowlist.py`, `audit.py`, `workspace.py`) is the shared-kernel extraction for pure functions previously duplicated between `tools/mcp_shared.py` and `tools/mcp_tools/registry.py` / `tools/persistent_session_manager.py`.
+2. **Shared kernel stays at repo root / `tools/kernel/`.** `db.py`, `mission.py`, `scope_gate.py` remain at the root because both flows import them (see `legacy/README.md`). They are not moved in Phase 2. `tools/kernel/` (`allowlist.py`, `audit.py`, `segmented_audit.py`, `workspace.py`) is the shared-kernel extraction for pure functions previously duplicated between `tools/mcp_shared.py` and `tools/mcp_tools/registry.py` / `tools/persistent_session_manager.py`.
 3. **Safety files are untouched.** `scope_gate.py`, `safety_reviewer.py`, `agent_loop.py`, `tool_router.py`, `risk_controller.py`, `mission.py`, `db.py` are not edited for Flow A features (invariant `AGENTS.md` §2). Flow B safety stays intact.
 4. **Deprecation signal:** Any new import of a Flow B module from Flow A code SHOULD emit a `DeprecationWarning` via `warnings.warn("Flow B is legacy; use tools.kernel / tools/run_service", DeprecationWarning, stacklevel=2)` — advisory only, not a gate.
 
 **Consequences:**
 
-- `tools/kernel/` is the single source for `allowlist` / `audit` / `workspace` pure functions; `tools/mcp_shared.py` and `tools/mcp_tools/registry.py` re-export for backwards compat (`from tools.kernel.allowlist import _allowed_target_list` etc.).
+- `tools/kernel/` is the single source for `allowlist` / `audit` / `workspace` pure functions. Segmented audit-chain storage lives in `segmented_audit.py`, with historical imports re-exported by `audit.py`; `tools/mcp_shared.py` and `tools/mcp_tools/registry.py` continue to re-export their compatibility APIs (`from tools.kernel.allowlist import _allowed_target_list` etc.).
 - `tools/persistent_session_manager.py:_is_inside_workspace` duplicate is deleted; it imports from `tools/kernel/workspace.py`.
 - No behavior change: `python -m pytest tests/ -q` + `python main.py --doctor` + `python main.py --self-test` remain green.
 - Future phases (3–6) may add `collect_tools()` introspection, `tools/recon/` / `tools/campaign/` splits, and `pkgutil.iter_modules` module discovery without touching the frozen surface.

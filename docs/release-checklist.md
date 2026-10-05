@@ -7,7 +7,7 @@ exact command; "green" means the stated exit/status, not "looks fine".
 
 Full-suite verification is CI's job. Locally, run one file at a time —
 never bare `pytest tests/`, never `-n auto`/`-n 4+`, never `-m` overrides
-(the default deselects `integration`/`live_llm` on purpose; see gate 5).
+(the default deselects `integration`/`live_llm` on purpose; see gate 6).
 Rule source: `AGENTS.md` test-run rules.
 
 ```bash
@@ -49,7 +49,38 @@ python3 -m coverage report --fail-under=80
 Green: report exits 0 (`fail_under = 80`, `pyproject.toml`). CI runs the
 same pair in the `coverage` job and uploads the XML.
 
-## 5. Integration / live_llm deselected by default
+## 5. WebUI and Python distribution
+
+The WebUI build, generated opacity-fallback assertion, frontend tests, npm
+audit, and installed-wheel smoke are release requirements. Reproduce the
+packaging path locally with:
+
+```bash
+cd webui
+npm ci
+npm test
+npm audit --audit-level=moderate
+npm run build
+cd ..
+python3 -m pytest tests/test_webui_packaging.py -v -p no:cacheprovider -n 0
+python -m pip install -c constraints-dev.txt build twine
+python scripts/package_webui.py
+export SOURCE_DATE_EPOCH="$(git log -1 --format=%ct)"
+python -m build
+python scripts/normalize_sdist.py dist/*.tar.gz
+python -m twine check dist/*
+python scripts/verify_python_distributions.py dist/*
+```
+
+Green: all commands exit 0 and the archive verifier finds no generated
+bytecode. The CI package job makes two independent source snapshots, builds
+both wheel/sdist pairs, normalizes each sdist, and fails unless artifact names
+and bytes match. The sdist normalizer fixes member ordering, ownership,
+permissions, and timestamps to `SOURCE_DATE_EPOCH`; the CI package job also
+installs the wheel outside the checkout, serves `/`, and fetches the generated
+JavaScript entry asset.
+
+## 6. Integration / live_llm deselected by default
 
 `pyproject.toml` ships `addopts = ["-m", "not integration and not live_llm"]`.
 Docker-backed integration and live-LLM evals are opt-in only:
@@ -62,7 +93,7 @@ Green: a bare local/CI run selects zero `integration`/`live_llm` tests.
 New tests needing Docker, network, or API keys must carry the matching
 marker, or they run (and fail) everywhere.
 
-## 6. Docs truth
+## 7. Docs truth
 
 ```bash
 python scripts/docs_truth_audit.py --check versions   # versions single-sourced, installer pins current
@@ -77,7 +108,9 @@ Green: all exit 0. README flags/config match `config.yaml`;
 release tags additionally require tag == tree version
 (`release` workflow `Version truth` step — bump with
 `python scripts/bump-version.py X.Y.Z` before tagging; sequence documented
-in `docs/deployment.md`).
+in `docs/deployment.md`). A successful tag push publishes a GitHub Release
+after the GO gate and build; `workflow_dispatch` builds artifacts but never
+publishes or updates a public release.
 
 ## After the gates
 

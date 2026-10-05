@@ -78,7 +78,7 @@ All routes are nested under `<Layout>` (`src/components/Layout.tsx:50`) which pr
 
 ### SPA Serving
 
-`python main.py --web` builds `webui/dist/` if missing, sets `api.serve_webui:true` in-memory, mounts `dist/` at `/` with deep-link fallback. Dev uses `npm run dev` against a separately running daemon.
+`python main.py --web` builds `webui/dist/` in a source checkout if missing or uses the installed wheel's `tools/webui/dist/`; it sets `api.serve_webui:true` in-memory and mounts the SPA at `/` with deep-link fallback. Dev uses `npm run dev` against a separately running daemon.
 
 ## Auth
 

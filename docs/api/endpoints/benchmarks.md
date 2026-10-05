@@ -26,7 +26,7 @@ Request model `BenchmarkRunRequest` (`benchmarks.py:33`):
 | `suite` | `str` | required | suite id (e.g. `xben`) |
 | `scenarios` | `str[]` | `[]` | restrict to scenario ids |
 | `tags` | `str[]` | `[]` | restrict to tagged scenarios |
-| `trials` | `int\|null` | `null` (→ config `benchmark.trials`, default 1) | `1..20` |
+| `trials` | `int\|null` | `null` (→ config `benchmark.trials`, default 3) | `1..20` |
 | `model` | `str` | `""` | alias override, recorded never substituted |
 | `reasoning` | `str` | `""` | reasoning profile label |
 | `sandbox_required` | `bool\|null` | `null` (→ config default, true) | require the sandbox |

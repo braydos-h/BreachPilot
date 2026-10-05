@@ -90,19 +90,21 @@ python main.py --benchmark xben --tag web --trials 1
 # List registered suites and their scenarios
 python main.py --benchmark-list
 
-# Baselines / regression gates (exit 1 on hard regressions)
+# Future baseline/regression path. Both commands currently fail closed because
+# the live runner has no producer for the required scope-violation telemetry.
 python main.py --benchmark xben --save-baseline
 python main.py --benchmark xben --check-regression
 ```
 
-`--save-baseline` writes the current run as the new baseline. When combined
-with `--check-regression`, BreachPilot first compares against the existing
-baseline and only replaces it after a complete, passing check. A failed or
-incomplete check keeps the previous baseline intact. To create the first
-baseline, use `--save-baseline` without `--check-regression`; a missing
-baseline makes the check fail closed. `benchmark.baseline_path` may be
-absolute; a relative path is resolved under `benchmark.output_dir`. The
-default value resolves to `<benchmark.output_dir>/baseline.json`.
+Once scope telemetry is produced, `--save-baseline` writes the current run as
+the new baseline. When combined with `--check-regression`, BreachPilot first
+compares against the existing baseline and only replaces it after a complete,
+passing check. A failed or incomplete check keeps the previous baseline intact.
+To create the first baseline, use `--save-baseline` without
+`--check-regression`; a missing baseline makes the check fail closed.
+`benchmark.baseline_path` may be absolute; a relative path is resolved under
+`benchmark.output_dir`. The default value resolves to
+`<benchmark.output_dir>/baseline.json`.
 
 The existing `--eval` / `--eval-list` commands are unchanged; the benchmark
 CLI reuses the same config validation and baseline workflow.
@@ -263,9 +265,14 @@ links. Historical runs survive restarts (everything is on disk).
 
 ## Repeated baseline (TODO 001) + XBEN (TODO 017)
 
-Protocol: `eval_targets/` DVWA / Juice Shop / Metasploitable2 +
-`secure_web` + `impossible_sqli` negative controls, `bp --benchmark` 5–10×
-per scenario on reset-capable targets, complete provenance (§32), metrics from
+Protocol: `eval_targets/` DVWA / Juice Shop. Metasploitable2 declares
+verification unsupported and is skipped until an independent verifier exists;
+the
+`secure_web` and `impossible_sqli` negative-control scoring fixtures are
+currently skipped because the compose suite does not provision them.
+`bp --benchmark` 5–10×
+per scenario on reset-capable targets, complete benchmark environment and
+replay provenance (see [evaluation provenance](evaluation.md#provenance-contract)), metrics from
 `docs/reliability-metrics.md` (verified compromise rate, FP rate,
 actions/verified, time-to-verified, completion, stuck-loop, duplicate-action,
 tool failures, reproduction success, scope violations=0).

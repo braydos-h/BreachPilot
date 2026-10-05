@@ -2,22 +2,16 @@
 
 ## Run Tests
 
-Run the full suite:
+Run a bounded focused slice for local changes:
 
 ```bash
-python -m pytest
-```
-
-Run a focused file:
-
-```bash
-python -m pytest tests/test_scope_gate.py
+python -m pytest tests/test_scope_gate.py -v -p no:cacheprovider -n 0
 ```
 
 Run a specific test:
 
 ```bash
-python -m pytest tests/test_attack_modules.py::TestModuleRegistry::test_list_modules_returns_all
+python -m pytest tests/test_attack_modules.py::TestModuleRegistry::test_list_modules_returns_all -p no:cacheprovider -n 0
 ```
 
 Run smoke checks:
@@ -27,16 +21,18 @@ python main.py --doctor
 python main.py --self-test
 ```
 
-Coverage (matches CI; `pytest-cov` is not a dependency, so `pytest --cov` fails):
+Full-suite and coverage verification run in CI. Do not run unrestricted
+`pytest tests/` or coverage across the entire suite locally. For local coverage
+work, use only an explicitly bounded test-file list:
 
 ```bash
-python -m coverage run -m pytest tests/
+python -m coverage run -m pytest tests/test_scope_gate.py tests/test_domain_allowlist.py -p no:cacheprovider -n 0
 python -m coverage report
 ```
 
 ## What To Test By Change Type
 
-The suite has **342** files (all mock subprocess/network — no live Nmap); this table covers the most common change types grouped by feature. When in doubt, grep `tests/` for the module name. Run `python -m pytest tests/ -v` for the full list; focused: `python -m pytest tests/test_scope_gate.py -v`.
+The suite currently has **450** `test_*.py` files. This table covers the most common change types grouped by feature. When in doubt, search `tests/` for the module name, then run only the relevant bounded test files locally. CI owns full-suite verification.
 
 | Change | Tests to consider |
 | --- | --- |
@@ -77,7 +73,7 @@ The suite has **342** files (all mock subprocess/network — no live Nmap); this
 | Rate limiting / reliability / recovery | `tests/test_rate_limiter.py`, `tests/test_reliability_bugs.py`, `tests/test_retry_logic.py`, `tests/test_campaign_checkpoint.py` |
 | API / WebUI / runs / events / connections / users | `tests/test_api_auth.py`, `tests/test_api_runs.py`, `tests/test_api_events.py`, `tests/test_api_persistence.py`, `tests/test_api_memory.py`, `tests/test_api_webui.py`, `tests/test_api_webui_regression.py`, `tests/test_api_frontend.py`, `tests/test_run_manager.py`, `tests/test_run_log.py`, `tests/test_api_models.py`, `tests/test_graph_explorer_api.py`, `tests/test_graph_route.py`, `tests/test_api_reset.py`, `tests/test_api_cli_args.py`, `tests/test_api_isolation.py`, `tests/test_api_run_sandbox.py`, `tests/test_connections_api.py`, `tests/test_users.py` |
 | Assessment state / capability / decision log | `tests/test_assessment_state_mcp_tools.py`, `tests/test_module_capability_metadata_a.py`, `tests/test_module_capability_metadata_b.py`, `tests/test_capability_guidance_prompt.py`, `tests/test_decision_log_hook.py`, `tests/test_task_graph_simulations.py` |
-| Evidence / audit / credential / artifact graph | `tests/test_evidence.py`, `tests/test_evidence_bridge.py`, `tests/test_enhanced_reporting_evidence.py`, `tests/test_flow_a_enhanced_report.py`, `tests/test_credential_store.py`, `tests/test_audit_redaction.py`, `tests/test_audit_extra_redaction.py`, `tests/test_audit_chain.py`, `tests/test_audit_failure.py`, `tests/test_audit_memory_bound.py`, `tests/test_approval_denial_audit.py`, `tests/test_activity_log.py`, `tests/test_run_log.py`, `tests/test_artifact_graph.py` |
+| Evidence / audit / credential / artifact graph | `tests/test_evidence.py`, `tests/test_evidence_bridge.py`, `tests/test_enhanced_reporting_evidence.py`, `tests/test_flow_a_enhanced_report.py`, `tests/test_credential_store.py`, `tests/test_audit_redaction.py`, `tests/test_audit_extra_redaction.py`, `tests/test_audit_chain.py`, `tests/test_segmented_audit.py`, `tests/test_audit_failure.py`, `tests/test_audit_memory_bound.py`, `tests/test_approval_denial_audit.py`, `tests/test_activity_log.py`, `tests/test_run_log.py`, `tests/test_artifact_graph.py` |
 | ICS / IoT / MITRE / webhook / ticketing / target graph | `tests/test_ics_exploit.py`, `tests/test_ics_iot_modules.py`, `tests/test_mitre_export.py`, `tests/test_webhook_notify.py`, `tests/test_ticketing.py`, `tests/test_threat_intel.py`, `tests/test_target_graph.py` |
 | Spinner / environment / logging / packaging / sync guards | `tests/test_spinner_release.py`, `tests/test_env_probe.py`, `tests/test_logging_setup.py`, `tests/test_summarizer.py`, `tests/test_demo_seed.py`, `tests/test_requirements_sync.py`, `tests/test_wheel_packaging.py`, `tests/test_wheel_cwd_regression.py`, `tests/test_fast_mode.py`, `tests/test_post_exploit.py`, `tests/test_ops_summary.py` |
 | Capability upgrade / wiring / witness | `tests/test_witness_agent.py`, `tests/test_witness_wiring.py`, `tests/test_attack_modules_api.py`, `tests/test_bel_adversarial.py`, `tests/test_ctf_mode.py`, `tests/test_local_target.py` |

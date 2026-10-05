@@ -95,6 +95,7 @@ argument group in `main.parse_args`, so references survive line drift.
 | `--scenario <ID>` | With `--benchmark`: restrict to specific scenario ids (repeatable) | benchmark suite |
 | `--tag <TAG>` | With `--benchmark`: restrict to scenarios carrying a tag (repeatable) | benchmark suite |
 | `--trials <N>` | With `--benchmark`: repeated trials per scenario (default `benchmark.trials`, 1-20) | benchmark suite |
+| `--timeout-seconds <SECONDS>` | With `--benchmark`: override each trial's mission timeout (minimum 30 seconds; default `benchmark.timeout_seconds`) | benchmark suite |
 
 ### API keys / config
 
@@ -129,8 +130,8 @@ daemon default and direct runs load keys without prompting.
 | Flag | Description | Group |
 |------|-------------|------|
 | `--demon`, `--daemon` | Start the local WebUI API server instead of the terminal menu (`main._run_daemon`) | webui |
-| `--web` | Daemon mode plus: build `webui/dist/` if needed, serve it at `/`, open a browser (`main._ensure_webui_build`) | webui |
-| `--rebuild`, `-rebuild` | Force a clean rebuild of `webui/dist/` (`npm install` + `npm run build`) for updates; with `--web`/`--daemon` rebuilds before serving, otherwise rebuilds and exits (`main._rebuild_webui`) | webui |
+| `--web` | Daemon mode plus: build `webui/dist/` from a source checkout if needed, or use the installed wheel's `tools/webui/dist/`; serve it at `/` and open a browser (`main._ensure_webui_build`) | webui |
+| `--rebuild`, `-rebuild` | Force a clean rebuild from a source checkout (`npm ci` when the lockfile exists, then `npm run build`); with an installed wheel use a source checkout to rebuild (`main._rebuild_webui`) | webui |
 | `--api-host <host>` | Daemon bind host — **loopback only** (`127.0.0.1`/`localhost`/`::1`); any other host exits with code 2 | webui |
 | `--api-port <n>` | Daemon port (default 8765) | webui |
 
@@ -160,7 +161,7 @@ is given, the flow prompts for one and, in interactive sessions, persists it
 to `exploit.allowed_targets` in the config (`tools/config_cli.add_target_to_allowlist`).
 
 > **No-args default:** `python main.py` with no arguments starts the **WebUI daemon** (`--web`:
-> build `webui/dist/` if needed, serve at `http://127.0.0.1:8765/`, open a browser). It does NOT
+> build or load the packaged WebUI if needed, serve at `http://127.0.0.1:8765/`, open a browser). It does NOT
 > open the terminal menu; use `--menu` for that.
 
 ## `python cli.py` — Flow B (SQLite mission workflow)

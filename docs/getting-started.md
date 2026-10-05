@@ -6,7 +6,7 @@
 |------|---------|-------|
 | Python | 3.11+ (`pyproject.toml` `requires-python = ">=3.11"`; `tools/doctor.py:31` rejects older; CI 3.11–3.13) | `python --version` |
 | Docker | Docker Desktop (Win/macOS) or Engine (Linux) + image `breachpilot-sandbox:latest` | Sandbox is default-on (`sandbox.fallback_native: false` default, fail-closed); without Docker attacks block, unless explicit opt-in `sandbox.fallback_native: true` degrades to native. Build: `docker build -t breachpilot-sandbox:latest docker/sandbox` |
-| Node.js + npm | Node 18+ | Only for first WebUI build (`webui/dist/` auto-built, ~600s timeout) |
+| Node.js + npm | Node 20.19+, 22.13+, or 24+ | Needed to build the UI from a source checkout; installed wheels already include it |
 | nmap | On `PATH` or `nmap.path` in `config.yaml` | Linux `-O`/`-sS` need root (`nmap.sudo: true` with `sudo -n`) or `nmap.priv_fallback` auto-downgrade |
 | Ollama endpoint | Cloud default (`https://api.ollama.com` + `OLLAMA_API_KEY`) or local (`http://localhost:11434`) | Embeddings stay local via `ollama.embed_host`. Alt providers: `opencode_go` (`OPENCODE_GO_API_KEY`), `chatgpt` (browser OAuth, tokens in `~/.codex/auth.json` — never config) |
 | Disk / rights | ~4GB free, admin for `install.bat`/winget (Win) or apt (Linux) | Git required for clone |
@@ -28,7 +28,7 @@ From the repository root.
 
 `install.bat` does everything: it checks for Python 3.11+, Node.js, Nmap and Ollama
 (offering to install anything missing via `winget` when you approve), creates
-`.venv`, installs `requirements.txt`, builds `webui/dist/` if Node is present,
+`.venv`, installs `requirements.txt`, builds `webui/dist/` for a source checkout,
 starts Ollama, pulls the default model + embedding model, walks you through
 `OLLAMA_API_KEY`, runs `python main.py --doctor`, and wires the `breachpilot`
 launcher. Safe to re-run; try `install.bat --check` for an audit-only pass
