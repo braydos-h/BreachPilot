@@ -7,7 +7,6 @@ client-side debugging share a correlation key.
 
 from __future__ import annotations
 
-import re
 import uuid
 from typing import Any
 
@@ -15,10 +14,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
-# Keys whose values are redacted in API responses (config, secrets, events).
-_SECRET_KEY_PATTERNS = re.compile(
-    r"(?i)(password|passwd|secret|token|api[_-]?key|auth|bearer|credential|private[_-]?key)"
-)
+from tools.kernel.redaction import sanitize, sanitize_message
 
 
 class APIError(Exception):
@@ -51,21 +47,12 @@ def _error_response(
         content={
             "error": {
                 "code": code,
-                "message": message,
-                "details": details or {},
+                "message": sanitize_message(message),
+                "details": sanitize(details or {}),
                 "request_id": request_id,
             }
         },
     )
-
-
-def sanitize(obj: Any) -> Any:
-    """Recursively redact values whose keys match secret patterns."""
-    if isinstance(obj, dict):
-        return {k: ("[REDACTED]" if _SECRET_KEY_PATTERNS.search(k) and v else sanitize(v)) for k, v in obj.items()}
-    if isinstance(obj, list):
-        return [sanitize(i) for i in obj]
-    return obj
 
 
 def install_error_handlers(app: FastAPI) -> None:
@@ -79,12 +66,23 @@ def install_error_handlers(app: FastAPI) -> None:
     @app.exception_handler(RequestValidationError)
     async def _validation_exc_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
         rid = getattr(request.state, "request_id", "")
+        # Pydantic's error dictionaries include the submitted `input`, which
+        # may contain credentials even when the location is an ordinary field.
+        # Return only schema location and error category to avoid reflecting it.
+        safe_errors = [
+            {
+                "loc": list(error.get("loc", ())) if isinstance(error.get("loc", ()), tuple | list) else [],
+                "type": str(error.get("type", "validation_error")),
+            }
+            for error in exc.errors()
+            if isinstance(error, dict)
+        ]
         return _error_response(
             "validation_error",
             "Request validation failed",
             422,
             rid,
-            details={"errors": exc.errors()},
+            details={"errors": safe_errors},
         )
 
     @app.exception_handler(APIError)

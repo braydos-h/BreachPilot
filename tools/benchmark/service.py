@@ -128,25 +128,33 @@ class BenchmarkService:
         async with self._start_lock:
             if self.is_active():
                 return {"error": "a benchmark run is already active", "run_id": self._active_run_id}
-            # ponytail: single global cap — active API runs occupy benchmark slots.
+            slot_reserved = False
             if self._run_manager is not None:
-                cap = int(((config_snapshot.get("api", {}) or {}).get("max_concurrent_runs", 1)) or 1)
-                busy = len(getattr(self._run_manager, "active_run_ids", []))
-                if busy >= max(cap, 1):
+                reserve_slot = getattr(self._run_manager, "reserve_benchmark_slot", None)
+                if not callable(reserve_slot):
+                    return {"error": "global run admission is unavailable; benchmark start refused"}
+                slot_reserved = await reserve_slot()
+                if not slot_reserved:
+                    cap = int(((config_snapshot.get("api", {}) or {}).get("max_concurrent_runs", 1)) or 1)
                     return {"error": f"{cap} run(s) already active. Cancel one first (api.max_concurrent_runs)."}
 
-            runner = BenchmarkRunner(
-                config_snapshot,
-                self.config_path,
-                model_alias=run_config.model_alias,
-                config_fingerprint=accepted_config_fingerprint,
-            )
-            cancel = asyncio.Event()
-            self._cancel_event = cancel
-            self._last_run_id = None
-            self._status = {"run_id": None, "state": "starting", "error": ""}
-            task = asyncio.create_task(self._execute(runner, run_config, cancel))
-            self._active_task = task
+            try:
+                runner = BenchmarkRunner(
+                    config_snapshot,
+                    self.config_path,
+                    model_alias=run_config.model_alias,
+                    config_fingerprint=accepted_config_fingerprint,
+                )
+                cancel = asyncio.Event()
+                self._cancel_event = cancel
+                self._last_run_id = None
+                self._status = {"run_id": None, "state": "starting", "error": ""}
+                task = asyncio.create_task(self._execute(runner, run_config, cancel))
+                self._active_task = task
+            except Exception:
+                if slot_reserved:
+                    await self._run_manager.release_benchmark_slot()
+                raise
         # run_id is minted inside the task; wait briefly for it so callers can
         # address the run immediately (poll-loop avoids ordering hazards).
         for _ in range(100):
@@ -185,6 +193,8 @@ class BenchmarkService:
             self._active_run_id = None
             self._active_task = None
             self._cancel_event = None
+            if self._run_manager is not None:
+                await self._run_manager.release_benchmark_slot()
 
     async def cancel(self) -> bool:
         """Cancel the active run (if any). Returns True when cancelled."""

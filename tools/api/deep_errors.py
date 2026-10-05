@@ -13,9 +13,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from tools.api.errors import sanitize
 from tools.exceptions import _EXC_GROUP_CATCH
 from tools.kernel.audit import _mask_secret_content, _redact_args
+from tools.kernel.redaction import sanitize
 
 DEEP_ERROR_KINDS = frozenset(
     {

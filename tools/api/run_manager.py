@@ -38,6 +38,7 @@ import asyncio
 import copy
 import json
 import logging
+import traceback
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -48,6 +49,8 @@ from tools.api.event_broker import EventBrokerRegistry, RunEventBroker
 from tools.api.persistence import ApiPersistence
 from tools.api.session_titler import generate_session_title
 from tools.exceptions import _EXC_GROUP_CATCH, _is_exception_group, _log_nested_exceptions
+from tools.kernel.config_fingerprint import config_fingerprint
+from tools.kernel.redaction import sanitize, sanitize_message
 from tools.run_service.models import (
     Decision,
     DecisionKind,
@@ -80,7 +83,7 @@ def _preparation_error_text(exc: BaseException) -> str:
     if isinstance(exc, _PREPARATION_PASS_THROUGH):
         text = str(exc).strip()
         if text:
-            return text
+            return sanitize_message(text)
     return "Run preparation failed. View server logs for details."
 
 
@@ -106,6 +109,9 @@ class RunHandle:
         # permission/budgets/destructive verdicts stay valid even if the
         # operator PATCHes /config between confirmation and execution.
         self.config_snapshot: dict[str, Any] | None = None
+        # SHA-256 of the accepted config, checked by every MCP child before
+        # tool registration. The digest contains no serialized config values.
+        self.config_fingerprint: str | None = None
         # Per-run allowlist snapshot = config ``exploit.allowed_targets`` UNION
         # this run's ``--target`` (primary + resolved IP + domain). Frozen at
         # prepare() time so Run A's target never leaks into Run B's allowlist
@@ -207,6 +213,7 @@ class RunManager:
         # key every caller already has.
         self._active: dict[str, RunHandle] = {}
         self._lifecycle_lock = asyncio.Lock()
+        self._benchmark_slot_reserved = False
         # P1-10: async server paths run persistence ops on the DB actor so
         # the event loop never blocks on SQLite I/O. Sync shims stay direct.
         self._db = persistence.actor
@@ -261,6 +268,22 @@ class RunManager:
     def active_run_ids(self) -> list[str]:
         return list(self._active.keys())
 
+    async def reserve_benchmark_slot(self) -> bool:
+        """Atomically reserve one global run slot for the benchmark service."""
+        async with self._lifecycle_lock:
+            benchmark_active = self._benchmark_slot_reserved or bool(
+                self._benchmark_service is not None and getattr(self._benchmark_service, "is_active", lambda: False)()
+            )
+            if len(self._active) + int(benchmark_active) >= self.max_concurrent_runs:
+                return False
+            self._benchmark_slot_reserved = True
+            return True
+
+    async def release_benchmark_slot(self) -> None:
+        """Release the benchmark service's global run-slot reservation."""
+        async with self._lifecycle_lock:
+            self._benchmark_slot_reserved = False
+
     async def create_run(self, request: RunRequest) -> tuple[str, RunPreview | None, Decision | None]:
         """Accept a run and start preparation in the background.
 
@@ -276,7 +299,7 @@ class RunManager:
         """
         async with self._lifecycle_lock:
             # ponytail: single global cap — an active benchmark occupies a slot.
-            bench_busy = bool(
+            bench_busy = self._benchmark_slot_reserved or bool(
                 self._benchmark_service is not None and getattr(self._benchmark_service, "is_active", lambda: False)()
             )
             if len(self._active) + (1 if bench_busy else 0) >= self.max_concurrent_runs:
@@ -285,6 +308,21 @@ class RunManager:
                     f"{self.max_concurrent_runs} run(s) already active. Cancel one first (api.max_concurrent_runs).",
                     status_code=409,
                 )
+
+            # Freeze config before the first await below. Config PATCH updates
+            # the shared app dict and file atomically; a DB write must not let
+            # that update slip between request acceptance and snapshot capture.
+            config_snapshot = copy.deepcopy(self._config)
+            # Skill flags are part of the effective per-run configuration.
+            # Apply them before fingerprinting so the MCP child verifies the
+            # same config that prepare()/execute() pass to it. This helper is
+            # idempotent; the service still applies it at its existing seams
+            # for CLI callers and compatibility.
+            from tools.run_service.prepare import _request_to_args
+            from tools.skills_cli import apply_skills_cli_overrides
+
+            config_snapshot = apply_skills_cli_overrides(config_snapshot, _request_to_args(request))
+            config_digest = config_fingerprint(config_snapshot)
 
             request.config_path = self._config_path
             request.reports_dir = self._persistence.reports_dir
@@ -306,7 +344,8 @@ class RunManager:
             handle.request = request
             # Freeze the config for this run now so execution sees the same
             # permission/budgets/destructive verdict the operator confirmed.
-            handle.config_snapshot = copy.deepcopy(self._config)
+            handle.config_snapshot = config_snapshot
+            handle.config_fingerprint = config_digest
             # Per-run allowlist snapshot is filled in when prepare() returns.
             handle.event_broker = event_broker
             handle.decision_broker = DecisionBroker(run_id, self._persistence, actor=self._db)
@@ -369,7 +408,7 @@ class RunManager:
             # ExceptionGroup included (anyio/MCP surfaces groups, not Exception).
             await self._fail_preparation(handle, exc)
             if _is_exception_group(exc):
-                _log_nested_exceptions(exc)
+                _log_nested_exceptions(exc, redact=sanitize_message)
             return
 
         async with self._lifecycle_lock:
@@ -452,7 +491,8 @@ class RunManager:
         if handle.decision_broker:
             handle.decision_broker.cancel_all()
         error_text = _preparation_error_text(exc)
-        log.exception("run %s preparation failed", handle.run_id)
+        trace = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
+        log.error("run %s preparation failed:\n%s", handle.run_id, sanitize_message(trace))
         try:
             await handle.emit("error", {"message": error_text})
             await handle.emit("state", {"state": RunState.FAILED.value, "error": error_text})
@@ -541,6 +581,7 @@ class RunManager:
                 event_sink=event_sink,
                 cancellation=handle.cancellation,
                 config=handle.config_snapshot,
+                config_fingerprint=handle.config_fingerprint,
                 approval_provider=approval_provider,
                 session_attach=lambda session, schemas, policy: self.set_mcp_session(
                     handle.run_id,
@@ -560,12 +601,13 @@ class RunManager:
                 state = RunState.FAILED.value
             else:
                 state = RunState.COMPLETED.value
-            result_dict = _result_to_dict(result)
+            result_dict = sanitize(_result_to_dict(result))
+            safe_error = sanitize_message(result.error) if result.error else ""
             await self._db.arun(
                 self._persistence.update_run_state,
                 handle.run_id,
                 state,
-                error=result.error,
+                error=safe_error,
                 result=result_dict,
             )
             await handle.emit("state", {"state": state, "result": result_dict})
@@ -578,13 +620,14 @@ class RunManager:
             # Catch BaseExceptionGroup too (MCP subprocess death raises it,
             # and it is NOT a subclass of Exception). Without this the run
             # would stay "running" forever. See tools/exceptions.py.
+            safe_error = sanitize_message(str(exc))
             await self._db.arun(
-                self._persistence.update_run_state, handle.run_id, RunState.FAILED.value, error=str(exc)
+                self._persistence.update_run_state, handle.run_id, RunState.FAILED.value, error=safe_error
             )
-            await handle.emit("error", {"message": str(exc)})
+            await handle.emit("error", {"message": safe_error})
             if _is_exception_group(exc):
-                _log_nested_exceptions(exc)
-            await self._maybe_title_run(handle, {"error": str(exc)})
+                _log_nested_exceptions(exc, redact=sanitize_message)
+            await self._maybe_title_run(handle, {"error": safe_error})
         finally:
             if handle.decision_broker:
                 handle.decision_broker.cancel_all()
@@ -787,7 +830,7 @@ class RunManager:
             except _EXC_GROUP_CATCH as exc:
                 # BaseExceptionGroup from MCP subprocess death is not an Exception.
                 if _is_exception_group(exc):
-                    _log_nested_exceptions(exc)
+                    _log_nested_exceptions(exc, redact=sanitize_message)
                 raise APIError("tool_error", "MCP tool call failed.", status_code=500) from exc
         # Extract text content.
         text = _extract_text(result)

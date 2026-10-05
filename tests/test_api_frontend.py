@@ -559,29 +559,29 @@ def _wait_start_confirm_decision(client, run_id: str, attempts: int = 50) -> dic
 
 
 def test_get_single_decision(tmp_path, monkeypatch):
-    client = _make_client(tmp_path, monkeypatch)
-    created = _create_run(client)
-    decision = _wait_start_confirm_decision(client, created["run_id"])
-    resp = client.get(
-        f"/api/v1/runs/{created['run_id']}/decisions/{decision['id']}",
-        headers=_auth(),
-    )
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data["id"] == decision["id"]
-    assert data["kind"] == "start_confirm"
-    assert "prompt_text" in data
+    with _make_client(tmp_path, monkeypatch) as client:
+        created = _create_run(client)
+        decision = _wait_start_confirm_decision(client, created["run_id"])
+        resp = client.get(
+            f"/api/v1/runs/{created['run_id']}/decisions/{decision['id']}",
+            headers=_auth(),
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["id"] == decision["id"]
+        assert data["kind"] == "start_confirm"
+        assert "prompt_text" in data
 
 
 def test_get_single_decision_wrong_run(tmp_path, monkeypatch):
-    client = _make_client(tmp_path, monkeypatch)
-    created = _create_run(client)
-    decision = _wait_start_confirm_decision(client, created["run_id"])
-    resp = client.get(
-        f"/api/v1/runs/nonexistent/decisions/{decision['id']}",
-        headers=_auth(),
-    )
-    assert resp.status_code == 404
+    with _make_client(tmp_path, monkeypatch) as client:
+        created = _create_run(client)
+        decision = _wait_start_confirm_decision(client, created["run_id"])
+        resp = client.get(
+            f"/api/v1/runs/nonexistent/decisions/{decision['id']}",
+            headers=_auth(),
+        )
+        assert resp.status_code == 404
 
 
 # ── SSE auth (D4) ────────────────────────────────────────────────────────────

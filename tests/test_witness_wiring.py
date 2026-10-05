@@ -268,7 +268,7 @@ def test_error_path_stops_witness_and_leaves_no_pending_tasks(tmp_path: Path) ->
         with activity.open("a", encoding="utf-8") as f:
             f.write(json.dumps({"tool_name": "run_exploit_terminal", "target_ip": "10.0.0.99", "status": "ok"}) + "\n")
         await asyncio.sleep(0.2)
-        raise RuntimeError("boom: session died")
+        raise RuntimeError("boom: session died access_token=do-not-persist client_secret=also-do-not-persist")
 
     service._c.run_session = _failing_run_session  # type: ignore[union-attr]
     sink = _CaptureSink()
@@ -291,6 +291,18 @@ def test_error_path_stops_witness_and_leaves_no_pending_tasks(tmp_path: Path) ->
 
     result = asyncio.run(_main())
     assert "boom: session died" in result.error
+    assert "do-not-persist" not in result.error
+    assert "also-do-not-persist" not in result.error
+    assert "[REDACTED]" in result.error
+    error_log = Path(result.reports_dir) / "session_error.log"
+    assert error_log.is_file()
+    log_text = error_log.read_text(encoding="utf-8")
+    assert "do-not-persist" not in log_text
+    assert "also-do-not-persist" not in log_text
+    assert "[REDACTED]" in log_text
+    emitted_text = json.dumps(sink.events)
+    assert "do-not-persist" not in emitted_text
+    assert "also-do-not-persist" not in emitted_text
     assert len(created) == 1, "the witness must be constructed on the error path too"
     assert created[0].stopped is True, "witness.stop() must be called when the run fails"
     # The witness still processed what it saw before the session died.

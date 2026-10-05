@@ -15,13 +15,16 @@ allowlist, even when both are live. These tests verify:
 
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 
 from tools.api.errors import APIError
 from tools.api.event_broker import EventBrokerRegistry
 from tools.api.persistence import ApiPersistence
-from tools.api.run_manager import RunManager, _snapshot_allowlist
-from tools.run_service.models import RunPreview, RunRequest
+from tools.api.run_manager import RunHandle, RunManager, _snapshot_allowlist
+from tools.kernel.config_fingerprint import config_fingerprint
+from tools.run_service.models import RunPreview, RunRequest, RunResult
 
 
 def _preview(run_id: str, target: str, tmp_path) -> RunPreview:
@@ -91,6 +94,34 @@ async def test_default_cap_is_one(tmp_path, monkeypatch):
     """``api.max_concurrent_runs`` defaults to 1 (legacy behavior)."""
     manager = _make_manager(tmp_path, monkeypatch)
     assert manager.max_concurrent_runs == 1
+
+
+@pytest.mark.asyncio
+async def test_accepted_config_fingerprint_includes_request_skill_overrides(tmp_path, monkeypatch):
+    """The child receives the same effective config that API accepted."""
+    manager = _make_manager(tmp_path, monkeypatch)
+    manager.config.update({"skills": {"enabled": False, "default_enabled": ["base"]}})
+    request = RunRequest(
+        target="10.0.0.50",
+        skills_mode="on",
+        skills_include=["web-research"],
+        skills_exclude=["unsafe-example"],
+        skills_no_reselect=True,
+    )
+
+    run_id, _preview, _decision = await manager.create_run(request)
+    handle = manager.active_for(run_id)
+    assert handle is not None
+    assert handle.config_snapshot is not None
+    assert handle.config_snapshot["skills"] == {
+        "enabled": True,
+        "default_enabled": ["base", "web-research"],
+        "inject_startup_context": True,
+        "exclude_names": ["unsafe-example"],
+        "reselect_mid_run": False,
+    }
+    assert handle.config_fingerprint == config_fingerprint(handle.config_snapshot)
+    await manager.cancel_run(run_id)
 
 
 @pytest.mark.asyncio
@@ -253,3 +284,103 @@ async def test_concurrent_create_run_ids_differ(tmp_path, monkeypatch):
     assert len(set(ids)) == 2
     for rid in ids:
         await manager.cancel_run(rid)
+
+
+@pytest.mark.asyncio
+async def test_benchmark_reserves_global_slot_while_api_run_persists(tmp_path, monkeypatch):
+    """API persistence awaits must not let a benchmark pass the global cap."""
+    import asyncio
+
+    from tools.benchmark.service import BenchmarkService
+
+    manager = _make_manager(tmp_path, monkeypatch, max_concurrent_runs=1)
+    service = BenchmarkService(manager.config, tmp_path / "config.yaml", run_manager=manager)
+    manager.benchmark_service = service
+
+    class _BlockingRunner:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        async def run(self, *_args, **_kwargs):
+            await asyncio.Event().wait()
+
+    monkeypatch.setattr("tools.benchmark.service.BenchmarkRunner", _BlockingRunner)
+    persistence_started = asyncio.Event()
+    continue_persistence = asyncio.Event()
+    real_arun = manager._db.arun
+
+    async def delayed_arun(fn, *args, **kwargs):
+        if getattr(fn, "__name__", "") == "create_run":
+            persistence_started.set()
+            await continue_persistence.wait()
+        return await real_arun(fn, *args, **kwargs)
+
+    monkeypatch.setattr(manager._db, "arun", delayed_arun)
+    api_start = asyncio.create_task(manager.create_run(RunRequest(target="10.0.0.50")))
+    await asyncio.wait_for(persistence_started.wait(), timeout=2)
+    benchmark_start = asyncio.create_task(service.start_run({"suite": "xben"}))
+    await asyncio.sleep(0)
+    continue_persistence.set()
+
+    run_id, _, _ = await api_start
+    benchmark_result = await benchmark_start
+
+    assert run_id in manager.active_run_ids
+    assert "error" in benchmark_result
+    assert not service.is_active()
+
+    await service.shutdown()
+    await manager.cancel_run(run_id)
+
+
+async def _empty_title(*_args, **_kwargs):
+    return ""
+
+
+@pytest.mark.asyncio
+async def test_service_returned_error_is_redacted_before_run_persistence(tmp_path, monkeypatch):
+    started = asyncio.Event()
+    finish = asyncio.Event()
+
+    class ErrorResultService(_FakeService):
+        async def execute(self, request, preview, **_kwargs):
+            started.set()
+            await finish.wait()
+            return RunResult(
+                run_id=preview.run_id,
+                target_ip=preview.target_ip,
+                mode="attack",
+                goal_name="recon_only",
+                goal_description="test",
+                error="client_secret=do-not-persist access_token=also-do-not-persist",
+            )
+
+    manager = _make_manager(tmp_path, monkeypatch)
+    monkeypatch.setattr("tools.run_service.AssessmentService", ErrorResultService)
+    monkeypatch.setattr("tools.api.run_manager.generate_session_title", _empty_title)
+    run_id, _, _ = await manager.create_run(RunRequest(target="10.0.0.60", yes=True))
+    handle = manager.active_for(run_id)
+    assert handle is not None
+    await asyncio.wait_for(started.wait(), timeout=2)
+    assert handle.task is not None
+    finish.set()
+    await handle.task
+
+    stored = manager._persistence.get_run(run_id)
+    assert stored is not None
+    persisted = str(stored["error"]) + str(stored["result_json"])
+    assert "do-not-persist" not in persisted
+    assert "also-do-not-persist" not in persisted
+    assert "[REDACTED]" in persisted
+
+
+@pytest.mark.asyncio
+async def test_preparation_failure_traceback_is_redacted_in_server_log(tmp_path, monkeypatch, caplog):
+    manager = _make_manager(tmp_path, monkeypatch)
+    handle = RunHandle("run-preparation-error")
+
+    with caplog.at_level("ERROR", logger="tools.api.run_manager"):
+        await manager._fail_preparation(handle, RuntimeError("client_secret=do-not-log"))
+
+    assert "do-not-log" not in caplog.text
+    assert "[REDACTED]" in caplog.text

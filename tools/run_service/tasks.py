@@ -123,6 +123,7 @@ class TasksMixin:
         decision_provider: DecisionProvider,
         event_sink: EventSink,
         cancellation: CancellationToken,
+        config_fingerprint: str | None = None,
     ) -> tuple[ReconAssessment, AttackGoal]:
         """Recon-first: scan target, suggest goals, let operator pick."""
         ui.status("RECON-FIRST MODE: Scanning target before goal selection...")
@@ -146,6 +147,15 @@ class TasksMixin:
                 soft_fail=True,
                 original_target=original_target if resolved_domain else None,
                 resolved_ip=resolved_ip if resolved_domain else None,
+                **(
+                    {
+                        "config_fingerprint": config_fingerprint,
+                        "config_snapshot": config,
+                        "snapshot_excluded_paths": (reports_dir,),
+                    }
+                    if config_fingerprint is not None
+                    else {}
+                ),
             ) as recon_session:
                 if recon_session is None:
                     ui.info("MCP recon unavailable — falling back to UNKNOWN OS verdict.")
@@ -248,6 +258,7 @@ class TasksMixin:
         decision_provider: DecisionProvider,
         event_sink: EventSink,
         cancellation: CancellationToken,
+        config_fingerprint: str | None = None,
     ) -> tuple[ReconAssessment, AttackGoal]:
         """Fast Mode: parallel recon preset, then auto goal + AI takeover.
 
@@ -313,6 +324,15 @@ class TasksMixin:
                     soft_fail=True,
                     original_target=original_target if resolved_domain else None,
                     resolved_ip=resolved_ip if resolved_domain else None,
+                    **(
+                        {
+                            "config_fingerprint": config_fingerprint,
+                            "config_snapshot": config,
+                            "snapshot_excluded_paths": (reports_dir,),
+                        }
+                        if config_fingerprint is not None
+                        else {}
+                    ),
                 ) as recon_session:
                     if recon_session is None:
                         ui.info("MCP recon unavailable — falling back to UNKNOWN assessment.")
@@ -576,10 +596,17 @@ class TasksMixin:
         event_sink: EventSink,
         cancellation: CancellationToken,
         checkpoint_hook: Any = None,
+        config: dict[str, Any] | None = None,
+        config_fingerprint: str | None = None,
     ) -> dict[str, Any]:
-        config = _config_cli_load(config_path)
+        # API runs use the snapshot that was previewed and confirmed. CLI
+        # callers retain the historical disk load (no fingerprint attached).
+        config = config if config_fingerprint is not None and config is not None else _config_cli_load(config_path)
         http_port = int(config.get("mcp", {}).get("http_port", 8001))
 
+        session_kwargs: dict[str, Any] = {}
+        if config_fingerprint is not None:
+            session_kwargs = {"config": config, "config_fingerprint": config_fingerprint}
         result = await self._c.run_session(
             client=model_client,
             model=model_alias,
@@ -600,6 +627,7 @@ class TasksMixin:
             resolved_ip=resolved_ip,
             event_sink=event_sink,
             checkpoint_hook=checkpoint_hook,
+            **session_kwargs,
         )
         ui.divider()
         ui.success(f"Session complete. {result.get('total_actions', 0)} actions executed.")

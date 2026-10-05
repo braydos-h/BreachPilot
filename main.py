@@ -809,6 +809,12 @@ def main(argv: list[str] | None = None) -> int:
         # without, the graded eval suite (oracle v2) across all/specified targets.
         if getattr(args, "eval", None) is not None:
             if args.target.strip():
+                if getattr(args, "save_baseline", False) or getattr(args, "check_regression", False):
+                    ui.error(
+                        "--save-baseline/--check-regression require the graded --eval path; "
+                        "remove --target to use the oracle suite."
+                    )
+                    return 2
                 from tools.eval_harness import run_eval
 
                 return asyncio.run(run_eval(args))
@@ -820,16 +826,24 @@ def main(argv: list[str] | None = None) -> int:
             report = asyncio.run(run_graded_eval(list(args.eval) or None, config))
             print(report.render_markdown())
             exit_code = 0
+            regression_passed: bool | None = None
             if getattr(args, "check_regression", False):
-                passed, messages = check_regression(
+                regression_passed, messages = check_regression(
                     report, baseline_path, float(eval_cfg.get("regression_tolerance", 0.05) or 0.05)
                 )
                 for message in messages:
                     print(message)
-                if not passed:
+                if not regression_passed:
                     exit_code = 1
             if getattr(args, "save_baseline", False):
-                save_baseline(report, baseline_path)
+                if regression_passed is False:
+                    ui.warning("Baseline was not replaced because the regression check failed.")
+                else:
+                    try:
+                        save_baseline(report, baseline_path)
+                    except ValueError as exc:
+                        ui.error(str(exc))
+                        return 2
             return exit_code
 
         # --ctf: CTF autopilot with goal-completion detection.

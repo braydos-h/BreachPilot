@@ -29,6 +29,7 @@ from tools.attack_ui import get_ui
 from tools.exceptions import _EXC_GROUP_CATCH, _find_cancellation, _is_exception_group, _log_nested_exceptions
 from tools.goal_engine import AttackGoal, GoalEngine
 from tools.goal_suggester import ReconAssessment
+from tools.kernel.redaction import sanitize, sanitize_message
 from tools.mcp_session import _RunHeartbeat
 from tools.model_telemetry import usage_log_path, workspace_root_from_sources
 from tools.run_log import RunLog
@@ -103,6 +104,7 @@ class ExecuteMixin:
             decision_provider: DecisionProvider,
             event_sink: EventSink,
             cancellation: CancellationToken,
+            config_fingerprint: str | None = None,
         ) -> tuple[ReconAssessment, AttackGoal]: ...
         async def _fast_recon(
             self,
@@ -122,6 +124,7 @@ class ExecuteMixin:
             decision_provider: DecisionProvider,
             event_sink: EventSink,
             cancellation: CancellationToken,
+            config_fingerprint: str | None = None,
         ) -> tuple[ReconAssessment, AttackGoal]: ...
         async def _setup_swarm(
             self,
@@ -165,6 +168,8 @@ class ExecuteMixin:
             event_sink: EventSink,
             cancellation: CancellationToken,
             checkpoint_hook: Any = None,
+            config: dict[str, Any] | None = None,
+            config_fingerprint: str | None = None,
         ) -> dict[str, Any]: ...
         async def _wait_swarm(
             self,
@@ -189,6 +194,7 @@ class ExecuteMixin:
         cancellation: CancellationToken,
         model_client: Any | None = None,
         config: dict[str, Any] | None = None,
+        config_fingerprint: str | None = None,
         approval_provider: Any | None = None,
         session_attach: Callable[[Any, list[dict[str, Any]], Any], None] | None = None,
     ) -> RunResult:
@@ -330,6 +336,7 @@ class ExecuteMixin:
                 decision_provider=decision_provider,
                 event_sink=event_sink,
                 cancellation=cancellation,
+                config_fingerprint=config_fingerprint,
             )
             # Fast recon implies recon_first semantics for downstream context.
             recon_first = True
@@ -350,6 +357,7 @@ class ExecuteMixin:
                 decision_provider=decision_provider,
                 event_sink=event_sink,
                 cancellation=cancellation,
+                config_fingerprint=config_fingerprint,
             )
         elif request.custom_goal.strip():
             goal = goal_engine.get("custom", request.custom_goal.strip(), risk_profile=risk_profile)
@@ -659,6 +667,8 @@ class ExecuteMixin:
                     event_sink=event_sink,
                     cancellation=cancellation,
                     checkpoint_hook=_checkpoint_hook,
+                    config=config if config_fingerprint is not None else None,
+                    config_fingerprint=config_fingerprint,
                 )
             finally:
                 if session_attach is not None:
@@ -681,18 +691,22 @@ class ExecuteMixin:
             cancellation_error = _find_cancellation(exc)
             if cancellation_error is not None:
                 raise cancellation_error from exc
+            safe_error = sanitize_message(str(exc))
             log_path = reports_dir / "session_error.log"
             try:
+                safe_traceback = sanitize_message(
+                    "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
+                )
                 log_path.write_text(
-                    "".join(traceback.format_exception(type(exc), exc, exc.__traceback__)),
+                    safe_traceback,
                     encoding="utf-8",
                 )
             except OSError:
                 pass
-            ui.error(f"Exploitation session failed unexpectedly: {exc}")
+            ui.error(f"Exploitation session failed unexpectedly: {safe_error}")
             if _is_exception_group(exc):
-                _log_nested_exceptions(exc)
-            await event_sink.emit(EVENT_ERROR, {"message": str(exc), "log_path": str(log_path)})
+                _log_nested_exceptions(exc, redact=sanitize_message)
+            await event_sink.emit(EVENT_ERROR, sanitize({"message": safe_error, "log_path": str(log_path)}))
             # Deep Run Logs: the session "errored out" — mirror the crash
             # into errors.jsonl so the fixer-agent gets kind/class/traceback,
             # not just the one-line message above. Fail-open, never gates.
@@ -723,7 +737,7 @@ class ExecuteMixin:
                 mode=mode,
                 goal_name=goal.name,
                 goal_description=goal.description,
-                error=str(exc),
+                error=safe_error,
                 reports_dir=str(reports_dir),
             )
         finally:

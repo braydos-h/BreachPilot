@@ -187,8 +187,8 @@ def create_app(
     if users_router is not None:
         app.include_router(users_router)
 
-    # Optional: serve the bundled WebUI from webui/dist/ when
-    # ``api.serve_webui`` is true and the build exists. Mounted LAST so the
+    # Optional: serve the bundled WebUI when ``api.serve_webui`` is true and
+    # the source-checkout or installed package build exists. Mounted LAST so the
     # /api/v1 routes, /docs, and /openapi.json are never shadowed. The SPA
     # fallback returns index.html for unknown non-API paths so client-side
     # deep links (/runs/:id, /system) work on refresh.
@@ -197,10 +197,12 @@ def create_app(
         from starlette.routing import Route
         from starlette.staticfiles import StaticFiles
 
-        webui_dist = Path(__file__).resolve().parent / "webui" / "dist"
-        index_html = webui_dist / "index.html"
-        assets_dir = webui_dist / "assets"
-        if index_html.exists():
+        from tools.paths import get_webui_dist_dir
+
+        webui_dist = get_webui_dist_dir()
+        if webui_dist is not None:
+            index_html = webui_dist / "index.html"
+            assets_dir = webui_dist / "assets"
             if assets_dir.exists():
                 app.mount(
                     "/assets",
@@ -213,7 +215,7 @@ def create_app(
             # route (not a FastAPI decorator) so it stays out of OpenAPI schema
             # generation. API/docs/openapi routes are matched first by
             # FastAPI's router and never reach here. Resolved-path guard
-            # blocks traversal outside webui/dist.
+            # blocks traversal outside the selected WebUI bundle directory.
             _webui_dist_resolved = webui_dist.resolve()
             _index_html_resolved = index_html.resolve()
 

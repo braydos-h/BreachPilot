@@ -24,6 +24,14 @@ def test_demon_default_host_port():
     assert args.api_port is None
 
 
+def test_benchmark_timeout_seconds_option():
+    from main import parse_args
+
+    args = parse_args(["--benchmark", "xben", "--timeout-seconds", "321"])
+
+    assert args.timeout_seconds == 321
+
+
 def test_demon_reuses_running_api_daemon(monkeypatch):
     """A second daemon invocation must not attempt another bind."""
     import main
@@ -329,16 +337,24 @@ def test_ensure_webui_build_errors_when_npm_missing(monkeypatch, tmp_path):
     import main
 
     monkeypatch.setattr(main.shutil, "which", lambda name: None)
-    # Force the dist-absent branch by patching Path.exists for index.html only.
+    # Force the dist-absent branch for both source and packaged bundles.
     webui_dir = Path(main.__file__).resolve().parent / "webui"
+    packaged_index = Path(main.__file__).resolve().parent / "tools" / "webui" / "dist" / "index.html"
     real_exists = Path.exists
+    real_is_file = Path.is_file
 
     def _fake_exists(self):
         if self == webui_dir / "dist" / "index.html":
             return False
         return real_exists(self)
 
+    def _fake_is_file(self):
+        if self == packaged_index:
+            return False
+        return real_is_file(self)
+
     monkeypatch.setattr(Path, "exists", _fake_exists)
+    monkeypatch.setattr(Path, "is_file", _fake_is_file)
 
     class _Ui:
         def __init__(self):
