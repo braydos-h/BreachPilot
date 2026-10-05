@@ -10,6 +10,7 @@ The autonomous campaign engine drives persistent multi-phase attacks across one 
 | `tools/campaign/orchestrator.py` | `AutonomousOrchestrator`: constructor wiring, `run_autonomous_campaign`, `_attack_target` delegation, delegating wrappers for batch / preflight / service-tasks / state-store. |
 | `tools/campaign/state.py` | `AttackTask`, `AttackState`, `AggressionLevel`, `AttackPhase`, `TaskStatus`, `RetryEngine`, `observe_autonomous_progress` / `_report_autonomous_progress`. |
 | `tools/campaign/executor.py` | `AttackModuleExecutor`: per-task lifecycle (scope, risk, critic, dispatch, classify, record, reflect). |
+| `tools/campaign/planner_step.py` | Memoryless adapter from one planner `StepContext` to `AttackModuleExecutor.execute`; planner-step success means the operation completed, while verified compromise remains separate. |
 | `tools/campaign/phases.py` | Phase handlers (`_phase_reconnaissance`, `_phase_exploitation`, `_phase_privilege_escalation`, `_phase_lateral_movement`, `_phase_persistence`, `_phase_validation`, `_phase_local_takeover`, `_phase_killchain`), `_attack_target`, adaptive rounds, kill-chain machine builder. Bound onto `AutonomousOrchestrator` after class definition. |
 | `tools/campaign/batch.py` | `_execute_task_batch`, prerequisite recovery (`_maybe_schedule_prereq`, `_prereq_artifact_kinds`, `_PREREQ_KIND_PATTERNS`), `_retry_failed_modules`. |
 | `tools/campaign/preflight.py` | `_preflight_targets`: resolve / dedupe / scope-check / non-routable filter. |

@@ -42,7 +42,7 @@ def _recon_plan() -> AttackPlan:
     plan.add_step(
         AttackStep(
             phase="recon",
-            tool="APIFuzzer",  # offline-safe stub: returns script_generated, no network
+            tool="ReconProbe",
             reason="probe api surface",
             target_ip=_TARGET,
             expected_evidence=["open ports"],
@@ -52,20 +52,116 @@ def _recon_plan() -> AttackPlan:
 
 
 # (a) planner -> executor -> FSM happy path advances the phase ---------------
-async def test_happy_path_advances_phase() -> None:
+async def test_completed_recon_step_advances_without_claiming_compromise(monkeypatch) -> None:
     plan = _recon_plan()
     assert plan.current_phase == AttackPhase.RECON
 
     ctx = step_context_for(plan, 0)
-    assert (ctx.target_ip, ctx.tool) == (_TARGET, "APIFuzzer")
+    assert (ctx.target_ip, ctx.tool) == (_TARGET, "ReconProbe")
 
-    raw = await AttackModuleExecutor(_allowing_scope_gate()).execute_plan_step(ctx)
+    class _ReconProbe:
+        name = "ReconProbe"
+
+        def run(self, _ctx):
+            return {
+                "status": "success",
+                "module": self.name,
+                "suggested_command": f"recon_probe --target {_TARGET}",
+                "evidence": ["HTTP service discovered on port 80"],
+            }
+
+    dispatches = []
+
+    def sandbox_dispatch_stub(command, args):
+        # This is the injected tool-execution boundary used by the campaign;
+        # the test records the request and never starts a host process or sends
+        # network traffic. Production wires this callback to sandbox-backed MCP.
+        dispatches.append((command, args))
+        return "HTTP service found at 127.0.0.1:80"
+
+    import tools.autonomous_orchestrator as orchestrator_shim
+
+    monkeypatch.setattr(
+        orchestrator_shim,
+        "get_module",
+        lambda name: _ReconProbe() if name == "ReconProbe" else None,
+    )
+    executor = AttackModuleExecutor(
+        _allowing_scope_gate(),
+        mission_config={
+            "exploit": {
+                "require_explicit_allowlist": True,
+                "allowed_targets": [_TARGET],
+            }
+        },
+        tool_executor=sandbox_dispatch_stub,
+    )
+    campaign_execute = executor.execute
+    execution = {}
+
+    async def capture_execution(task, state):
+        result = await campaign_execute(task, state)
+        execution["result"] = result
+        execution["state"] = state
+        return result
+
+    monkeypatch.setattr(executor, "execute", capture_execution)
+
+    raw = await executor.execute_plan_step(ctx)
     assert raw["success"] is True
     assert raw["failure_class"] == ""
+
+    # The planner's success means the recon operation completed. It must not
+    # promote that operational success to a compromise or unlock access.
+    executed = execution["result"]
+    state = execution["state"]
+    assert executed["completed"] is True
+    assert executed["success"] is False
+    assert executed["verified_success"] is False
+    assert state.access_achieved is False
+    assert state.successful_exploits == []
+    assert dispatches == [("recon_probe --target 127.0.0.1", {"target": _TARGET})]
 
     assert record_step_result(plan, 0, raw) == "done"
     assert fsm_advance(plan) == AttackPhase.ENUMERATE
     assert plan.current_phase == AttackPhase.ENUMERATE
+
+
+async def test_planner_step_adapter_folds_completed_result_into_bounded_evidence(monkeypatch) -> None:
+    executor = AttackModuleExecutor(_allowing_scope_gate())
+    observed = {}
+
+    async def fake_execute(task, state):
+        observed["task"] = task
+        observed["state"] = state
+        return {
+            "success": False,
+            "completed": True,
+            "verified_success": False,
+            "result": {
+                "evidence": ["x" * 600 for _ in range(11)],
+                "note": "verified by target-bound check",
+                "status": "success",
+            },
+        }
+
+    monkeypatch.setattr(executor, "execute", fake_execute)
+    step = step_context_for(_recon_plan(), 0)
+    result = await executor.execute_plan_step(step)
+
+    task = observed["task"]
+    state = observed["state"]
+    assert task.task_id == "FSM-00001"
+    assert task.phase.value == "recon"
+    assert (task.module_name, task.target, task.parameters) == (step.tool, step.target_ip, step.arguments)
+    assert state.target == step.target_ip
+    assert result == {
+        "success": True,
+        "evidence": ["x" * 500] * 10,
+        "failure_class": "",
+        "tool": step.tool,
+        "target_ip": step.target_ip,
+    }
 
 
 def test_fsm_guard_rejects_phase_jumps() -> None:

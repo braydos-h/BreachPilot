@@ -21,6 +21,7 @@ from tools.kernel.workspace import write_workspace_script
 from tools.logging_setup import get_logger
 from tools.scope_verdict import ScopeVerdict, verdict_for
 
+from tools.campaign.planner_step import execute_plan_step as _execute_planner_step
 from tools.campaign.state import (
     AggressionLevel,
     AttackPhase,
@@ -32,21 +33,6 @@ from tools.campaign.state import (
 
 logger = get_logger()
 ui = get_ui()
-
-
-def _result_evidence(result: Any) -> list[str]:
-    """Pull human-readable evidence strings out of a module result dict."""
-    if not isinstance(result, dict):
-        return [str(result)[:500]] if result else ["no evidence returned"]
-    out: list[str] = []
-    ev = result.get("evidence")
-    if isinstance(ev, list):
-        out.extend(str(e)[:500] for e in ev)
-    for key in ("note", "status"):
-        val = result.get(key)
-        if val:
-            out.append(str(val)[:500])
-    return out[:10] or ["no evidence returned"]
 
 
 class AttackModuleExecutor:
@@ -545,57 +531,8 @@ class AttackModuleExecutor:
             return {"success": False, "error": task.error}
 
     async def execute_plan_step(self, step: StepContext) -> dict[str, Any]:
-        """Run ONE planner step with no cross-step memory (FSM executor role).
-
-        Takes only a StepContext (target/tool/arguments/expected evidence) --
-        never a plan, battle log, or history. Builds an ephemeral AttackTask /
-        AttackState, runs it through execute(), and folds the outcome into
-        ``{"success", "evidence", "failure_class"}`` for
-        ``tools.attack_planner.record_step_result``. Scope gating stays inside
-        execute() (fail-closed); a scope block maps to ``scope_blocked``.
-        """
-        task = AttackTask(
-            task_id=f"FSM-{self._action_count + 1:05d}",
-            phase=self._campaign_phase_for(step.phase),
-            module_name=step.tool,
-            target=step.target_ip,
-            parameters=dict(step.arguments),
-        )
-        state = AttackState(target=step.target_ip)
-        try:
-            raw = await self.execute(task, state)
-        except _EXC_GROUP_CATCH as exc:
-            if _is_exception_group(exc):
-                _log_nested_exceptions(exc)
-            err = f"{type(exc).__name__}: {exc}"[:2000]
-            task.failure_class = classify_failure(err).value
-            return {
-                "success": False,
-                "evidence": [err],
-                "failure_class": task.failure_class,
-                "tool": step.tool,
-                "target_ip": step.target_ip,
-            }
-        if raw.get("success"):
-            task.failure_class = ""
-            return {
-                "success": True,
-                "evidence": _result_evidence(raw.get("result")),
-                "failure_class": "",
-                "tool": step.tool,
-                "target_ip": step.target_ip,
-            }
-        err = str(raw.get("error") or "unknown failure")[:2000]
-        # Fail-closed scope blocks are scope_blocked even when the message
-        # misses the taxonomy regexes (never retry a blocked step blindly).
-        task.failure_class = "scope_blocked" if raw.get("blocked") else classify_failure(err).value
-        return {
-            "success": False,
-            "evidence": [err],
-            "failure_class": task.failure_class,
-            "tool": step.tool,
-            "target_ip": step.target_ip,
-        }
+        """Run one memoryless FSM step through the normal campaign executor."""
+        return await _execute_planner_step(self, step)
 
     @staticmethod
     def _campaign_phase_for(planner_phase: str) -> AttackPhase:

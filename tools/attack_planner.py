@@ -414,7 +414,12 @@ class StepContext:
 
 @dataclass
 class ExecutorResult:
-    """Memoryless executor output, folded into the plan via record_step_result."""
+    """Memoryless step-completion output, not a compromise verdict.
+
+    ``success`` means the planned operation completed and can satisfy step
+    dependencies. Exploit verification and access state remain owned by the
+    campaign executor's separate ``verified_success`` result.
+    """
 
     success: bool
     evidence: list[str] = field(default_factory=list)
@@ -452,9 +457,9 @@ def record_step_result(
     *,
     max_retries: int = 3,
 ) -> str:
-    """Fold ONE memoryless executor result into the plan (planner-side write).
+    """Fold ONE memoryless step-completion result into the plan.
 
-    The ONLY writer path for executor outcomes: returns "done" (step
+    The ONLY writer path for planner-step outcomes: returns "done" (step
     succeeded), "retry" (failed, may be reset for another attempt), or
     "replan" (step blocked -- same failure_class hit the retry budget, or the
     class is permanent -- the planner must author a NEW step, never blindly

@@ -1,7 +1,7 @@
 ---
 title: Campaign — Overview
 package: tools/campaign
-files: [orchestrator.py, state.py, executor.py, phases.py, batch.py, preflight.py, service_tasks.py, state_store.py, __init__.py]
+files: [orchestrator.py, state.py, executor.py, planner_step.py, phases.py, batch.py, preflight.py, service_tasks.py, state_store.py, __init__.py]
 ---
 
 # Campaign — Overview (`tools/campaign/`)
@@ -24,6 +24,7 @@ AutonomousOrchestrator (orchestrator.py)
   -> _execute_task_batch (batch.py) -> AttackModuleExecutor.execute (executor.py)
        scope gate -> risk -> critic pre-check -> module.run -> dispatch artifact
        -> classify -> record -> reflection post-check
+  -> planner StepContext -> execute_plan_step (planner_step.py) -> execute()
   -> save_state / load_state (state_store.py, attack_states.json)
 ```
 
@@ -36,6 +37,7 @@ AutonomousOrchestrator (orchestrator.py)
 | `orchestrator.py` | `AutonomousOrchestrator` | Constructor wiring, `run_autonomous_campaign`, `_attack_target` delegation, wrappers for batch / preflight / service-tasks / state-store; phase handlers bound after class definition |
 | `state.py` | `AttackTask`, `AttackState`, `AggressionLevel`, `AttackPhase`, `TaskStatus`, `RetryEngine`, `observe_autonomous_progress` | Enums, task/state dataclasses, retry engine, progress hook |
 | `executor.py` | `AttackModuleExecutor` | Per-task lifecycle: scope, risk, critic, dispatch, classify, record, reflect |
+| `planner_step.py` | `execute_plan_step` | Adapts one memoryless FSM `StepContext` to an ephemeral campaign task/state; planner success records operational completion, not compromise |
 | `phases.py` | `_phase_*`, `_attack_target`, `_run_adaptive_rounds`, `_module_context` | Phase handlers (bound onto the orchestrator as `self._phase_*`) |
 | `batch.py` | `_execute_task_batch`, `_maybe_schedule_prereq`, `_retry_failed_modules` | Concurrency-3 batches, prerequisite recovery, aggression-escalated retry |
 | `preflight.py` | `_preflight_targets` | Campaign-entry target filtering |
@@ -159,7 +161,7 @@ class AttackModuleExecutor:
 
 `execute()` order: mark `RUNNING` → fail-closed scope check (no gate wired = `BLOCKED`) → risk-budget check → `CriticAgent` pre-check (`deny` blocks, `modify` downgrades aggression in place; critic exception denies fail-closed) → resolve module through the facade → build `ModuleContext` (version/CPE/creds/task params/live attack state) → per-target OPSEC pacing → run with timeout → dispatch runnable artifact through `tool_executor` when wired (verified shell markers only set `access_achieved`) → `COMPLETED` only for `success`/`exploited`/`script_generated` (`info` stubs count as failed, never wins) → blackboard + semantic-lesson recording → advisory reflection post-check.
 
-Supporting methods: `execute_plan_step` (FSM executor role — ephemeral task/state, folds outcome into `{success, evidence, failure_class}`; scope blocks map to `scope_blocked`), `_dispatch_module_artifact` (prefers `suggested_command`, else writes `script` to `<workspace>/modules/` and dispatches), `_dispatch_block_reason` (fail-closed target lock before dispatch), `_snapshot_before_destructive` (fail-open auto-snapshot), `_run_critic` / `_apply_critic_modifications` / blackboard recorders / `_run_reflection` / `_record_lesson_on_success` (all no-ops when their agent/store is unwired).
+Supporting methods: `execute_plan_step` delegates to `planner_step.py`, which accepts only one FSM `StepContext`, creates ephemeral task/state, and folds the outcome into `{success, evidence, failure_class}`. Here `success` means the requested operation completed and can satisfy planner dependencies; it does not mean verified compromise. Scope blocks map to `scope_blocked`. `_dispatch_module_artifact` prefers `suggested_command`, else writes `script` to `<workspace>/modules/` and dispatches; `_dispatch_block_reason` enforces the target lock before dispatch; `_snapshot_before_destructive` is fail-open; `_run_critic` / `_apply_critic_modifications` / blackboard recorders / `_run_reflection` / `_record_lesson_on_success` are no-ops when their agent/store is unwired.
 
 ## Phases (`phases.py`)
 
@@ -245,6 +247,7 @@ orchestrator.stop()  # graceful stop; in-flight loops exit with stopped status
 - `tools/campaign/orchestrator.py`
 - `tools/campaign/state.py`
 - `tools/campaign/executor.py`
+- `tools/campaign/planner_step.py`
 - `tools/campaign/phases.py`
 - `tools/campaign/batch.py`
 - `tools/campaign/preflight.py`
