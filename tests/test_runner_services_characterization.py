@@ -312,6 +312,35 @@ async def test_log_decision_hook_no_sink_never_raises(tmp_path):
     )
 
 
+@pytest.mark.asyncio
+async def test_log_decision_hook_propagates_grouped_cancellation(tmp_path, monkeypatch):
+    import asyncio
+
+    import tools.decision_log as decision_log
+    from tools.exploit_agent.runner.telemetry import log_decision_hook
+
+    def cancel_log(*_args, **_kwargs):
+        raise BaseExceptionGroup("log cancelled", [asyncio.CancelledError()])
+
+    monkeypatch.setattr(decision_log, "log_decision", cancel_log)
+    with pytest.raises(BaseExceptionGroup, match="log cancelled"):
+        await log_decision_hook(
+            tmp_path,
+            None,
+            tmp_path,
+            round_num=1,
+            tool_name="check_os",
+            target_ip="10.0.0.1",
+            result_text="ok",
+            outcome="completed",
+            failure_class="",
+            success=True,
+            evidence_refs=[],
+            action_count=1,
+            phase="recon",
+        )
+
+
 # ---------------------------------------------------------------------------
 # termination service
 # ---------------------------------------------------------------------------
@@ -653,6 +682,33 @@ async def test_persist_verdict_signal_noops():
         exploit_outcome=None,
         is_exploit_action=True,
     )
+
+
+@pytest.mark.asyncio
+async def test_persist_verdict_signal_propagates_grouped_cancellation():
+    import asyncio
+
+    from tools.exploit_agent.runner.evidence_promotion import persist_verdict_signal
+
+    class _CancelledStore:
+        def record_evidential_outcome(self, **_kwargs):
+            raise BaseExceptionGroup("evidence cancelled", [asyncio.CancelledError()])
+
+    with pytest.raises(BaseExceptionGroup, match="evidence cancelled"):
+        await persist_verdict_signal(
+            event_sink=None,
+            reports_dir=None,
+            experience_store=_CancelledStore(),
+            verdict_signal={"status": "confirmed"},
+            target_ip="10.0.0.1",
+            tool_name="check_os",
+            action_count=1,
+            round_num=1,
+            phase="recon",
+            last_record=None,
+            exploit_outcome=None,
+            is_exploit_action=True,
+        )
 
 
 # ---------------------------------------------------------------------------
