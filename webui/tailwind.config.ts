@@ -2,8 +2,11 @@ import type { Config } from "tailwindcss";
 import typography from "@tailwindcss/typography";
 import animate from "tailwindcss-animate";
 
+// Give the v4 compatibility pass a normalized HSL token to derive slash-opacity
+// fallbacks from (for example, `bg-background/30`).
+const themeColor = (name: string) => `hsl(var(--${name}) / <alpha-value>)`;
+
 const config: Config = {
-  darkMode: ["class"],
   content: ["./index.html", "./src/**/*.{ts,tsx}"],
   theme: {
     container: {
@@ -27,38 +30,38 @@ const config: Config = {
         },
       },
       colors: {
-        border: "hsl(var(--border))",
-        input: "hsl(var(--input))",
-        ring: "hsl(var(--ring))",
-        background: "hsl(var(--background))",
-        foreground: "hsl(var(--foreground))",
+        border: themeColor("border"),
+        input: themeColor("input"),
+        ring: themeColor("ring"),
+        background: themeColor("background"),
+        foreground: themeColor("foreground"),
         primary: {
-          DEFAULT: "hsl(var(--primary))",
-          foreground: "hsl(var(--primary-foreground))",
+          DEFAULT: themeColor("primary"),
+          foreground: themeColor("primary-foreground"),
         },
         secondary: {
-          DEFAULT: "hsl(var(--secondary))",
-          foreground: "hsl(var(--secondary-foreground))",
+          DEFAULT: themeColor("secondary"),
+          foreground: themeColor("secondary-foreground"),
         },
         destructive: {
-          DEFAULT: "hsl(var(--destructive))",
-          foreground: "hsl(var(--destructive-foreground))",
+          DEFAULT: themeColor("destructive"),
+          foreground: themeColor("destructive-foreground"),
         },
         muted: {
-          DEFAULT: "hsl(var(--muted))",
-          foreground: "hsl(var(--muted-foreground))",
+          DEFAULT: themeColor("muted"),
+          foreground: themeColor("muted-foreground"),
         },
         accent: {
-          DEFAULT: "hsl(var(--accent))",
-          foreground: "hsl(var(--accent-foreground))",
+          DEFAULT: themeColor("accent"),
+          foreground: themeColor("accent-foreground"),
         },
         popover: {
-          DEFAULT: "hsl(var(--popover))",
-          foreground: "hsl(var(--popover-foreground))",
+          DEFAULT: themeColor("popover"),
+          foreground: themeColor("popover-foreground"),
         },
         card: {
-          DEFAULT: "hsl(var(--card))",
-          foreground: "hsl(var(--card-foreground))",
+          DEFAULT: themeColor("card"),
+          foreground: themeColor("card-foreground"),
         },
       },
       borderRadius: {
