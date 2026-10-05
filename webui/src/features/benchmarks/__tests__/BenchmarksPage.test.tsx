@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 // BreachPilot by @braydos-h — https://github.com/braydos-h/BreachPilot
 import { describe, expect, it, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BenchmarksPage } from "@/routes/BenchmarksPage";
@@ -100,9 +101,11 @@ describe("BenchmarksPage (Overview)", () => {
     expect(screen.getByRole("link", { name: "Past benchmarks" })).toHaveAttribute("href", "/benchmarks/history");
     // Verified success from the latest run summary.
     await waitFor(() => {
-      expect(screen.getByTestId("benchmark-metric-cards")).toBeInTheDocument();
+    expect(screen.getByTestId("benchmark-metric-cards")).toBeInTheDocument();
     });
     expect(screen.getByText("66.7%")).toBeInTheDocument();
+    expect(within(screen.getByRole("region", { name: "Latest run metrics" })).getByText("Completed")).toBeInTheDocument();
+    expect(within(screen.getByRole("region", { name: "Latest run metrics" })).queryByText("Verified", { selector: "span" })).not.toBeInTheDocument();
     // Baseline card from overview.baseline.
     expect(screen.getByTestId("benchmark-baseline")).toBeInTheDocument();
     // Recent-runs preview links to the run detail + full history.
@@ -126,5 +129,39 @@ describe("BenchmarksPage (Overview)", () => {
       expect(screen.getByTestId("benchmarks-empty-state")).toBeInTheDocument();
     });
     expect(screen.getByRole("link", { name: /Start a benchmark/ })).toHaveAttribute("href", "/benchmarks/new");
+  });
+
+  it("shows a retry state when the latest completed run detail request fails", async () => {
+    const api = await import("@/features/benchmarks/api");
+    (api.fetchRun as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error("detail service unavailable"));
+    const user = userEvent.setup();
+    renderPage();
+
+    expect(await screen.findByTestId("benchmark-latest-detail-error")).toBeInTheDocument();
+    expect(screen.getByText("detail service unavailable")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Retry" }));
+    await waitFor(() => expect(screen.getByTestId("benchmark-metric-cards")).toBeInTheDocument());
+  });
+
+  it("discloses a completed overview row whose persisted detail has no summary", async () => {
+    const api = await import("@/features/benchmarks/api");
+    (api.fetchRun as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ run_id: "run-1", status: "completed", summary: null });
+    renderPage();
+
+    expect(await screen.findByTestId("benchmark-summary-unavailable")).toBeInTheDocument();
+    expect(screen.queryByTestId("benchmarks-empty-state")).not.toBeInTheDocument();
+  });
+
+  it("shows a retry state instead of an empty timeline when event loading fails", async () => {
+    const api = await import("@/features/benchmarks/api");
+    (api.fetchRunEvents as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error("timeline service unavailable"));
+    const user = userEvent.setup();
+    renderPage();
+
+    expect(await screen.findByTestId("benchmark-events-error")).toBeInTheDocument();
+    expect(screen.getByText(/Timeline unavailable: timeline service unavailable/)).toBeInTheDocument();
+    expect(screen.queryByText("No events recorded.")).not.toBeInTheDocument();
+    await user.click(within(screen.getByTestId("benchmark-events-error")).getByRole("button", { name: "Retry" }));
+    await waitFor(() => expect(screen.queryByTestId("benchmark-events-error")).not.toBeInTheDocument());
   });
 });

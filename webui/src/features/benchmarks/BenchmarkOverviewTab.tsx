@@ -2,7 +2,7 @@ import { Loader2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { MetricCards, formatCost, formatDuration, formatPct } from "@/features/benchmarks/MetricCards";
+import { MetricCards, ReliabilityCards, formatCost, formatDuration, formatPct } from "@/features/benchmarks/MetricCards";
 import type { BenchmarkRunState } from "./useBenchmarkRun";
 
 export function BenchmarkOverviewTab({ page }: { page: BenchmarkRunState }) {
@@ -11,6 +11,7 @@ export function BenchmarkOverviewTab({ page }: { page: BenchmarkRunState }) {
     return (
       <>
         <MetricCards summary={summary} />
+        <ReliabilityCards summary={summary} />
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm">Failure categories</CardTitle>
@@ -38,7 +39,8 @@ export function BenchmarkOverviewTab({ page }: { page: BenchmarkRunState }) {
           <CardHeader className="pb-2">
             <CardTitle className="text-sm">Summary</CardTitle>
             <CardDescription>
-              {summary.solved}/{summary.trials_total} verified · {formatPct(summary.verified_success_rate)} success ·{" "}
+              {summary.solved}/{summary.trials_completed ?? "n/a"} completed verified ({summary.trials_total} total) ·{" "}
+              {formatPct(summary.verified_success_rate)} success ·{" "}
               {formatPct(summary.false_positive_rate)} false positives
             </CardDescription>
           </CardHeader>

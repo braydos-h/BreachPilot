@@ -1,6 +1,6 @@
 // BreachPilot by @braydos-h — https://github.com/braydos-h/BreachPilot
 // Dashboard metric cards for a benchmark run summary.
-import { AlertTriangle, CheckCircle2, Clock3, Coins, Flame, ListChecks, OctagonAlert, ShieldAlert, Target, Timer } from "lucide-react";
+import { AlertTriangle, CheckCircle2, CircleHelp, Clock3, Coins, ListChecks, OctagonAlert, ShieldAlert, ShieldCheck, Target, Timer } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import { formatCost, formatDuration, formatPct } from "@/features/benchmarks/format";
@@ -46,28 +46,36 @@ export interface MetricCardsProps {
 }
 
 export function MetricCards({ summary }: MetricCardsProps) {
-  const fpTone = summary.false_positive_rate > 0.02 ? "danger" : summary.false_positive_rate > 0 ? "warning" : "success";
+  const fpRate = summary.false_positive_rate;
+  const fpTone = fpRate == null ? "neutral" : fpRate > 0.02 ? "danger" : fpRate > 0 ? "warning" : "success";
+  const verifiedRate =
+    summary.trials_completed == null || summary.trials_completed <= 0 ? null : summary.verified_success_rate;
+  const verifiedTone = verifiedRate == null ? "neutral" : verifiedRate === 0 ? "danger" : "success";
   const infraTone = summary.infra_error_count > 0 ? "warning" : "neutral";
+  const verifiedCounts =
+    summary.trials_completed == null
+      ? `${summary.solved} verified · completed denominator unavailable (${summary.trials_total} total)`
+      : `${summary.solved}/${summary.trials_completed} completed · ${summary.trials_total} total trials`;
   return (
     <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6" data-testid="benchmark-metric-cards">
       <MetricCard
         title="Verified success"
-        value={formatPct(summary.verified_success_rate)}
-        sub={`${summary.solved}/${summary.trials_total} trials verified`}
-        icon={CheckCircle2}
-        tone="success"
+        value={formatPct(verifiedRate)}
+        sub={verifiedCounts}
+        icon={verifiedRate == null ? CircleHelp : verifiedRate === 0 ? OctagonAlert : CheckCircle2}
+        tone={verifiedTone}
       />
       <MetricCard
         title="Timeouts"
         value={String(summary.timeout_count)}
-        sub={`of ${summary.trials_total} trials`}
+        sub={`of ${summary.trials_total} total trials`}
         icon={Target}
         tone={summary.timeout_count > 0 ? "warning" : "neutral"}
       />
       <MetricCard
         title="False positives"
         value={formatPct(summary.false_positive_rate)}
-        sub="claimed but unverified"
+        sub={fpRate == null ? "unavailable: trial denominator not available" : "claimed but unverified"}
         icon={AlertTriangle}
         tone={fpTone}
       />
@@ -84,11 +92,11 @@ export function MetricCards({ summary }: MetricCardsProps) {
         icon={Coins}
       />
       <MetricCard
-        title="Sandbox violations"
+        title="Sandbox blocks"
         value={String(summary.sandbox_blocked_actions)}
-        sub={`${summary.infra_error_count} infra errors`}
-        icon={summary.sandbox_blocked_actions > 0 ? ShieldAlert : Flame}
-        tone={summary.sandbox_blocked_actions > 0 ? "danger" : infraTone}
+        sub={`contained attempts · ${summary.infra_error_count} infra error${summary.infra_error_count === 1 ? "" : "s"} · ${summary.skipped_count ?? 0} skipped`}
+        icon={ShieldCheck}
+        tone={infraTone}
       />
     </div>
   );
@@ -100,23 +108,30 @@ export function MetricCards({ summary }: MetricCardsProps) {
 // (older persisted summaries carry no stuck/scope/repro fields), so the
 // dashboard never renders a fabricated zero as measured.
 export function ReliabilityCards({ summary }: MetricCardsProps) {
-  const scope = summary.scope_violation_count ?? null;
+  const scopeCount = summary.scope_violation_count;
+  const scope =
+    summary.scope_violation_telemetry_available === true ||
+    (typeof scopeCount === "number" && scopeCount > 0)
+      ? (scopeCount ?? null)
+      : null;
   const stuckCount = summary.stuck_loop_count ?? null;
   const stuckRate = summary.stuck_loop_rate ?? null;
-  const reproRate = summary.reproduced_twice_rate ?? null;
   const reproCount = summary.scenarios_reproduced_twice ?? null;
   const verifiedScenarios = (summary.scenarios ?? []).filter((s) => (s.verified ?? 0) > 0).length;
+  const reproRate = verifiedScenarios === 0 ? null : (summary.reproduced_twice_rate ?? null);
+  const reproductionSub =
+    reproCount == null
+      ? "no repeat data in this summary"
+      : verifiedScenarios === 0
+        ? "no verified scenarios to measure"
+        : `${reproCount}/${verifiedScenarios} scenarios verified on ≥2 trials`;
   const medianActions = summary.median_tool_actions;
   return (
     <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6" data-testid="benchmark-reliability-cards">
       <MetricCard
         title="Reproduced twice"
         value={reproRate == null ? "n/a" : formatPct(reproRate)}
-        sub={
-          reproCount == null
-            ? "no repeat data in this summary"
-            : `${reproCount}/${verifiedScenarios} scenarios verified on ≥2 trials`
-        }
+        sub={reproductionSub}
         icon={ListChecks}
         tone={reproRate == null ? "neutral" : reproRate >= 1 ? "success" : reproRate > 0 ? "warning" : "neutral"}
       />

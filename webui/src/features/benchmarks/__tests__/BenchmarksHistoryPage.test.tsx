@@ -2,6 +2,7 @@
 // BreachPilot by @braydos-h — https://github.com/braydos-h/BreachPilot
 import { describe, expect, it, vi } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BenchmarksHistoryPage } from "@/routes/BenchmarksHistoryPage";
@@ -30,6 +31,7 @@ const RUN = {
   status: "completed",
   timestamp: "2026-08-29T00:00:00Z",
   trials_total: 3,
+  trials_completed: 3,
   solved: 2,
   verified_success_rate: 0.6667,
   false_positive_rate: 0.3333,
@@ -53,7 +55,7 @@ describe("BenchmarksHistoryPage", () => {
     });
     expect(screen.getByTestId("benchmark-comparison")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "run-1" })).toHaveAttribute("href", "/benchmarks/run-1");
-    expect(screen.getByText("2/3 (66.7%)")).toBeInTheDocument();
+    expect(screen.getByText("2/3 completed (3 total) · 66.7%")).toBeInTheDocument();
     expect(screen.getByText("2m 00s")).toBeInTheDocument(); // median solve time
   });
 
@@ -69,5 +71,23 @@ describe("BenchmarksHistoryPage", () => {
     await waitFor(() => {
       expect(screen.getByText(/No runs recorded yet/)).toBeInTheDocument();
     });
+  });
+
+  it("discloses when the extended history query fails and retries it", async () => {
+    fetchOverview.mockResolvedValue({
+      suites: [],
+      runs: [RUN],
+      active: { run_id: null, state: "idle", error: "" },
+      baseline: { exists: false, path: "reports/benchmarks/baseline.json" },
+    });
+    fetchRuns.mockRejectedValueOnce(new Error("history service unavailable"));
+    const user = userEvent.setup();
+    renderPage();
+
+    expect(await screen.findByTestId("benchmark-history-error")).toBeInTheDocument();
+    expect(screen.getByText(/showing the recent overview only/)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "run-1" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Retry" }));
+    await waitFor(() => expect(screen.queryByTestId("benchmark-history-error")).not.toBeInTheDocument());
   });
 });

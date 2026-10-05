@@ -5,7 +5,7 @@ import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ScenarioResultsTable, STATUS_META } from "@/features/benchmarks/ScenarioResultsTable";
 import { BenchmarkTimeline } from "@/features/benchmarks/BenchmarkTimeline";
-import type { Trial } from "@/features/benchmarks/types";
+import type { BenchmarkEvent, Trial } from "@/features/benchmarks/types";
 
 function makeTrial(overrides: Partial<Trial> & { scenario_id: string; trial_index: number }): Trial {
   return {
@@ -131,7 +131,7 @@ describe("ScenarioResultsTable", () => {
 });
 
 describe("BenchmarkTimeline", () => {
-  const events = [
+  const events: BenchmarkEvent[] = [
     {
       sequence: 1,
       timestamp: "2026-08-29T00:00:00Z",
@@ -183,6 +183,28 @@ describe("BenchmarkTimeline", () => {
     expect(screen.getByText(/Target ready: 127.0.0.1/)).toBeInTheDocument();
     expect(screen.getByText(/Oracle: VERIFIED/)).toBeInTheDocument();
     expect(screen.getByText("0m 03s")).toBeInTheDocument();
+  });
+
+  it("keeps run completion neutral when no oracle verified success is present", () => {
+    const completed: BenchmarkEvent = {
+      sequence: 4,
+      timestamp: "2026-08-29T00:01:00Z",
+      elapsed_seconds: 60,
+      run_id: "r1",
+      type: "run_end",
+      level: "info",
+      trial_id: "",
+      scenario_id: "",
+      agent: "",
+      tool: "",
+      target: "",
+      payload: { status: "completed", solved: 0, trials_completed: 2, trials_total: 2 },
+    };
+    render(<BenchmarkTimeline events={[completed]} />);
+
+    const event = screen.getByText(/Run completed/).closest("li");
+    expect(event?.querySelector("span.relative.z-10")).toHaveClass("text-muted-foreground");
+    expect(event?.querySelector("span.relative.z-10")).not.toHaveClass("text-emerald-500");
   });
 
   it("filters events by trial id", () => {

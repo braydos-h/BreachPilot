@@ -60,6 +60,18 @@ export function BenchmarksHistoryPage() {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
+          {runsExtended.isError ? (
+            <div className="rounded-md border border-destructive/30 bg-destructive/5 p-3" role="alert" data-testid="benchmark-history-error">
+              <ErrorState
+                message={
+                  runsExtended.data
+                    ? `Extended history refresh failed; showing the last loaded ${historyRows.length} runs. ${runsExtended.error instanceof Error ? runsExtended.error.message : String(runsExtended.error)}`
+                    : `Extended history unavailable; showing the recent overview only. ${runsExtended.error instanceof Error ? runsExtended.error.message : String(runsExtended.error)}`
+                }
+                onRetry={() => void runsExtended.refetch()}
+              />
+            </div>
+          ) : null}
           {loading ? (
             <SkeletonRows count={5} />
           ) : (
@@ -92,7 +104,8 @@ export function BenchmarksHistoryPage() {
                             <StatusBadge status={runStatusToBadge(r.status)} />
                           </td>
                           <td className="px-3 py-2 tabular-nums">
-                            {r.solved}/{r.trials_total} ({formatPct(r.verified_success_rate)})
+                            {r.solved}/{r.trials_completed ?? "n/a"} completed ({r.trials_total} total) ·{" "}
+                            {formatPct(r.verified_success_rate)}
                           </td>
                           <td className="px-3 py-2 tabular-nums">{formatPct(r.false_positive_rate)}</td>
                           <td className="px-3 py-2 tabular-nums">{formatDuration(r.median_solve_time)}</td>

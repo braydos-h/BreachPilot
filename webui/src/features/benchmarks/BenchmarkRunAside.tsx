@@ -50,14 +50,21 @@ export function BenchmarkRunAside({ page }: { page: BenchmarkRunState }) {
             </div>
             <div className="rounded-md bg-muted/40 p-2">
               <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Verified</div>
-              <div className="font-medium tabular-nums">{summary ? `${summary.solved}/${summary.trials_total}` : `${displayTrials.filter((t) => t.oracle_verified_success).length}/${displayTrials.length}`}</div>
+              <div className="font-medium tabular-nums">
+                {summary
+                  ? `${summary.solved}/${summary.trials_completed ?? "n/a"}`
+                  : `${displayTrials.filter((t) => t.oracle_verified_success).length}/${displayTrials.length}`}
+              </div>
+              <div className="text-[11px] text-muted-foreground">
+                {summary ? `${summary.trials_total} total trials` : "completed / observed"}
+              </div>
               <div className="text-[11px] text-muted-foreground">{summary ? formatPct(summary.verified_success_rate) : "—"}</div>
             </div>
           </div>
           {summary && (
             <div className="space-y-1">
               <div className="flex justify-between text-xs"><span className="text-muted-foreground">False positives</span><span className="tabular-nums">{formatPct(summary.false_positive_rate)}</span></div>
-              <div className="flex justify-between text-xs"><span className="text-muted-foreground">Infra errors</span><span className="tabular-nums">{summary.infra_error_count}</span></div>
+              <div className="flex justify-between text-xs"><span className="text-muted-foreground">Infra / skipped</span><span className="tabular-nums">{summary.infra_error_count} / {summary.skipped_count ?? 0}</span></div>
               <div className="flex justify-between text-xs"><span className="text-muted-foreground">Sandbox blocks</span><span className="tabular-nums">{summary.sandbox_blocked_actions}</span></div>
             </div>
           )}

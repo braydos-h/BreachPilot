@@ -48,15 +48,18 @@ export function BenchmarksPage() {
       const runId = latestRunQuery.data!.run_id;
       return fetchRunEvents(runId, { limit: 400 });
     },
-    enabled: !!latestRunQuery.data,
-    placeholderData: keepPreviousData,
+    enabled: !!latestRunId && latestRunQuery.data?.run_id === latestRunId,
     staleTime: 10_000,
   });
 
   const overviewLoading = overview.isLoading && !overview.data;
   const overviewError = overview.isError ? overview.error : null;
-  const latestLoading = !!latestRunId && latestRunQuery.isLoading;
-  const summary: RunSummary | null = latestRunQuery.data?.summary ?? null;
+  const latestRunMatchesSelection = !!latestRunId && latestRunQuery.data?.run_id === latestRunId;
+  const latestLoading = !!latestRunId && !latestRunMatchesSelection && latestRunQuery.isFetching;
+  const latestDetailError = !!latestRunId && latestRunQuery.isError ? latestRunQuery.error : null;
+  const summary: RunSummary | null = latestRunMatchesSelection ? latestRunQuery.data?.summary ?? null : null;
+  const latestSummaryUnavailable =
+    !!latestRunId && latestRunMatchesSelection && !latestRunQuery.isLoading && !latestDetailError && !summary;
   const recentRuns = overview.data?.runs.slice(0, 5) ?? [];
 
   return (
@@ -189,7 +192,7 @@ export function BenchmarksPage() {
             <Link to={`/benchmarks/${summary.run_id}`} className="font-mono text-sm underline-offset-4 hover:underline">
               {summary.run_id}
             </Link>
-            <StatusBadge status="VERIFIED" />
+            <StatusBadge status={runStatusToBadge(latestRunQuery.data?.status ?? "completed")} />
             <span className="text-xs text-muted-foreground">{formatRelative(summary.timestamp)}</span>
             {latestLoading && <span className="flex items-center gap-1 text-xs text-muted-foreground"><Loader2 className="h-3 w-3 animate-spin" /> updating…</span>}
           </div>
@@ -202,11 +205,21 @@ export function BenchmarksPage() {
                 <CardDescription>Structured mission events from the latest run.</CardDescription>
               </CardHeader>
               <CardContent>
-                <BenchmarkTimeline
-                  events={latestEventsQuery.data?.events ?? []}
-                  isLoading={latestEventsQuery.isLoading && !latestEventsQuery.data}
-                  maxEvents={12}
-                />
+                {latestEventsQuery.isError ? (
+                  <div className="mb-3" role="alert" data-testid="benchmark-events-error">
+                    <ErrorState
+                      message={`Timeline unavailable: ${latestEventsQuery.error instanceof Error ? latestEventsQuery.error.message : String(latestEventsQuery.error)}`}
+                      onRetry={() => void latestEventsQuery.refetch()}
+                    />
+                  </div>
+                ) : null}
+                {latestEventsQuery.isError && !latestEventsQuery.data ? null : (
+                  <BenchmarkTimeline
+                    events={latestEventsQuery.data?.run_id === latestRunId ? latestEventsQuery.data.events : []}
+                    isLoading={latestEventsQuery.isLoading && !latestEventsQuery.data}
+                    maxEvents={12}
+                  />
+                )}
               </CardContent>
             </Card>
             <Card>
@@ -224,7 +237,30 @@ export function BenchmarksPage() {
         <Card>
           <CardContent className="py-10 text-center"><SkeletonRows count={3} /></CardContent>
         </Card>
-      ) : overview.data ? (
+      ) : latestDetailError ? (
+        <Card data-testid="benchmark-latest-detail-error">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm">Latest benchmark run unavailable</CardTitle>
+            <CardDescription>The overview lists a completed run, but its details could not be loaded.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <ErrorState
+              message={latestDetailError instanceof Error ? latestDetailError.message : "Failed to load latest benchmark run"}
+              onRetry={() => void latestRunQuery.refetch()}
+            />
+          </CardContent>
+        </Card>
+      ) : latestSummaryUnavailable ? (
+        <Card data-testid="benchmark-summary-unavailable">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm">Latest benchmark summary unavailable</CardTitle>
+            <CardDescription>The run is recorded as completed, but its summary could not be loaded.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <ErrorState message="Stored run details do not include a summary." onRetry={() => void latestRunQuery.refetch()} />
+          </CardContent>
+        </Card>
+      ) : overview.data && !latestRunId ? (
         <Card data-testid="benchmarks-empty-state">
           <CardContent className="flex flex-col items-center gap-2 py-10 text-center">
             <FlaskConical className="h-6 w-6 text-muted-foreground" />
@@ -276,7 +312,8 @@ export function BenchmarksPage() {
                         <StatusBadge status={runStatusToBadge(r.status)} />
                       </td>
                       <td className="px-3 py-2 tabular-nums">
-                        {r.solved}/{r.trials_total} ({formatPct(r.verified_success_rate)})
+                        {r.solved}/{r.trials_completed ?? "n/a"} completed ({r.trials_total} total) ·{" "}
+                        {formatPct(r.verified_success_rate)}
                       </td>
                       <td className="px-3 py-2 text-xs text-muted-foreground">{formatRelative(r.timestamp)}</td>
                     </tr>

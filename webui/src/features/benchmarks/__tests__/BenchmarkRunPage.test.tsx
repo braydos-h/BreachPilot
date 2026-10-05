@@ -5,10 +5,11 @@
 // per-trial progress is merged from the scenarios endpoint.
 import { describe, expect, it, vi } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
+import userEvent from "@testing-library/user-event";
+import { Link, MemoryRouter, Route, Routes } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BenchmarkRunPage } from "@/routes/BenchmarkRunPage";
-import type { RunDetail, Trial } from "@/features/benchmarks/types";
+import type { BenchmarkEvent, RunDetail, Trial } from "@/features/benchmarks/types";
 
 vi.mock("@/api/hooks", () => ({
   useModels: () => ({ data: { default_alias: "glm" } }),
@@ -147,7 +148,15 @@ function renderRunPage() {
     <QueryClientProvider client={client}>
       <MemoryRouter initialEntries={["/benchmarks/r1"]}>
         <Routes>
-          <Route path="/benchmarks/:runId" element={<BenchmarkRunPage />} />
+          <Route
+            path="/benchmarks/:runId"
+            element={
+              <>
+                <Link to="/benchmarks/r2">Open run r2</Link>
+                <BenchmarkRunPage />
+              </>
+            }
+          />
         </Routes>
       </MemoryRouter>
     </QueryClientProvider>,
@@ -220,10 +229,75 @@ describe("BenchmarkRunPage", () => {
 
     await waitFor(() => {
       expect(screen.getByTestId("benchmark-metric-cards")).toBeInTheDocument();
+      expect(screen.getByTestId("benchmark-reliability-cards")).toBeInTheDocument();
     });
     expect(screen.getAllByText("50.0%").length).toBeGreaterThan(0);
     expect(screen.queryByTestId("benchmark-interrupted-banner")).not.toBeInTheDocument();
   });
+
+  it("does not display the previous run while a newly selected run is loading", async () => {
+    let resolveRun2!: (value: RunDetail) => void;
+    let resolveEvents2!: (value: { run_id: string; events: BenchmarkEvent[]; latest_sequence: number }) => void;
+    fetchRun.mockImplementation((id: string) => {
+      if (id === "r1") return Promise.resolve({ ...BASE_RUN, status: "completed" });
+      return new Promise<RunDetail>((resolve) => {
+        resolveRun2 = resolve;
+      });
+    });
+    fetchOverview.mockResolvedValue({
+      suites: [],
+      runs: [],
+      active: { run_id: null, state: "idle", error: "" },
+      baseline: { exists: false, path: "reports/benchmarks/baseline.json" },
+    });
+    fetchRunEvents.mockImplementation((id: string) => {
+      if (id === "r1") {
+        return Promise.resolve({
+          run_id: "r1",
+          events: [
+            {
+              sequence: 1,
+              timestamp: "2026-08-30T00:00:00Z",
+              elapsed_seconds: 1,
+              run_id: "r1",
+              type: "tool_call",
+              level: "info",
+              trial_id: "r1-trial",
+              scenario_id: "r1-scenario",
+              agent: "",
+              tool: "r1-marker",
+              target: "",
+              payload: {},
+            },
+          ],
+          latest_sequence: 1,
+        });
+      }
+      return new Promise((resolve) => {
+        resolveEvents2 = resolve;
+      });
+    });
+
+    const user = userEvent.setup();
+    renderRunPage();
+    await screen.findByRole("heading", { name: "r1" });
+    await user.click(screen.getByRole("tab", { name: /Timeline/ }));
+    expect(await screen.findByText("1 events")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("link", { name: "Open run r2" }));
+    expect(await screen.findByRole("status")).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "r1" })).not.toBeInTheDocument();
+
+    resolveRun2({ ...BASE_RUN, run_id: "r2", suite: "r2-suite", status: "completed" });
+    await screen.findByRole("heading", { name: "r2" });
+    await user.click(screen.getByRole("tab", { name: /Timeline/ }));
+    expect(screen.getAllByText(/0 events/).length).toBeGreaterThan(0);
+    expect(screen.queryByText("r1-marker")).not.toBeInTheDocument();
+
+    resolveEvents2({ run_id: "r2", events: [], latest_sequence: 0 });
+    expect(screen.queryByText("r1-marker")).not.toBeInTheDocument();
+  });
+
   it("surfaces an unreachable-lab banner on instant-finish provision failures", async () => {
     const provisionTrial = makeTrial({
       status: "INFRASTRUCTURE_ERROR",

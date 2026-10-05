@@ -104,7 +104,7 @@ export interface Trial {
   false_positive: boolean;
   false_negative: boolean;
   stuck_loop: boolean;
-  scope_violations: number;
+  scope_violations: number | null;
   failure_category: FailureCategory;
   failure_detail: string;
   started_at: string;
@@ -155,15 +155,17 @@ export interface ScenarioSummary {
   difficulty: string;
   tags: string[];
   trials: number;
+  trials_completed?: number | null;
   verified: number;
   claimed: number;
   false_positives: number;
   false_negatives: number;
   timeouts: number;
   infra_errors: number;
-  success_probability: number;
-  success_variance: number;
-  success_stddev: number;
+  skipped?: number;
+  success_probability: number | null;
+  success_variance: number | null;
+  success_stddev: number | null;
   ci95_low: number | null;
   ci95_high: number | null;
   reproduced_twice: boolean;
@@ -182,11 +184,11 @@ export interface RunSummary {
   suite: string;
   timestamp: string;
   trials_total: number;
-  trials_completed: number;
-  verified_success_rate: number;
+  trials_completed?: number | null;
+  verified_success_rate: number | null;
   solved: number;
-  false_positive_rate: number;
-  false_negative_rate: number;
+  false_positive_rate: number | null;
+  false_negative_rate: number | null;
   median_solve_time: number | null;
   mean_solve_time: number | null;
   median_tool_actions: number | null;
@@ -197,12 +199,14 @@ export interface RunSummary {
   time_to_first_verified_success: number | null;
   sandbox_blocked_actions: number;
   infra_error_count: number;
+  skipped_count?: number;
   timeout_count: number;
   scenarios_reproduced_twice?: number;
   reproduced_twice_rate?: number | null;
   stuck_loop_count?: number;
   stuck_loop_rate?: number | null;
-  scope_violation_count?: number;
+  scope_violation_count?: number | null;
+  scope_violation_telemetry_available?: boolean;
   failure_categories: Record<string, number>;
   scenarios: ScenarioSummary[];
 }
@@ -250,9 +254,10 @@ export interface RunIndexRow {
   status: string;
   timestamp: string;
   trials_total: number;
+  trials_completed?: number | null;
   solved: number;
-  verified_success_rate: number;
-  false_positive_rate: number;
+  verified_success_rate: number | null;
+  false_positive_rate: number | null;
   median_solve_time: number | null;
   estimated_cost: number | null;
   total_tokens: number;
@@ -328,15 +333,16 @@ export interface BaselineMeta {
   suite?: string;
   timestamp?: string;
   trials_total?: number;
-  verified_success_rate?: number;
-  false_positive_rate?: number;
-  stuck_loop_rate?: number;
-  scope_violation_count?: number;
-  reproduced_twice_rate?: number;
+  trials_completed?: number | null;
+  verified_success_rate?: number | null;
+  false_positive_rate?: number | null;
+  stuck_loop_rate?: number | null;
+  scope_violation_count?: number | null;
+  reproduced_twice_rate?: number | null;
   scenarios_reproduced_twice?: number;
   median_solve_time?: number | null;
   estimated_cost?: number | null;
-  scenarios?: Record<string, { success_probability: number; verified: number; trials: number }>;
+  scenarios?: Record<string, { success_probability: number | null; verified: number; trials: number; trials_completed?: number | null }>;
 }
 
 export interface CompareMetricRow {
@@ -344,15 +350,16 @@ export interface CompareMetricRow {
   baseline: number | null;
   current: number | null;
   delta: number | null;
-  direction: "improved" | "regressed" | "unchanged";
+  direction: "improved" | "regressed" | "unchanged" | "incomparable" | "unavailable";
+  safety_gate?: "failed" | "passed" | "unavailable";
 }
 
 export interface CompareScenarioRow {
   scenario_id: string;
-  baseline: number;
-  current: number;
-  delta: number;
-  category: "newly_solved" | "regressed" | "still_solved" | "still_failing";
+  baseline: number | null;
+  current: number | null;
+  delta: number | null;
+  category: "newly_solved" | "regressed" | "still_solved" | "still_failing" | "not_compared";
 }
 
 export interface RunComparison {

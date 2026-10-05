@@ -14,6 +14,8 @@ import { isActiveState, isOrphanedRun, runStatusToBadge } from "@/features/bench
 import type { BenchmarkEvent, RunDetail, Trial } from "@/features/benchmarks/types";
 import { derivePhases, isRunActive, mergeEvents, normalizeTrial, REFRESH_MS } from "./runDetailUtils";
 
+type RunEventsData = { run_id: string; events: BenchmarkEvent[]; latest_sequence?: number };
+
 /** Benchmark run detail state: polled run/events/scenarios queries plus
  * merged live trials, progress, liveness, and banner derivations. */
 export function useBenchmarkRun() {
@@ -33,7 +35,6 @@ export function useBenchmarkRun() {
     queryKey: ["benchmarks", "run", runId],
     queryFn: ({ signal }) => fetchRun(runId, signal),
     enabled: !!runId,
-    placeholderData: keepPreviousData,
     staleTime: 5_000,
     gcTime: 5 * 60_000,
     // Never stop on a missing summary alone: terminal failed/cancelled runs
@@ -41,9 +42,6 @@ export function useBenchmarkRun() {
     refetchInterval: (query) => {
       const data = query.state.data as RunDetail | undefined;
       if (!data) return REFRESH_MS;
-      // No isPlaceholderData on QueryState in v5 — dataUpdatedAt === 0 means
-      // only placeholder data has arrived, so keep polling for the real row.
-      if (query.state.dataUpdatedAt === 0) return REFRESH_MS;
       return isRunActive(data.status) ? REFRESH_MS : false;
     },
   });
@@ -63,14 +61,10 @@ export function useBenchmarkRun() {
 
   // A run whose status still says "running" but that no runner owns (daemon
   // restarted mid-run) will never progress — detect it and stop treating the
-  // page as live. Grace period: while the overview is still loading (or this
-  // run's own query is placeholder data from a previous run) give the run the
-  // benefit of the doubt so the live bar doesn't flash off on first paint.
+  // page as live. While the overview is loading, give the run the benefit of
+  // the doubt so the live bar does not flash off on first paint.
   const overviewSettled = overview.isSuccess || overview.isError;
-  const orphaned =
-    !overview.isLoading && overviewSettled && !run.isPlaceholderData
-      ? isOrphanedRun(run.data?.status, overview.data, runId)
-      : false;
+  const orphaned = !overview.isLoading && overviewSettled ? isOrphanedRun(run.data?.status, overview.data, runId) : false;
 
   // Single liveness flag for every polling query: run-local active status ORs
   // the overview's verdict instead of letting a possibly-stale overview veto
@@ -82,23 +76,24 @@ export function useBenchmarkRun() {
   const runStatus = run.data?.status;
   const overviewVeto =
     overviewSettled &&
-    !run.isPlaceholderData &&
     overview.data?.active != null &&
     !(overview.data.active.run_id === runId && isActiveState(overview.data.active.state));
   const live = !!runId && !orphaned && (!runStatus || isRunActive(runStatus)) && !overviewVeto;
 
-  const events = useQuery<{ events: BenchmarkEvent[]; latest_sequence?: number }>({
+  const events = useQuery<RunEventsData>({
     queryKey: ["benchmarks", "run-events", runId],
-    queryFn: async ({ signal }): Promise<{ events: BenchmarkEvent[]; latest_sequence?: number }> => {
+    queryFn: async ({ signal }): Promise<RunEventsData> => {
       const key = ["benchmarks", "run-events", runId];
-      const cached = queryClient.getQueryData<{ events: BenchmarkEvent[]; latest_sequence?: number }>(key);
+      const cached = queryClient.getQueryData<RunEventsData>(key);
       // Incremental once ANY page has been cached (even an empty one — a fresh
       // run caches {events: []} and must not redo the full backfill every 2s).
       if (cached !== undefined) {
         const cursor = cached.latest_sequence ?? cached.events[cached.events.length - 1]?.sequence ?? 0;
         const data = await fetchRunEvents(runId, { after: cursor, limit: 1000, signal });
+        if (data.run_id !== runId) throw new Error("Benchmark events response did not match the requested run");
         if (data.events.length === 0) return cached;
         return {
+          run_id: runId,
           events: mergeEvents(cached.events, data.events),
           latest_sequence: data.latest_sequence,
         };
@@ -108,6 +103,7 @@ export function useBenchmarkRun() {
       let latest = 0;
       for (let page = 0; page < 5; page++) {
         const data = await fetchRunEvents(runId, { after: cursor, limit: 1000, signal });
+        if (data.run_id !== runId) throw new Error("Benchmark events response did not match the requested run");
         all = mergeEvents(all, data.events);
         latest = data.latest_sequence;
         if (data.events.length < 1000) break;
@@ -115,10 +111,9 @@ export function useBenchmarkRun() {
         // global latest (which would skip the middle pages on multi-page runs).
         cursor = all[all.length - 1]?.sequence ?? data.latest_sequence;
       }
-      return { events: all, latest_sequence: latest };
+      return { run_id: runId, events: all, latest_sequence: latest };
     },
     enabled: !!runId,
-    placeholderData: keepPreviousData,
     staleTime: 2_000,
     // Polling queries must not retry with backoff at poll cadence on a
     // failing backend — surface the error inline instead (see below).
@@ -134,7 +129,6 @@ export function useBenchmarkRun() {
     queryKey: ["benchmarks", "run-scenarios", runId],
     queryFn: ({ signal }) => fetchRunScenarios(runId, signal),
     enabled: !!runId && !!run.data && isRunActive(run.data.status),
-    placeholderData: keepPreviousData,
     staleTime: 2_000,
     retry: false,
     refetchInterval: () => (live ? REFRESH_MS : false),
@@ -187,7 +181,10 @@ export function useBenchmarkRun() {
   // wins per id). run.json's trials array is empty until finalize, so during
   // a live run the scenarios endpoint is the only source of completed-trial
   // progress; a wholesale either/or would hide live trials mid-finalize.
-  const liveTrials = useMemo(() => (runScenarios.data?.scenarios ?? []).map(normalizeTrial), [runScenarios.data]);
+  const liveTrials = useMemo(
+    () => (runScenarios.data?.run_id === runId ? runScenarios.data.scenarios : []).map(normalizeTrial),
+    [runId, runScenarios.data],
+  );
   const storedTrials = useMemo(() => (run.data?.trials ?? []).map(normalizeTrial), [run.data?.trials]);
   const displayTrials: Trial[] = useMemo(() => {
     if (storedTrials.length === 0) return liveTrials;
@@ -206,7 +203,7 @@ export function useBenchmarkRun() {
   // The scenarios endpoint only persists finished trials, so mid-run the trial
   // list never contains the in-progress trial — fall back to the latest
   // event's trial locus so the live strip and "now:" label still render.
-  const eventList = events.data?.events ?? [];
+  const eventList = events.data?.run_id === runId ? events.data.events : [];
   const liveHint = useMemo(() => {
     for (let i = eventList.length - 1; i >= 0; i--) {
       const e = eventList[i];

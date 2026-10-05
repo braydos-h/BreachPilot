@@ -12,6 +12,9 @@ import type { CompareMetricRow, RunComparison } from "@/features/benchmarks/type
 const METRIC_LABELS: Record<string, string> = {
   verified_success_rate: "Verified success",
   false_positive_rate: "False positives",
+  stuck_loop_rate: "Stuck-loop rate",
+  reproduced_twice_rate: "Reproduced twice",
+  scope_violation_count: "Scope violations",
   median_solve_time: "Median solve time",
   median_tool_actions: "Median actions",
   estimated_cost: "Cost",
@@ -25,6 +28,7 @@ const CATEGORY_LABELS: Record<string, string> = {
   regressed: "Regressed",
   still_solved: "Still solved",
   still_failing: "Still failing",
+  not_compared: "Not compared",
 };
 
 function formatMetricValue(metric: string, value: number | null): string {
@@ -32,6 +36,8 @@ function formatMetricValue(metric: string, value: number | null): string {
   switch (metric) {
     case "verified_success_rate":
     case "false_positive_rate":
+    case "stuck_loop_rate":
+    case "reproduced_twice_rate":
       return formatPct(value);
     case "median_solve_time":
       return formatDuration(value);
@@ -45,18 +51,22 @@ function formatMetricValue(metric: string, value: number | null): string {
 }
 
 function formatDelta(metric: string, row: CompareMetricRow): string {
+  if (row.direction === "incomparable") return "Not comparable (suite, scenarios, or trial counts differ)";
+  if (row.direction === "unavailable") return "Unavailable";
   if (row.delta === null || row.direction === "unchanged") return "";
-  const sign = row.delta > 0 ? "+" : "";
+  const absoluteSign = row.delta > 0 ? "+" : row.delta < 0 ? "-" : "";
   switch (metric) {
     case "verified_success_rate":
     case "false_positive_rate":
-      return `${sign}${(row.delta * 100).toFixed(1)}%`;
+    case "stuck_loop_rate":
+    case "reproduced_twice_rate":
+      return `${row.delta > 0 ? "+" : ""}${(row.delta * 100).toFixed(1)}%`;
     case "median_solve_time":
-      return `${sign}${formatDuration(Math.abs(row.delta))}`;
+      return `${absoluteSign}${formatDuration(Math.abs(row.delta))}`;
     case "estimated_cost":
-      return `${sign}$${Math.abs(row.delta).toFixed(2)}`;
+      return `${absoluteSign}$${Math.abs(row.delta).toFixed(2)}`;
     default:
-      return `${sign}${row.delta.toLocaleString()}`;
+      return `${row.delta > 0 ? "+" : ""}${row.delta.toLocaleString()}`;
   }
 }
 
@@ -71,7 +81,14 @@ export function ComparisonView({ runs }: ComparisonViewProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
-  const canCompare = useMemo(() => runA && runB && runA !== runB, [runA, runB]);
+  const eligibleRuns = useMemo(() => runs.filter((run) => run.status === "completed"), [runs]);
+  const canCompare = useMemo(
+    () =>
+      runA !== runB &&
+      eligibleRuns.some((run) => run.run_id === runA) &&
+      eligibleRuns.some((run) => run.run_id === runB),
+    [eligibleRuns, runA, runB],
+  );
 
   // A previous comparison must never linger next to a new (unchanged) pair of
   // pickers — drop the result + error as soon as either selection changes.
@@ -101,11 +118,12 @@ export function ComparisonView({ runs }: ComparisonViewProps) {
       <select
         value={value}
         onChange={(e) => onChange(e.target.value)}
+        disabled={loading}
         className="h-9 w-full min-w-0 rounded-md border bg-background px-2 text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
         aria-label={label}
       >
         <option value="">Select run…</option>
-        {runs.map((r) => (
+        {eligibleRuns.map((r) => (
           <option key={r.run_id} value={r.run_id}>
             {r.run_id} · {formatRelative(r.timestamp)}
           </option>
@@ -122,6 +140,7 @@ export function ComparisonView({ runs }: ComparisonViewProps) {
           variant="ghost"
           size="icon"
           className="mb-0.5"
+          disabled={loading}
           aria-label="Swap runs"
           onClick={() => {
             setRunA(runB);
@@ -138,7 +157,8 @@ export function ComparisonView({ runs }: ComparisonViewProps) {
           Compare
         </Button>
       </div>
-      {error && <div className="rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">{error}</div>}
+      {loading && <div role="status" aria-live="polite" className="sr-only">Comparing selected benchmark runs…</div>}
+      {error && <div role="alert" className="rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">{error}</div>}
       {!comparison && !error && (
         <p className="text-xs text-muted-foreground">
           Pick a baseline and a candidate run, then press Compare to see metric deltas and per-scenario changes.
@@ -164,6 +184,21 @@ export function ComparisonView({ runs }: ComparisonViewProps) {
                     <td className="px-3 py-2 tabular-nums">{formatMetricValue(row.metric, row.current)}</td>
                     <td className="px-3 py-2 tabular-nums">
                       <span className="inline-flex items-center gap-1">
+                        {row.safety_gate === "failed" && (
+                          <span className="font-medium text-red-700 dark:text-red-300" role="status">
+                            Hard safety gate failed
+                          </span>
+                        )}
+                        {row.safety_gate === "passed" && (
+                          <span className="text-emerald-700 dark:text-emerald-300" role="status">
+                            Safety gate clear
+                          </span>
+                        )}
+                        {row.metric === "scope_violation_count" && row.safety_gate === "unavailable" && (
+                          <span className="text-muted-foreground" role="status">
+                            Safety telemetry unavailable
+                          </span>
+                        )}
                         {row.direction === "improved" && (
                           <>
                             <ArrowUpRight className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" aria-label="improved" />
@@ -178,7 +213,9 @@ export function ComparisonView({ runs }: ComparisonViewProps) {
                         )}
                         {row.direction !== "improved" && row.direction !== "regressed" && (
                           <>
-                            <Minus className="h-3.5 w-3.5 text-muted-foreground" aria-label="unchanged" />
+                            {row.direction === "unchanged" && (
+                              <Minus className="h-3.5 w-3.5 text-muted-foreground" aria-label="unchanged" />
+                            )}
                             <span className="text-muted-foreground">{formatDelta(row.metric, row) || "—"}</span>
                           </>
                         )}
@@ -227,20 +264,22 @@ export function ComparisonView({ runs }: ComparisonViewProps) {
                   comparison.comparison.scenarios.map((row) => (
                     <tr key={row.scenario_id} className="border-t">
                       <td className="px-3 py-2 font-mono text-xs">{row.scenario_id}</td>
-                      <td className="px-3 py-2 tabular-nums">{row.baseline.toFixed(2)}</td>
-                      <td className="px-3 py-2 tabular-nums">{row.current.toFixed(2)}</td>
+                      <td className="px-3 py-2 tabular-nums">{row.baseline == null ? "n/a" : row.baseline.toFixed(2)}</td>
+                      <td className="px-3 py-2 tabular-nums">{row.current == null ? "n/a" : row.current.toFixed(2)}</td>
                       <td className="px-3 py-2">
-                        <StatusBadge
-                          status={
-                            row.category === "newly_solved"
-                              ? "VERIFIED"
-                              : row.category === "regressed"
-                                ? "REGRESSED"
-                                : row.category === "still_solved"
-                                  ? "VERIFIED"
-                                  : "FAILED"
-                          }
-                        />
+                        {row.category !== "not_compared" && (
+                          <StatusBadge
+                            status={
+                              row.category === "newly_solved"
+                                ? "VERIFIED"
+                                : row.category === "regressed"
+                                  ? "REGRESSED"
+                                  : row.category === "still_solved"
+                                    ? "VERIFIED"
+                                    : "FAILED"
+                            }
+                          />
+                        )}
                         <span className="ml-2 text-xs text-muted-foreground">{CATEGORY_LABELS[row.category]}</span>
                       </td>
                     </tr>

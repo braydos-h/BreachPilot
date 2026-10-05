@@ -8,7 +8,7 @@ import type { BenchmarkEvent } from "@/features/benchmarks/types";
 
 const EVENT_ICON: Record<string, React.ComponentType<{ className?: string }>> = {
   run_start: PlayCircle,
-  run_end: CheckCircle2,
+  run_end: Clock,
   run_cancelled: XCircle,
   run_error: AlertCircle,
   target_ready: CheckCircle2,
@@ -32,7 +32,7 @@ function eventLabel(event: BenchmarkEvent): string {
     case "run_start":
       return `Benchmark started — ${String(event.payload.scenarios ?? "").slice(0, 120)}`;
     case "run_end":
-      return `Run ${String(event.payload.status ?? "ended")} — solved ${String(event.payload.solved ?? 0)}/${String(event.payload.trials_total ?? 0)}`;
+      return `Run ${String(event.payload.status ?? "ended")} — solved ${String(event.payload.solved ?? 0)}/${String(event.payload.trials_completed ?? "n/a")} completed (${String(event.payload.trials_total ?? 0)} total trials)`;
     case "run_cancelled":
       return "Run cancelled by operator";
     case "run_error":
@@ -125,14 +125,9 @@ export function BenchmarkTimeline({ events, trialId, isLoading, maxEvents = 200 
         {filtered.map((event, idx) => {
           const Icon = EVENT_ICON[event.type] ?? Clock;
           const isError = event.level === "error" || event.type.includes("error") || event.type.includes("timeout");
-          // run_end carries no `verified` field on failed runs — only the
-          // oracle verdict or a completed status counts as verified.
-          const isVerified =
-            event.type === "oracle_result"
-              ? event.payload.verified === true
-              : event.type === "run_end"
-                ? event.payload.status === "completed"
-                : false;
+          // A completed run can have zero verified trials; only an explicit
+          // oracle verdict earns the verified color.
+          const isVerified = event.type === "oracle_result" && event.payload.verified === true;
           return (
             <li key={event.sequence} className="relative flex gap-3 pb-4">
               {idx < filtered.length - 1 && (
