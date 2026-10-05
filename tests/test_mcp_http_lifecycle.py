@@ -7,6 +7,7 @@ import contextlib
 import socket
 import subprocess
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
@@ -131,6 +132,64 @@ def test_streamable_client_bypasses_proxy(monkeypatch, token, authorization) -> 
 
     asyncio.run(_run())
     assert seen == {"authorization": authorization, "trust_env": False}
+
+
+def test_http_sessions_use_distinct_child_and_client_tokens(monkeypatch, tmp_path: Path) -> None:
+    import mcp
+
+    server_tokens: list[str] = []
+    client_tokens: list[str] = []
+
+    class _Session:
+        async def initialize(self) -> None:
+            return None
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_exc_info):
+            return False
+
+    @contextlib.asynccontextmanager
+    async def _transport(_url, *, token=""):
+        client_tokens.append(token)
+        yield ("read", "write", None)
+
+    def _start(**kwargs):
+        server_tokens.append(kwargs["env"]["MCP_HTTP_TOKEN"])
+        log_handle = SimpleNamespace(name=str(tmp_path / "server.log"), close=lambda: None)
+        return _RunningProcess(), log_handle
+
+    async def _ready(*_args, **_kwargs) -> None:
+        return None
+
+    monkeypatch.setenv("MCP_HTTP_TOKEN", "operator-configured-token")
+    monkeypatch.setattr(mcp, "ClientSession", lambda *_args: _Session())
+    monkeypatch.setattr(ms, "start_exploit_http_server", _start)
+    monkeypatch.setattr(ms, "wait_for_mcp_http_ready", _ready)
+    monkeypatch.setattr(ms, "_streamable_http_transport", _transport)
+    monkeypatch.setattr(ms, "stop_process", lambda *_args, **_kwargs: None)
+
+    async def _open(workspace: Path) -> None:
+        async with ms._open_exploit_mcp_session_once(
+            transport="http",
+            config_path=Path("config.yaml"),
+            target_ip="192.0.2.10",
+            exploit_port=8001,
+            workspace=workspace,
+        ) as session:
+            assert session is not None
+
+    async def _run() -> None:
+        await _open(tmp_path / "run-1")
+        await _open(tmp_path / "run-2")
+
+    asyncio.run(_run())
+
+    assert len(server_tokens) == len(client_tokens) == 2
+    assert server_tokens == client_tokens
+    assert len(set(server_tokens)) == 2
+    assert "operator-configured-token" not in server_tokens
 
 
 def test_occupied_port_is_rejected_without_spawning(tmp_path: Path) -> None:

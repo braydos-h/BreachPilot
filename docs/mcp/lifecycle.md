@@ -100,7 +100,7 @@ except _EXC_GROUP_CATCH as exc:
 | `EXPLOIT_TARGET_DOMAIN` | `original_target` (domain string) | same union | Lets HTTP tools use Host/SNI |
 | `AI_NMAP_MULTI_MODEL_ENABLED` | `1/0` when `multi_model_enabled` not None | `tools/mcp_tools/registry._multi_model_enabled` | Per-run peer-consult override |
 | `AI_NMAP_ACTIVE_MODEL_ALIAS` | `active_model_alias` when non-empty | `tools/mcp_tools/registry._resolve_consult_aliases` | Excludes active model from self-consult |
-| `MCP_HTTP_TOKEN` | operator env (passed through) | `tools/mcp_shared.run_mcp_http_server` server + `_streamable_http_transport` client | Required for non-loopback binds; optional on loopback |
+| `MCP_HTTP_TOKEN` | fresh random token per local HTTP session | `tools/mcp_shared.run_mcp_http_server` child + `_streamable_http_transport` client | Prevents a run from attaching to another run's listener on the shared loopback port; standalone public binds still require an operator token |
 
 `_allowed_target_list` unions `config["exploit"]["allowed_targets"]` with those env vars plus `EXPLOIT_DISCOVERED_TARGETS` (comma-separated, via `add_discovered_target` in `tools/mcp_tools/domain.py:475`).
 

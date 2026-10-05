@@ -6,6 +6,7 @@ import asyncio
 import contextlib
 import os
 import re
+import secrets
 import signal
 import socket
 import subprocess
@@ -124,6 +125,13 @@ def _sensitive_env_values(env: dict[str, str]) -> tuple[str, ...]:
         ):
             values.append(value)
     return tuple(values)
+
+
+def _assign_http_session_token(env: dict[str, str]) -> str:
+    """Set a fresh bearer secret for one private loopback HTTP child."""
+    token = secrets.token_urlsafe(32)
+    env["MCP_HTTP_TOKEN"] = token
+    return token
 
 
 @contextlib.asynccontextmanager
@@ -431,6 +439,10 @@ async def _open_exploit_mcp_session_once(
                 raise
         return
 
+    # Multiple API runs share the configured TCP port. A fresh child token
+    # makes the client prove it reached this run's server after the listener
+    # appears; readiness alone cannot identify which concurrent child owns it.
+    _assign_http_session_token(env)
     _http_start_label = f"Starting MCP HTTP server on port {exploit_port}"
     _boot_step(_http_start_label, ok=False)
     # The readiness probe + initialize() below share this single deadline (see
