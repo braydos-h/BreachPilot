@@ -306,15 +306,16 @@ async def test_run_eval_requires_target(tmp_path):
 @pytest.mark.asyncio
 async def test_run_eval_writes_report_with_mocked_session(tmp_path, monkeypatch):
     import tools.eval_harness as mod
+    from tools.eval import single_run
 
     # Patch the config loader to return our in-memory config (no file I/O).
-    monkeypatch.setattr(mod, "load_validated_config", lambda _path: _fake_config())
+    monkeypatch.setattr(single_run, "load_validated_config", lambda _path: _fake_config())
 
     # Patch the model router so no real Ollama client is built.
     fake_client = MagicMock(name="model_client")
     fake_router = MagicMock(name="router")
     fake_router.get_client.return_value = fake_client
-    monkeypatch.setattr(mod, "build_router", lambda *a, **k: fake_router)
+    monkeypatch.setattr(single_run, "build_router", lambda *a, **k: fake_router)
 
     # Patch the MCP boot probe to yield a fake session (no subprocess).
     fake_session = MagicMock(name="mcp_session")
@@ -337,11 +338,11 @@ async def test_run_eval_writes_report_with_mocked_session(tmp_path, monkeypatch)
         "messages": [],
     }
     fake_session_call = AsyncMock(return_value=fake_result)
-    monkeypatch.setattr(mod, "run_exploit_session", fake_session_call)
+    monkeypatch.setattr(single_run, "run_exploit_session", fake_session_call)
 
     # Redirect eval output into tmp_path by mutating the config's output_dir.
     monkeypatch.setattr(
-        mod,
+        single_run,
         "load_validated_config",
         lambda _path: {
             **_fake_config(),
@@ -377,9 +378,10 @@ async def test_run_eval_writes_report_with_mocked_session(tmp_path, monkeypatch)
 @pytest.mark.asyncio
 async def test_run_eval_degrades_when_mcp_unavailable(tmp_path, monkeypatch):
     import tools.eval_harness as mod
+    from tools.eval import single_run
 
     monkeypatch.setattr(
-        mod,
+        single_run,
         "load_validated_config",
         lambda _path: {
             **_fake_config(),
@@ -388,7 +390,7 @@ async def test_run_eval_degrades_when_mcp_unavailable(tmp_path, monkeypatch):
     )
     fake_router = MagicMock()
     fake_router.get_client.return_value = MagicMock()
-    monkeypatch.setattr(mod, "build_router", lambda *a, **k: fake_router)
+    monkeypatch.setattr(single_run, "build_router", lambda *a, **k: fake_router)
 
     # MCP probe yields None (soft_fail) -> degrade to error report.
     monkeypatch.setattr(
@@ -398,7 +400,7 @@ async def test_run_eval_degrades_when_mcp_unavailable(tmp_path, monkeypatch):
     )
     # run_exploit_session must NOT be called when the probe failed.
     session_call = AsyncMock()
-    monkeypatch.setattr(mod, "run_exploit_session", session_call)
+    monkeypatch.setattr(single_run, "run_exploit_session", session_call)
 
     args = SimpleNamespace(target="10.0.0.5", config=tmp_path / "config.yaml")
     rc = await mod.run_eval(args)
@@ -944,6 +946,7 @@ def test_check_regression_new_target_and_baseline_only_warning(tmp_path):
 @pytest.mark.asyncio
 async def test_default_agent_runner_pins_target_and_does_not_mutate_config(tmp_path, monkeypatch):
     import tools.eval_harness as mod
+    from tools.eval import graded
 
     captured = {}
 
@@ -955,10 +958,10 @@ async def test_default_agent_runner_pins_target_and_does_not_mutate_config(tmp_p
             "workspace": "/tmp/ws",
         }
 
-    monkeypatch.setattr(mod, "run_exploit_session", fake_run_exploit_session)
+    monkeypatch.setattr(graded, "run_exploit_session", fake_run_exploit_session)
     fake_router = MagicMock()
     fake_router.get_client.return_value = MagicMock()
-    monkeypatch.setattr(mod, "build_router", lambda *a, **k: fake_router)
+    monkeypatch.setattr(graded, "build_router", lambda *a, **k: fake_router)
 
     config = {
         "ollama": {"host": "http://localhost:11434"},

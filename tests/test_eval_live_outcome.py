@@ -337,6 +337,7 @@ class _FakeCtx:
 @pytest.mark.asyncio
 async def test_run_graded_eval_collects_telemetry_and_classifies_fail(tmp_path, monkeypatch):
     import tools.eval_harness as mod
+    from tools.eval import graded
 
     oracle_dir = tmp_path / "targets"
     oracle_dir.mkdir()
@@ -359,7 +360,7 @@ async def test_run_graded_eval_collects_telemetry_and_classifies_fail(tmp_path, 
     async def fake_open(host, cfg):
         return _FakeCtx(None), None, None
 
-    monkeypatch.setattr(mod, "_open_verify_session", fake_open)
+    monkeypatch.setattr(graded, "_open_verify_session", fake_open)
 
     report = await mod.run_graded_eval(
         ["alpha"],
