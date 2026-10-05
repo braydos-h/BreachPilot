@@ -479,7 +479,7 @@ async def test_audit_log_masks_free_text_command_field(tmp_path: Path):
 
 
 @pytest.mark.asyncio
-async def test_run_as_root_no_longer_double_logs_raw_command(tmp_path: Path):
+async def test_run_as_root_no_longer_double_logs_raw_command(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     # run_as_root was @audit_tool-decorated (logs the masked command arg) AND
     # manually called _audit_log(command=original_command) with the RAW command
     # -- a credential leak. The manual call is removed; only the decorator logs.
@@ -496,14 +496,23 @@ async def test_run_as_root_no_longer_double_logs_raw_command(tmp_path: Path):
         tmp_path,
         config,
     )
-    # Monkeypatch subprocess.run so nothing actually executes (bash/sudo are
-    # not invoked); we only care that the audit trail never holds the raw inline
-    # secret and that the manual "running" double-log is gone.
-    import unittest.mock as _mock
+    # Mock the sandbox boundary so nothing executes. Mocking subprocess.run
+    # here no longer reaches the tool: run_as_root uses run_command_in_sandbox
+    # whenever the fail-closed sandbox manager is present.
+    from tools.mcp_tools.terminal import execute as terminal_execute
+    from tools.sandbox.models import SandboxResult
 
-    with _mock.patch("mcp_exploit_server.subprocess.run") as _r:
-        _r.return_value = _mock.MagicMock(stdout="", stderr="", returncode=0)
-        await mcp.call_tool("run_as_root", {"command": 'echo "-H Authorization: Bearer s3cret123"'})
+    sandbox_calls: list[tuple[object, str, dict[str, Any]]] = []
+
+    def _run_in_sandbox(ctx: object, command: str, **kwargs: Any) -> tuple[bool, SandboxResult]:
+        sandbox_calls.append((ctx, command, kwargs))
+        return True, SandboxResult(exit_code=0, stdout="", stderr="", timed_out=False, duration_seconds=0.01)
+
+    monkeypatch.setattr(terminal_execute, "run_command_in_sandbox", _run_in_sandbox)
+    monkeypatch.setattr(terminal_execute, "_require_sudo_or_pivot", lambda *_args, **_kwargs: None)
+    await mcp.call_tool("run_as_root", {"command": 'echo "-H Authorization: Bearer s3cret123"'})
+    assert len(sandbox_calls) == 1
+    assert sandbox_calls[0][2]["user"] == "root"
     audit_text = (tmp_path / "exploit_audit.jsonl").read_text(encoding="utf-8")
     assert "s3cret123" not in audit_text  # raw inline secret never logged
     assert _REDACTED in audit_text
