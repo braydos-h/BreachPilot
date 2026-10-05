@@ -83,9 +83,7 @@ def research_api_key_env_names(config: dict[str, Any]) -> list[str]:
         str(research.get("fallback_provider", "serpapi") or "").lower(),
     }
 
-    if "ollama" in provider_names and (
-        bool(ollama.get("use_web_search", True)) or bool(ollama.get("use_web_fetch", True))
-    ):
+    if "ollama" in provider_names and bool(ollama.get("use_web_search", True)):
         names.append(str(ollama.get("api_key_env", "OLLAMA_API_KEY") or "OLLAMA_API_KEY"))
     if "serpapi" in provider_names:
         names.append(str(serpapi.get("api_key_env", "SERPAPI_API_KEY") or "SERPAPI_API_KEY"))
@@ -193,7 +191,8 @@ def research_api_keys_available(config: dict[str, Any]) -> bool:
         return True
     if not bool(research.get("require_api_key_for_mcp_tools", True)):
         return True
-    return any(os.environ.get(name) for name in research_api_key_env_names(config))
+    names = research_api_key_env_names(config)
+    return not names or any(os.environ.get(name) for name in names)
 
 
 def disabled_mcp_tools_without_api_key(config: dict[str, Any]) -> set[str]:

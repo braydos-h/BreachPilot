@@ -282,9 +282,9 @@ The `opsec` block is the **active** detection-evasion / pacing / UA-rotation / D
 | `max_content_chars` | int | `12000` | Fetched-content cap | mcp_shared.py:135 |
 | `cache_ttl_seconds` / `cache_max_entries` | int | `1800` / `250` | Cache bounds | mcp_shared.py:136-137 |
 | `min_source_quality` | str | `medium` | `low`\|`medium`\|`high` source ranking | mcp_shared.py:138, web_researcher.py:889 |
-| `require_api_key_for_mcp_tools` | bool | `true` | Gate MCP research tools on provider keys | api_key_store.py:179 |
+| `require_api_key_for_mcp_tools` | bool | `true` | Gate MCP research tools when an enabled remote search provider needs a key | api_key_store.py:179 |
 | `allow_local_fetch` | bool | `false` | Permit localhost/private fetches | mcp_shared.py:139 |
-| `ollama.api_key_env` / `max_results` / `use_web_search` / `use_web_fetch` | — | `OLLAMA_API_KEY` / `8` / `true` / `true` | Ollama research provider | mcp_shared.py:153-158, web_researcher.py:319-369 |
+| `ollama.api_key_env` / `max_results` / `use_web_search` / `use_web_fetch` | — | `OLLAMA_API_KEY` / `8` / `true` / `true` | Ollama search settings; remote `web_fetch` is disabled because it cannot enforce local destination policy | mcp_shared.py:153-158, tools/research/providers.py |
 | `serpapi.api_key_env` / `endpoint` / `engine` / `region` | — | `SERPAPI_API_KEY` / serpapi.com / `duckduckgo` / `us-en` | SerpAPI provider | mcp_shared.py:159-164 |
 | `assistant.*` | see research_assistant.py:97-140 | enabled, `automatic: true`, `failure_trigger: 2`, budgets | Read-only in-loop research assistant (advisory) | `tools/exploit_agent/research_assistant.py`, `tools/exploit_agent/runner/_impl.py` |
 

@@ -39,7 +39,8 @@ Three distinct provider surfaces:
 |---|---|---|
 | Chat/generate | `tools/providers/` registry → `ModelClient` | `ollama` (code default), `opencode_go`, `chatgpt` — the checked-in lab `config.yaml` ships `models.provider: opencode_go`; absent key → `ollama` (`tools/config/loader.py::get_ai_provider`) |
 | Embeddings | `tools/providers/embeddings.py` → `EmbeddingProvider` | `ollama` (default), `none` |
-| Research (web search/fetch) | `tools/web_researcher.py` → `ResearchProvider` | `ollama`, `serpapi` |
+| Research web search | `tools/research/` → `ResearchProvider` | `ollama`, `serpapi` |
+| Research page fetch | `tools/research/http_fetch.py` via `StdlibFetchProvider` | local pinned transport; Ollama `web_fetch` is disabled |
 
 **Ollama is optional.** A zero-Ollama install (no `ollama` Python package, no
 Ollama endpoints/traffic) runs the engine on another provider:

@@ -36,7 +36,8 @@ Three distinct provider surfaces (from `docs/providers.md`):
 |---|---|---|
 | Chat/generate | `tools/providers/` registry → `ModelClient` | `ollama` (default), `opencode_go`, `chatgpt` |
 | Embeddings | `tools/providers/embeddings.py` → `EmbeddingProvider` | `ollama` (default), `none` |
-| Research (web search/fetch) | `tools/web_researcher.py` → `ResearchProvider` | `ollama`, `serpapi` |
+| Research web search | `tools/research/` → `ResearchProvider` | `ollama`, `serpapi` |
+| Research page fetch | `tools/research/http_fetch.py` via `StdlibFetchProvider` | local pinned transport; Ollama `web_fetch` is disabled |
 
 ## `types.py` — the canonical contract
 

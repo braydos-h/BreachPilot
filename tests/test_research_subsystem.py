@@ -9,6 +9,7 @@ from typing import Any
 
 import pytest
 
+from tools.research import providers as research_providers
 from tools.web_researcher import (
     FetchResult,
     OllamaResearchProvider,
@@ -66,7 +67,7 @@ def test_validate_url_blocks_private_and_internal_hosts() -> None:
 
 
 @pytest.mark.asyncio
-async def test_ollama_provider_uses_mocked_web_search_and_fetch(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_ollama_search_uses_scope_checked_local_fetch_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
     class FakeOllamaModule:
         @staticmethod
         def web_search(query: str, max_results: int = 8) -> dict[str, Any]:
@@ -84,11 +85,7 @@ async def test_ollama_provider_uses_mocked_web_search_and_fetch(monkeypatch: pyt
 
         @staticmethod
         def web_fetch(url: str) -> dict[str, Any]:
-            return {
-                "title": "Fetched source",
-                "content": "CVE-2024-12345 affects test product versions before 1.2.3.",
-                "links": ["https://cve.org/CVERecord?id=CVE-2024-12345"],
-            }
+            raise AssertionError("remote Ollama fetching bypasses the local destination policy")
 
     monkeypatch.setitem(sys.modules, "ollama", FakeOllamaModule)
     monkeypatch.setenv("OLLAMA_API_KEY", "test-key")
@@ -100,13 +97,34 @@ async def test_ollama_provider_uses_mocked_web_search_and_fetch(monkeypatch: pyt
     )
 
     results = await provider.search("CVE-2024-12345", max_results=2)
-    fetched = await provider.fetch(results[0].url)
+
+    observed: list[tuple[str, bool, tuple[str, ...]]] = []
+
+    def fetch_public_page(url: str, *, policy, timeout: float, user_agent: str):
+        observed.append((url, policy.allow_local_fetch, policy.allowed_domains))
+        return (
+            b"<html><title>Fetched source</title><p>CVE-2024-12345 affects test product versions before 1.2.3.</p></html>",
+            "text/html",
+            url,
+        )
+
+    monkeypatch.setattr(research_providers, "fetch_bytes", fetch_public_page)
+    researcher = WebResearcher(
+        WebResearcherSettings(
+            provider="ollama",
+            fallback_provider="serpapi",
+            max_content_chars=1000,
+            allowed_domains=["nvd.nist.gov"],
+        )
+    )
+    fetched = await researcher.fetch_result_async(results[0].url)
 
     assert results[0].provider == "ollama"
     assert results[0].url == "https://nvd.nist.gov/vuln/detail/CVE-2024-12345"
-    assert fetched.provider == "ollama"
+    assert fetched.provider == "stdlib"
+    assert fetched.ok
     assert "CVE-2024-12345" in fetched.content
-    assert fetched.links == ["https://cve.org/CVERecord?id=CVE-2024-12345"]
+    assert observed == [(results[0].url, False, ("nvd.nist.gov",))]
 
 
 @pytest.mark.asyncio
@@ -279,6 +297,23 @@ def test_api_key_store_saves_and_loads_without_printing_values(monkeypatch: pyte
     assert os.environ["OLLAMA_API_KEY"] == "secret-value"
     assert "secret-value" not in store.name
     assert store.exists()
+
+
+def test_local_page_fetch_does_not_require_disabled_ollama_fetch_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    from tools.api_key_store import research_api_key_env_names, research_api_keys_available
+
+    monkeypatch.delenv("OLLAMA_API_KEY", raising=False)
+    config = {
+        "research": {
+            "provider": "ollama",
+            "fallback_provider": "",
+            "require_api_key_for_mcp_tools": True,
+            "ollama": {"use_web_search": False, "use_web_fetch": True},
+        }
+    }
+
+    assert research_api_key_env_names(config) == []
+    assert research_api_keys_available(config)
 
 
 @pytest.mark.asyncio

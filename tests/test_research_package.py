@@ -40,7 +40,8 @@ def test_search_result_roundtrip():
 
 def test_fetch_result_truncation():
     result = wr.FetchResult(url="https://example.com", content="x" * 100)
-    assert result.to_dict(max_content_chars=10).endswith("[truncated]")
+    content = result.to_dict(max_content_chars=10)["content"]
+    assert content == "x" * 10 + "\n[truncated]"
 
 
 def test_brief_json_shape():
