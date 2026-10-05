@@ -18,6 +18,7 @@ import subprocess
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 
 @dataclass
@@ -74,6 +75,9 @@ def check_versions(root: Path) -> GateResult:
         py_version = str(py["project"]["version"]).strip()
         main_text = (root / "main.py").read_text(encoding="utf-8")
         match = re.search(r"__version__\s*=\s*[\"']([^\"']+)[\"']", main_text)
+        if match is None and re.search(r"from\s+tools\.cli_args\s+import\s+[^\n]*\b__version__\b", main_text):
+            cli_text = (root / "tools" / "cli_args.py").read_text(encoding="utf-8")
+            match = re.search(r"__version__\s*=\s*[\"']([^\"']+)[\"']", cli_text)
         main_version = match.group(1).strip() if match else ""
         webui = json.loads((root / "webui" / "package.json").read_text(encoding="utf-8"))
         web_version = str(webui["version"]).strip()
@@ -218,7 +222,7 @@ def check_negative_controls(root: Path) -> GateResult:
             sys.path.remove(str(root))
         except ValueError:
             pass
-    return _ok("negative-controls", "secure_web + impossible_sqli score REFUTED correctly")
+    return _ok("negative-controls", "negative-control scoring rules pass; live fixtures are explicitly unsupported")
 
 
 def check_provenance_fields(root: Path) -> GateResult:
@@ -323,6 +327,10 @@ def _required_provenance_fields() -> set[str]:
         "model_id",
         "model_version",
         "temperature",
+        "seed",
+        "action_budget",
+        "max_rounds",
+        "sandbox_enabled",
         "scenario_version",
         "code_revision",
         "breachpilot_version",
@@ -337,15 +345,23 @@ def _required_provenance_fields() -> set[str]:
     }
 
 
-def _verify_eval_dir(eval_dir: Path | None) -> tuple[GateResult, GateResult]:
+def _verify_eval_dir(
+    eval_dir: Path | None,
+    *,
+    oracle_dir: Path | None = None,
+    source_revision: str | None = None,
+) -> tuple[GateResult, GateResult]:
     """Verify live-eval + repeated-trial evidence from an artifacts dir.
 
     Contract (docs/release.md): ``--eval-dir`` points at a directory containing
-    eval JSON reports with a ``provenance`` object carrying all 14
-    ``RunProvenance`` fields. Missing dir/files -> EXTERNAL (safe default).
-    Present-but-invalid (missing fields, malformed JSON) or stale (>90d) -> FAIL.
-    ``live-eval-backend`` passes on any valid provenance; ``repeated-trials``
-    additionally requires ``trials >= 5`` or >=5 provenance files.
+    eval JSON reports (recursively) with known values for all required
+    ``RunProvenance`` pins, a passing outcome from the requested source
+    revision, measured zero scope violations, and executed trials.
+    Missing dir/files -> EXTERNAL (safe default). Present-but-invalid (missing
+    fields, malformed JSON, skipped run) or stale (>90d) -> FAIL.
+    ``live-eval-backend`` passes on any valid full-suite report with exact
+    oracle coverage; ``repeated-trials`` requires five distinct run IDs with
+    the same full-suite coverage. Targets in one report are not repeat trials.
     """
     if eval_dir is None:
         return (
@@ -361,7 +377,7 @@ def _verify_eval_dir(eval_dir: Path | None) -> tuple[GateResult, GateResult]:
             ),
         )
     try:
-        files = sorted(eval_dir.glob("*.json"))
+        files = sorted(eval_dir.rglob("*.json"))
     except OSError as exc:
         return (
             _fail("live-eval-backend", f"cannot read --eval-dir: {exc}"),
@@ -375,6 +391,27 @@ def _verify_eval_dir(eval_dir: Path | None) -> tuple[GateResult, GateResult]:
     import time
 
     required = _required_provenance_fields()
+    target_root = oracle_dir or (Path(__file__).resolve().parents[1] / "eval_targets")
+    oracle_targets: dict[str, bool] = {}
+    positive_targets: set[str] = set()
+    try:
+        for oracle_path in sorted(target_root.glob("*.oracle.json")):
+            oracle = json.loads(oracle_path.read_text(encoding="utf-8"))
+            target_id = oracle.get("target_id") if isinstance(oracle, dict) else None
+            if isinstance(target_id, str) and target_id.strip():
+                oracle_targets[target_id] = oracle.get("verification_supported", True) is not False
+                if oracle_targets[target_id] and oracle.get("negative_control") is not True:
+                    positive_targets.add(target_id)
+    except (OSError, ValueError) as exc:
+        return (
+            _fail("live-eval-backend", f"cannot load eval oracle coverage from {target_root}: {exc}"),
+            _fail("repeated-trials", f"cannot load eval oracle coverage from {target_root}: {exc}"),
+        )
+    if not oracle_targets:
+        return (
+            _fail("live-eval-backend", f"no eval oracle targets found under {target_root}"),
+            _fail("repeated-trials", f"no eval oracle targets found under {target_root}"),
+        )
     valid: list[dict] = []
     errors: list[str] = []
     for path in files:
@@ -383,13 +420,124 @@ def _verify_eval_dir(eval_dir: Path | None) -> tuple[GateResult, GateResult]:
         except (OSError, ValueError) as exc:
             errors.append(f"{path.name}: unreadable ({exc})")
             continue
-        prov = payload.get("provenance", payload if isinstance(payload, dict) else {})
+        if not isinstance(payload, dict):
+            errors.append(f"{path.name}: report is not an object")
+            continue
+        prov = payload.get("provenance", {})
         if not isinstance(prov, dict):
             errors.append(f"{path.name}: provenance not an object")
             continue
         missing = required - set(prov.keys())
         if missing:
             errors.append(f"{path.name}: missing provenance fields {sorted(missing)}")
+            continue
+        unusable = [
+            field
+            for field in sorted(required - {"sandbox_enabled", "action_budget", "max_rounds", "seed"})
+            if not isinstance(prov.get(field), str)
+            or not prov[field].strip()
+            or prov[field].strip().lower() in {"unknown", "none", "null"}
+        ]
+        if unusable:
+            errors.append(f"{path.name}: provenance values unavailable for {unusable}")
+            continue
+        if prov.get("sandbox_enabled") is not True:
+            errors.append(f"{path.name}: eval report did not use the required sandbox")
+            continue
+        if any(type(prov.get(field)) is not int or prov[field] <= 0 for field in ("action_budget", "max_rounds")):
+            errors.append(f"{path.name}: action budget or max rounds provenance is invalid")
+            continue
+        if not isinstance(prov.get("seed"), str):
+            errors.append(f"{path.name}: seed provenance is malformed")
+            continue
+        revision = prov.get("code_revision", "").strip().lower()
+        if re.fullmatch(r"(?:[0-9a-f]{40}|[0-9a-f]{64})", revision) is None:
+            errors.append(f"{path.name}: code revision is not a full commit hash")
+            continue
+        if source_revision and revision != source_revision.lower():
+            errors.append(f"{path.name}: code revision {revision!r} does not match release source")
+            continue
+        outcome = payload.get("live_outcome")
+        trials = payload.get("trials")
+        run_id = payload.get("run_id")
+        target_rows = payload.get("targets")
+        target_ids = (
+            [
+                row.get("target_id")
+                for row in target_rows
+                if isinstance(row, dict) and isinstance(row.get("target_id"), str)
+            ]
+            if isinstance(target_rows, list)
+            else []
+        )
+        executed_ids = (
+            {
+                row.get("target_id")
+                for row in target_rows
+                if isinstance(row, dict)
+                and isinstance(row.get("target_id"), str)
+                and not (isinstance(row.get("details"), dict) and row["details"].get("skipped"))
+            }
+            if isinstance(target_rows, list)
+            else set()
+        )
+        trial_ids = (
+            [
+                trial.get("target_id")
+                for trial in trials
+                if isinstance(trial, dict) and isinstance(trial.get("target_id"), str)
+            ]
+            if isinstance(trials, list)
+            else []
+        )
+        if outcome != "PASS" or not isinstance(trials, list) or not trials or not isinstance(run_id, str) or not run_id:
+            errors.append(f"{path.name}: no executed live trial signal (outcome={outcome!r})")
+            continue
+        if payload.get("full_suite") is not True:
+            errors.append(f"{path.name}: report is not attested as a full oracle suite")
+            continue
+        if (
+            not isinstance(target_rows, list)
+            or len(target_rows) != len(target_ids)
+            or len(target_ids) != len(set(target_ids))
+            or set(target_ids) != set(oracle_targets)
+        ):
+            errors.append(f"{path.name}: target rows do not exactly match the current oracle suite")
+            continue
+        if any((target_id in executed_ids) != oracle_targets[target_id] for target_id in oracle_targets):
+            errors.append(f"{path.name}: skipped-target status disagrees with oracle verification support")
+            continue
+        if any(
+            not isinstance(row.get("details"), dict)
+            or row["details"].get("runner_error") is True
+            or type(row["details"].get("findings_false_positives")) is not int
+            or row["details"].get("findings_false_positives") != 0
+            for row in target_rows
+            if isinstance(row, dict) and not (isinstance(row.get("details"), dict) and row["details"].get("skipped"))
+        ):
+            errors.append(f"{path.name}: report contains runner errors or false-positive findings")
+            continue
+        reliability = payload.get("reliability")
+        scope_count = reliability.get("scope_violation_count") if isinstance(reliability, dict) else None
+        if type(scope_count) is not int or scope_count != 0:
+            errors.append(f"{path.name}: scope-violation telemetry is missing or nonzero")
+            continue
+        verified_positive_targets = {
+            row.get("target_id")
+            for row in target_rows
+            if isinstance(row, dict)
+            and row.get("target_id") in positive_targets
+            and row.get("success") is True
+            and type(row.get("findings_verified")) is int
+            and row.get("findings_verified") > 0
+            and type(row.get("flags_captured")) is int
+            and row.get("flags_captured") > 0
+        }
+        if not verified_positive_targets:
+            errors.append(f"{path.name}: no supported positive target has verified findings and a captured flag")
+            continue
+        if len(trial_ids) != len(trials) or len(trial_ids) != len(set(trial_ids)) or set(trial_ids) != executed_ids:
+            errors.append(f"{path.name}: trial rows do not exactly match executed target rows")
             continue
         # Freshness: artifact mtime within 90 days (stale evidence fails).
         try:
@@ -399,23 +547,39 @@ def _verify_eval_dir(eval_dir: Path | None) -> tuple[GateResult, GateResult]:
         if age_days > 90:
             errors.append(f"{path.name}: stale ({age_days:.0f}d old, max 90d)")
             continue
-        valid.append({"path": path.name, "provenance": prov})
+        valid.append(
+            {
+                "path": path.name,
+                "run_id": run_id,
+                "provenance": prov,
+                "coverage": tuple(sorted(executed_ids)),
+                "pins": tuple((field, prov[field]) for field in sorted(required)),
+            }
+        )
     if not valid:
         return (
             _fail("live-eval-backend", f"no valid provenance in --eval-dir: {'; '.join(errors[:3])}"),
             _fail("repeated-trials", f"no valid provenance in --eval-dir: {'; '.join(errors[:3])}"),
         )
     live = _ok("live-eval-backend", f"{len(valid)} provenance artifact(s) in {eval_dir}")
-    # Repeated trials: trials>=5 in any artifact, or >=5 valid files.
-    repeated_ok = len(valid) >= 5 or any(
-        isinstance(v["provenance"].get("trials"), int) and v["provenance"]["trials"] >= 5 for v in valid
-    )
+    # Distinct complete eval run IDs are the repeat unit. A report's target
+    # count or provenance.trials field cannot stand in for independent runs.
+    coverage_runs: dict[tuple[tuple[str, ...], tuple[tuple[str, Any], ...]], set[str]] = {}
+    for artifact in valid:
+        identity = (artifact["coverage"], artifact["pins"])
+        coverage_runs.setdefault(identity, set()).add(artifact["run_id"])
+    repeated_count = max((len(run_ids) for run_ids in coverage_runs.values()), default=0)
+    repeated_ok = repeated_count >= 5
     if repeated_ok:
-        repeated = _ok("repeated-trials", f"repeated-trial evidence: {len(valid)} file(s), trials>=5 satisfied")
+        repeated = _ok(
+            "repeated-trials",
+            f"{repeated_count} distinct full-suite run IDs with identical target coverage and provenance pins",
+        )
     else:
         repeated = _external(
             "repeated-trials",
-            f"only {len(valid)} valid provenance file(s); need >=5 files or trials>=5 for repeated baseline",
+            f"only {repeated_count} distinct full-suite run IDs with identical coverage and provenance pins; "
+            "need at least 5",
         )
     return (live, repeated)
 
@@ -425,8 +589,9 @@ def _verify_branch_rules(path: Path | None) -> GateResult:
 
     Contract: ``--branch-rules-file`` is JSON from
     ``gh api repos/OWNER/REPO/rulesets`` (list) or a single ruleset object.
-    Must name the main branch, be active, and require CI checks. Missing ->
-    EXTERNAL; present-but-wrong -> FAIL.
+    Must name the main branch, be active, require all documented status checks,
+    require pull requests, block force-push/deletion, and define no bypass
+    actors. Missing -> EXTERNAL; present-but-wrong -> FAIL.
     """
     if path is None:
         return _external(
@@ -439,22 +604,91 @@ def _verify_branch_rules(path: Path | None) -> GateResult:
     rulesets = payload if isinstance(payload, list) else [payload]
     if not isinstance(rulesets, list) or not rulesets:
         return _fail("branch-rules-applied", "branch-rules file has no rulesets")
-    blob = json.dumps(rulesets).lower()
-    # Require evidence of main protection + CI checks.
-    if "main" not in blob:
-        return _fail("branch-rules-applied", "no ruleset targets main branch")
-    if "ci success" not in blob and "ci" not in blob:
-        return _fail("branch-rules-applied", "ruleset does not require CI checks")
-    if '"enforcement": "active"' not in blob.replace(" ", "") and "active" not in blob:
-        return _fail("branch-rules-applied", "ruleset not active")
-    return _ok("branch-rules-applied", f"branch rules verified from {path.name}")
+    for ruleset in rulesets:
+        if not isinstance(ruleset, dict) or ruleset.get("enforcement") != "active":
+            continue
+        if ruleset.get("target") != "branch":
+            continue
+        conditions = ruleset.get("conditions")
+        ref_name = conditions.get("ref_name") if isinstance(conditions, dict) else None
+        includes = ref_name.get("include") if isinstance(ref_name, dict) else None
+        excludes = ref_name.get("exclude", []) if isinstance(ref_name, dict) else None
+        if (
+            not isinstance(includes, list)
+            or "refs/heads/main" not in includes
+            or not isinstance(excludes, list)
+            or "refs/heads/main" in excludes
+        ):
+            continue
+        raw_rules = ruleset.get("rules")
+        if not isinstance(raw_rules, list):
+            continue
+        required_checks = []
+        for rule in raw_rules:
+            if not isinstance(rule, dict) or rule.get("type") != "required_status_checks":
+                continue
+            parameters = rule.get("parameters")
+            if isinstance(parameters, dict):
+                required_checks.append(parameters.get("required_status_checks", []))
+        contexts = {
+            check.get("context")
+            for checks in required_checks
+            if isinstance(checks, list)
+            for check in checks
+            if isinstance(check, dict)
+        }
+        required_contexts = {
+            "CI success",
+            "Eval unit tests (mocked, no API key)",
+            "CodeQL / Analyze (python)",
+            "CodeQL / Analyze (javascript)",
+            "Dependency Review / dependency-review",
+        }
+        rule_types = {rule.get("type") for rule in raw_rules if isinstance(rule, dict)}
+        pull_request_rules = [
+            rule
+            for rule in raw_rules
+            if isinstance(rule, dict)
+            and rule.get("type") == "pull_request"
+            and isinstance(rule.get("parameters"), dict)
+        ]
+        approvals_ok = any(
+            type(rule["parameters"].get("required_approving_review_count")) is int
+            and rule["parameters"]["required_approving_review_count"] >= 1
+            and rule["parameters"].get("dismiss_stale_reviews_on_push") is True
+            and rule["parameters"].get("required_review_thread_resolution") is True
+            for rule in pull_request_rules
+        )
+        strict_status_checks = any(
+            isinstance(rule.get("parameters"), dict)
+            and rule["parameters"].get("strict_required_status_checks_policy") is True
+            for rule in raw_rules
+            if isinstance(rule, dict) and rule.get("type") == "required_status_checks"
+        )
+        if (
+            required_contexts <= contexts
+            and {"deletion", "non_fast_forward", "pull_request"} <= rule_types
+            and approvals_ok
+            and strict_status_checks
+            and ruleset.get("bypass_actors") == []
+        ):
+            return _ok(
+                "branch-rules-applied",
+                f"active main ruleset requires fresh documented checks, resolved review threads, PRs, and no bypass in {path.name}",
+            )
+    return _fail(
+        "branch-rules-applied",
+        "no active main ruleset enforces all documented status checks, PRs, no force-push/deletion, and no bypass",
+    )
 
 
-def _verify_sandbox_digest(path: Path | None) -> GateResult:
+def _verify_sandbox_digest(path: Path | None, source_revision: str | None = None) -> GateResult:
     """Verify published sandbox-image digest artifact.
 
     Contract: ``--sandbox-digest-file`` is text containing a
-    ``sha256:<hex>`` digest (e.g. ``worker-digests.txt`` from release.yml).
+    ``sha256:<hex>`` digest (e.g. ``DIGESTS.md`` from sandbox-image.yml).
+    When release source is supplied, ``Source commit`` must bind the image to
+    that source revision.
     Missing -> EXTERNAL; present-but-malformed -> FAIL. Optionally compares
     against the local docker image digest when docker is available (mismatch
     is a FAIL, not silent green).
@@ -465,9 +699,13 @@ def _verify_sandbox_digest(path: Path | None) -> GateResult:
         text = path.read_text(encoding="utf-8")
     except OSError as exc:
         return _fail("sandbox-image-published", f"cannot read --sandbox-digest-file: {exc}")
-    match = re.search(r"sha256:[0-9a-f]{32,}", text.lower())
+    match = re.search(r"(?<![0-9a-f])sha256:[0-9a-f]{64}(?![0-9a-f])", text.lower())
     if not match:
         return _fail("sandbox-image-published", f"{path.name} has no sha256 digest")
+    if source_revision:
+        source_match = re.search(r"(?im)^Source commit:\s*([0-9a-f]{40}|[0-9a-f]{64})\s*$", text)
+        if source_match is None or source_match.group(1).lower() != source_revision.lower():
+            return _fail("sandbox-image-published", f"{path.name} source commit does not match release source")
     return _ok("sandbox-image-published", f"sandbox image digest {match.group(0)[:19]}… from {path.name}")
 
 
@@ -477,6 +715,7 @@ def check_external(
     eval_dir: Path | None = None,
     sandbox_digest_file: Path | None = None,
     branch_rules_file: Path | None = None,
+    source_revision: str | None = None,
 ) -> list[GateResult]:
     """Boxes needing live infra or maintainer action — EXTERNAL unless evidence verifies.
 
@@ -484,13 +723,12 @@ def check_external(
     eval provenance JSON, GHCR digest file, branch-rules API output.
     Missing evidence stays EXTERNAL; invalid/stale evidence FAILs.
     """
-    _ = root
-    live, repeated = _verify_eval_dir(eval_dir)
+    live, repeated = _verify_eval_dir(eval_dir, oracle_dir=root / "eval_targets", source_revision=source_revision)
     return [
         live,
         repeated,
         _verify_branch_rules(branch_rules_file),
-        _verify_sandbox_digest(sandbox_digest_file),
+        _verify_sandbox_digest(sandbox_digest_file, source_revision),
     ]
 
 
@@ -500,6 +738,7 @@ def run_gate(
     eval_dir: Path | None = None,
     sandbox_digest_file: Path | None = None,
     branch_rules_file: Path | None = None,
+    source_revision: str | None = None,
 ) -> GateReport:
     report = GateReport()
     report.results += [
@@ -518,6 +757,7 @@ def run_gate(
             eval_dir=eval_dir,
             sandbox_digest_file=sandbox_digest_file,
             branch_rules_file=branch_rules_file,
+            source_revision=source_revision,
         ),
     ]
     return report
@@ -538,6 +778,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--branch-rules-file", default=None, help="gh api rulesets JSON output (satisfies branch-rules-applied)"
     )
+    parser.add_argument("--source-revision", default=None, help="require eval provenance from this source revision")
     args = parser.parse_args(argv)
     root = Path(args.root).resolve()
 
@@ -552,6 +793,7 @@ def main(argv: list[str] | None = None) -> int:
         eval_dir=_opt(args.eval_dir),
         sandbox_digest_file=_opt(args.sandbox_digest_file),
         branch_rules_file=_opt(args.branch_rules_file),
+        source_revision=args.source_revision,
     )
     if args.json:
         print(json.dumps(report.to_dict(), indent=2))

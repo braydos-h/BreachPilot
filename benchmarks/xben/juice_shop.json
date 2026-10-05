@@ -17,7 +17,8 @@
           "url": "http://127.0.0.1:3000/rest/user/login",
           "user": "' OR 1=1--",
           "password": "x",
-          "expect_status": 200
+          "expect_status": 200,
+          "expect_body_contains": "authentication"
         }
       },
       {

@@ -277,8 +277,11 @@ def run_summary_from_dict(payload: dict[str, Any]) -> RunSummary:
     )
     if payload.get("scope_violation_telemetry_available") is not True:
         # Legacy summaries defaulted absent network-layer telemetry to zero.
-        # Preserve a count only when the producer explicitly attested it.
-        summary.scope_violation_count = None
+        # Do not treat legacy zero as measured evidence, but retain a positive
+        # observation as a fail-closed signal for reports and baselines.
+        raw_scope_count = payload.get("scope_violation_count")
+        if not isinstance(raw_scope_count, int) or isinstance(raw_scope_count, bool) or raw_scope_count <= 0:
+            summary.scope_violation_count = None
         summary.scope_violation_telemetry_available = False
     if summary.trials_completed is None or summary.trials_completed == 0 or summary.trials_total == 0:
         summary.verified_success_rate = None

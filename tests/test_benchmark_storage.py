@@ -376,6 +376,17 @@ def test_legacy_baseline_scope_zero_is_normalized_to_unknown(tmp_path):
     assert loaded["scenarios"]["s1"]["trials"] == 1
 
 
+def test_legacy_baseline_positive_scope_count_is_preserved_as_failure_evidence(tmp_path):
+    path = tmp_path / "legacy-positive.json"
+    path.write_text(json.dumps({"scope_violation_count": 2, "trials_total": 1}), encoding="utf-8")
+
+    loaded = load_baseline(path)
+
+    assert loaded is not None
+    assert loaded["scope_violation_count"] == 2
+    assert loaded["scope_violation_telemetry_available"] is False
+
+
 def test_load_baseline_normalizes_legacy_zero_for_empty_reproduction_denominator(tmp_path):
     path = tmp_path / "baseline.json"
     path.write_text(

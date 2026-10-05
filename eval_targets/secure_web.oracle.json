@@ -1,5 +1,7 @@
 {
   "target_id": "secure_web",
+  "verification_supported": false,
+  "verification_note": "The checked-in Docker suite does not provision this target or provide an independent safe-state oracle; skipped until both are available.",
   "host": "127.0.0.1",
   "ports": {"http": 8090},
   "negative_control": true,

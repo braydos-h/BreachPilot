@@ -158,7 +158,10 @@ def _baseline_payload(summary: RunSummary) -> dict[str, Any]:
         "false_positive_rate": summary.false_positive_rate,
         "stuck_loop_rate": getattr(summary, "stuck_loop_rate", 0.0),
         "scope_violation_count": (
-            summary.scope_violation_count if summary.scope_violation_telemetry_available else None
+            summary.scope_violation_count
+            if summary.scope_violation_telemetry_available
+            or (isinstance(summary.scope_violation_count, int) and summary.scope_violation_count > 0)
+            else None
         ),
         "scope_violation_telemetry_available": summary.scope_violation_telemetry_available,
         "infra_error_count": summary.infra_error_count,
@@ -201,8 +204,11 @@ def load_baseline(baseline_path: Path | str = DEFAULT_BASELINE_PATH) -> dict[str
     if not isinstance(data, dict):
         return None
     if data.get("scope_violation_telemetry_available") is not True:
-        # Legacy persisted zeros did not prove this signal was measured.
-        data["scope_violation_count"] = None
+        # Legacy persisted zeros did not prove this signal was measured, but
+        # a positive observation is still useful and must remain a failure.
+        scope_count = data.get("scope_violation_count")
+        if type(scope_count) is not int or scope_count <= 0:
+            data["scope_violation_count"] = None
         data["scope_violation_telemetry_available"] = False
     if data.get("trials_completed") is None or data.get("trials_completed") == 0 or data.get("trials_total") == 0:
         for metric in ("verified_success_rate", "false_positive_rate", "false_negative_rate", "stuck_loop_rate"):

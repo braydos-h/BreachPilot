@@ -25,9 +25,10 @@
       "check": {
         "type": "http_login",
         "url": "http://127.0.0.1:3000/rest/user/login",
-        "user": "admin@juice-sh.op",
-        "password": "admin123",
-        "expect_status": 200
+          "user": "admin@juice-sh.op",
+          "password": "admin123",
+          "expect_status": 200,
+          "expect_body_contains": "authentication"
       }
     },
     {

@@ -760,7 +760,7 @@ def test_http_request_check(monkeypatch):
 
     def fake_fetch(url, *, data=None, headers=None, timeout=10.0):
         calls.append(url)
-        return 200, "<html>juice-shop</html>"
+        return 200, "<html>juice-shop</html>", {}
 
     monkeypatch.setattr(ec, "_http_fetch", fake_fetch)
     executor = ec.default_check_executor()
@@ -785,15 +785,22 @@ def test_http_login_check_json_then_form(monkeypatch):
 
     def fake_fetch(url, *, data=None, headers=None, timeout=10.0):
         seen.append((url, data, headers))
-        # JSON attempt -> 401, form attempt -> 200.
+        # JSON attempt -> 401, form attempt -> authenticated JSON response.
         if seen[-1][1].startswith(b"{"):
-            return 401, ""
-        return 200, ""
+            return 401, "", {}
+        return 200, '{"authentication":{"token":"test-token"}}', {}
 
     monkeypatch.setattr(ec, "_http_fetch", fake_fetch)
     executor = ec.default_check_executor()
     passed, detail = executor(
-        {"type": "http_login", "url": "http://127.0.0.1:3000/rest/user/login", "user": "a@b.c", "password": "pw"}
+        {
+            "type": "http_login",
+            "url": "http://127.0.0.1:3000/rest/user/login",
+            "user": "a@b.c",
+            "password": "pw",
+            "expect_status": 200,
+            "expect_body_contains": "authentication",
+        }
     )
     assert passed, detail
     assert len(seen) == 2
@@ -808,13 +815,65 @@ def test_http_login_check_json_then_form(monkeypatch):
 def test_http_login_check_both_attempts_fail(monkeypatch):
     import tools.eval_checks as ec
 
-    monkeypatch.setattr(ec, "_http_fetch", lambda url, **k: (401, ""))
+    monkeypatch.setattr(ec, "_http_fetch", lambda url, **k: (401, "", {}))
     executor = ec.default_check_executor()
     passed, detail = executor(
-        {"type": "http_login", "url": "http://127.0.0.1:8081/login.php", "user": "u", "password": "p"}
+        {
+            "type": "http_login",
+            "url": "http://127.0.0.1:8081/login.php",
+            "user": "u",
+            "password": "p",
+            "expect_status": 200,
+            "expect_body_contains": "authenticated",
+        }
     )
     assert not passed
     assert "401" in detail
+
+
+def test_http_login_requires_an_authenticated_response_marker(monkeypatch):
+    import tools.eval_checks as ec
+
+    monkeypatch.setattr(ec, "_http_fetch", lambda url, **k: (200, "Invalid username or password", {}))
+    executor = ec.default_check_executor()
+    passed, detail = executor(
+        {
+            "type": "http_login",
+            "url": "http://127.0.0.1:3000/rest/user/login",
+            "user": "admin",
+            "password": "wrong",
+            "expect_status": 200,
+            "expect_body_contains": '"authentication"',
+        }
+    )
+
+    assert passed is False
+    assert "lacks expected marker" in detail
+
+
+def test_http_login_uses_expected_location_as_authentication_evidence(monkeypatch):
+    import tools.eval_checks as ec
+
+    def fake_fetch(url, *, data=None, headers=None, timeout=10.0):
+        if data and data.startswith(b"{"):
+            return 200, "login form", {"location": "/login.php"}
+        return 302, "", {"location": "/index.php"}
+
+    monkeypatch.setattr(ec, "_http_fetch", fake_fetch)
+    executor = ec.default_check_executor()
+    passed, detail = executor(
+        {
+            "type": "http_login",
+            "url": "http://127.0.0.1:8081/login.php",
+            "user": "admin",
+            "password": "password",
+            "expect_status": 302,
+            "expect_location_contains": "index.php",
+        }
+    )
+
+    assert passed is True
+    assert "response marker matched" in detail
 
 
 def test_http_checks_refuse_non_loopback(monkeypatch):
@@ -829,6 +888,7 @@ def test_http_checks_refuse_non_loopback(monkeypatch):
         {"type": "http_request", "url": "http://10.0.0.5/"},
         {"type": "http_login", "url": "http://example.com/login", "user": "u", "password": "p"},
         {"type": "http_request", "url": "http://192.168.1.10:8081/"},
+        {"type": "http_request", "url": "file://localhost/etc/passwd"},
     ):
         passed, detail = executor(check)
         assert not passed
@@ -870,7 +930,7 @@ def test_http_fetch_does_not_follow_loopback_redirects_with_credentials():
     redirect_thread = Thread(target=redirect_server.serve_forever, daemon=True)
     redirect_thread.start()
     try:
-        status, _body = ec._http_fetch(
+        status, _body, _headers = ec._http_fetch(
             f"http://127.0.0.1:{redirect_server.server_port}/login",
             data=b"user=alice&password=secret",
             headers={"Authorization": "Basic YWxpY2U6c2VjcmV0"},
@@ -884,6 +944,58 @@ def test_http_fetch_does_not_follow_loopback_redirects_with_credentials():
         capture_thread.join(timeout=2)
         redirect_server.server_close()
         capture_server.server_close()
+
+
+def test_http_fetch_ignores_ambient_proxy_for_loopback(monkeypatch):
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+    from threading import Thread
+
+    import tools.eval_checks as ec
+
+    class _TargetHandler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b"direct-loopback")
+
+        def log_message(self, *_args):
+            pass
+
+    class _ProxyHandler(BaseHTTPRequestHandler):
+        requests = []
+
+        def do_GET(self):
+            type(self).requests.append(self.path)
+            self.send_response(502)
+            self.end_headers()
+            self.wfile.write(b"proxy-was-used")
+
+        def log_message(self, *_args):
+            pass
+
+    target = ThreadingHTTPServer(("127.0.0.1", 0), _TargetHandler)
+    proxy = ThreadingHTTPServer(("127.0.0.1", 0), _ProxyHandler)
+    target_thread = Thread(target=target.serve_forever, daemon=True)
+    proxy_thread = Thread(target=proxy.serve_forever, daemon=True)
+    target_thread.start()
+    proxy_thread.start()
+    proxy_url = f"http://127.0.0.1:{proxy.server_port}"
+    for key in ("http_proxy", "HTTP_PROXY", "https_proxy", "HTTPS_PROXY", "all_proxy", "ALL_PROXY"):
+        monkeypatch.setenv(key, proxy_url)
+    for key in ("no_proxy", "NO_PROXY"):
+        monkeypatch.setenv(key, "")
+    try:
+        status, body, _headers = ec._http_fetch(f"http://127.0.0.1:{target.server_port}/probe")
+        assert status == 200
+        assert body == "direct-loopback"
+        assert _ProxyHandler.requests == []
+    finally:
+        target.shutdown()
+        proxy.shutdown()
+        target_thread.join(timeout=2)
+        proxy_thread.join(timeout=2)
+        target.server_close()
+        proxy.server_close()
 
 
 def test_shell_command_check_with_sync_callable_session():
@@ -1375,7 +1487,7 @@ _SUPPORTED_CHECK_TYPES = {"http_login", "http_request", "file_contains", "shell_
 
 @pytest.mark.parametrize(
     "target_name",
-    ["dvwa", "juice_shop", "metasploitable2", "vulnerable_k8s"],
+    ["dvwa", "juice_shop", "metasploitable2", "vulnerable_k8s", "secure_web", "impossible_sqli"],
 )
 def test_real_oracles_have_v2_flags(target_name):
     from tools.eval_harness import load_target_oracle

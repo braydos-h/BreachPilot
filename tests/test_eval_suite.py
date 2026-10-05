@@ -180,7 +180,7 @@ def test_score_success_criteria_2_web_vulns():
 
 
 def test_score_negative_control_empty_is_success():
-    """#36/#37: on a hardened target the correct output is nothing claimed."""
+    """#36/#37: the pure scorer treats no claims as success for a safe target."""
     import json
     from pathlib import Path
 

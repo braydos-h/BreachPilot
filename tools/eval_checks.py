@@ -5,8 +5,8 @@ oracle flag **independently of the agent's claims** — the executor is the trut
 source. Check specs are declarative dicts stored target-side in
 ``eval_targets/*.oracle.json`` (schema v2):
 
-- ``http_login``    — ``{type, url, user, password, expect_status?}`` — POST a
-  credential pair and judge by HTTP response status.
+- ``http_login``    — ``{type, url, user, password, expect_status?, expect_body_contains?, expect_location_contains?}`` — POST a
+  credential pair and require an authenticated response marker for success.
 - ``http_request``  — ``{type, url, expect_status?, expect_body_contains?}`` —
   anonymous probe (juice-shop / k8s anonymous-access style checks).
 - ``file_contains`` — ``{type, path, pattern}`` — ``path`` may be
@@ -84,7 +84,10 @@ def _is_loopback_url(url: str) -> bool:
     hostname. Non-loopback URLs are refused before any socket is opened.
     """
     try:
-        host = (_urlparse.urlsplit(url).hostname or "").lower()
+        parsed = _urlparse.urlsplit(url)
+        if parsed.scheme.lower() not in {"http", "https"}:
+            return False
+        host = (parsed.hostname or "").lower()
     except ValueError:
         return False
     if not host:
@@ -103,8 +106,8 @@ def _http_fetch(
     data: bytes | None = None,
     headers: dict[str, str] | None = None,
     timeout: float = _DEFAULT_HTTP_TIMEOUT,
-) -> "tuple[int, str]":
-    """Perform one HTTP request and return ``(status, body_text)``.
+) -> "tuple[int, str, dict[str, str]]":
+    """Perform one HTTP request and return ``(status, body_text, headers)``.
 
     HTTP error statuses (401/403/...) are returned as normal results rather
     than raised — a login probe that gets a 401 is a legitimate observation,
@@ -115,15 +118,19 @@ def _http_fetch(
     try:
         # A redirect can leave loopback and forward an Authorization header.
         # Treat 3xx as an observed status instead of following it.
-        opener = _urlrequest.build_opener(_NoRedirectHandler)
+        # Ignore ambient proxy settings: a loopback-only URL must connect
+        # directly, even when the operator shell has HTTP(S)_PROXY set.
+        opener = _urlrequest.build_opener(_urlrequest.ProxyHandler({}), _NoRedirectHandler)
         with opener.open(request, timeout=timeout) as resp:  # noqa: S310 - initial URL is loopback-only; redirects are disabled
-            return int(resp.status), resp.read().decode("utf-8", errors="replace")
+            response_headers = {str(key).lower(): str(value) for key, value in resp.headers.items()}
+            return int(resp.status), resp.read().decode("utf-8", errors="replace"), response_headers
     except _urlerror.HTTPError as exc:
         try:
             body = exc.read().decode("utf-8", errors="replace")
         except OSError:
             body = ""
-        return int(exc.code), body
+        response_headers = {str(key).lower(): str(value) for key, value in (exc.headers or {}).items()}
+        return int(exc.code), body, response_headers
 
 
 # ---------------------------------------------------------------------------
@@ -234,6 +241,12 @@ def _check_http_login(check: dict[str, Any], timeout: float) -> "tuple[bool, str
         expect_status = int(check.get("expect_status", 200) or 200)
     except (TypeError, ValueError):
         expect_status = 200
+    expected_body = str(check.get("expect_body_contains", "") or "")
+    expected_location = str(check.get("expect_location_contains", "") or "")
+    if expect_status < 400 and not (expected_body or expected_location):
+        return False, "http_login: successful status requires an authenticated body or redirect marker"
+    if expect_status not in {401, 403} and expect_status >= 400 and not (expected_body or expected_location):
+        return False, "http_login: failure status requires an explicit response marker"
 
     # Two credential-carrying attempts, judged independently: JSON first
     # (REST/JSON login endpoints such as juice-shop /rest/user/login), then a
@@ -252,16 +265,26 @@ def _check_http_login(check: dict[str, Any], timeout: float) -> "tuple[bool, str
         ),
     ]
     last_status = -1
+    last_detail = ""
     for content_type, data in attempts:
         headers = {"Content-Type": content_type, "Authorization": f"Basic {basic}"}
         try:
-            status, _body = _http_fetch(url, data=data, headers=headers, timeout=timeout)
+            status, body, response_headers = _http_fetch(url, data=data, headers=headers, timeout=timeout)
         except OSError as exc:
             return False, f"http_login: transport error for {url}: {exc}"
         last_status = status
-        if status == expect_status:
-            return True, f"http_login: status={status} (expected {expect_status})"
-    return False, f"http_login: status={last_status} != expected {expect_status} for {url}"
+        if status != expect_status:
+            last_detail = f"status={status} (expected {expect_status})"
+            continue
+        if expected_body and expected_body not in body:
+            last_detail = f"response body lacks expected marker {expected_body!r}"
+            continue
+        location = response_headers.get("location", "")
+        if expected_location and expected_location not in location:
+            last_detail = f"redirect location lacks expected marker {expected_location!r}"
+            continue
+        return True, f"http_login: status={status} and response marker matched"
+    return False, f"http_login: {last_detail or f'status={last_status} != expected {expect_status}'} for {url}"
 
 
 def _check_http_request(check: dict[str, Any], timeout: float) -> "tuple[bool, str]":
@@ -275,7 +298,7 @@ def _check_http_request(check: dict[str, Any], timeout: float) -> "tuple[bool, s
     except (TypeError, ValueError):
         expect_status = 200
     try:
-        status, body = _http_fetch(url, timeout=timeout)
+        status, body, _response_headers = _http_fetch(url, timeout=timeout)
     except OSError as exc:
         return False, f"http_request: transport error for {url}: {exc}"
     if status != expect_status:

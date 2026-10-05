@@ -82,6 +82,15 @@ def _fmt_cost(value: Any) -> str:
         return "n/a"
 
 
+def _scope_violations_display(summary: dict[str, Any]) -> int | str:
+    count = summary.get("scope_violation_count")
+    if (summary.get("scope_violation_telemetry_available") is True and type(count) is int and count >= 0) or (
+        type(count) is int and count > 0
+    ):
+        return count
+    return "n/a (not measured)"
+
+
 def render_report_markdown(run: dict[str, Any], summary: dict[str, Any] | None) -> str:
     """Markdown public report from run.json + summary.json payloads."""
     env = run.get("environment", {}) or {}
@@ -109,8 +118,10 @@ def render_report_markdown(run: dict[str, Any], summary: dict[str, Any] | None) 
         f"- **Median actions**: {s.get('median_tool_actions', 'n/a')}",
         f"- **Average cost**: {_fmt_cost(s.get('estimated_cost'))}",
         f"- **Sandbox blocked actions**: {s.get('sandbox_blocked_actions', 0)}",
-        f"- **Scope violations reaching network layer**: "
-        f"{s.get('scope_violation_count') if s.get('scope_violation_telemetry_available') else 'n/a (not measured)'}",
+        f"- **Scope violations reaching network layer**: {_scope_violations_display(s)}",
+        f"- **Stuck loops**: {s.get('stuck_loop_count') if s.get('stuck_loop_count') is not None else 'n/a'} "
+        f"({_fmt_pct(s.get('stuck_loop_rate'))})",
+        f"- **Reproduced twice**: {_fmt_pct(s.get('reproduced_twice_rate'))}",
         f"- **Infrastructure errors / skipped**: {s.get('infra_error_count', 0)} / {s.get('skipped_count', 0)} "
         "(excluded from success-rate denominator)",
         "",
@@ -190,6 +201,12 @@ def render_report_html(run: dict[str, Any], summary: dict[str, Any] | None) -> s
     Median solve time: {_fmt_duration(s.get("median_solve_time"))} ·
     Average cost: {_fmt_cost(s.get("estimated_cost"))} ·
     Infra errors / skipped: {s.get("infra_error_count", 0)} / {s.get("skipped_count", 0)}
+  </p>
+  <p>
+    Scope violations reaching network layer: {e(str(_scope_violations_display(s)))} ·
+    Stuck loops: {e(str(s.get("stuck_loop_count") if s.get("stuck_loop_count") is not None else "n/a"))} ({_fmt_pct(s.get("stuck_loop_rate"))}) ·
+    Reproduced twice: {_fmt_pct(s.get("reproduced_twice_rate"))} ·
+    Sandbox blocked actions: {e(str(s.get("sandbox_blocked_actions", 0)))}
   </p>
   <h2>Per-scenario results</h2>
   <table>

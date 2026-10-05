@@ -381,6 +381,34 @@ def test_unavailable_reproduced_rate_survives_api_and_baseline_serialization(tmp
     assert baseline.json()["reproduced_twice_rate"] is None
 
 
+def test_baseline_save_preserves_positive_legacy_scope_observation(tmp_path, monkeypatch):
+    _seed_and_patch_runner(monkeypatch, tmp_path)
+    client = _make_client(tmp_path, monkeypatch)
+    import json
+
+    from tools.benchmark.storage import BenchmarkStorage
+
+    storage = BenchmarkStorage(tmp_path / "bench")
+    _persist_run(storage, "fake", "run-legacy-scope", verified=True)
+    summary_path = storage.run_dir("fake", "run-legacy-scope") / "summary.json"
+    summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    summary["scope_violation_count"] = 2
+    summary.pop("scope_violation_telemetry_available", None)
+    summary_path.write_text(json.dumps(summary), encoding="utf-8")
+
+    saved = client.post(
+        "/api/v1/benchmarks/baseline",
+        headers=_headers(),
+        json={"run_id": "run-legacy-scope"},
+    )
+
+    assert saved.status_code == 200, saved.text
+    baseline = client.get("/api/v1/benchmarks/baseline", headers=_headers())
+    assert baseline.status_code == 200, baseline.text
+    assert baseline.json()["scope_violation_count"] == 2
+    assert baseline.json()["scope_violation_telemetry_available"] is False
+
+
 def test_api_normalizes_legacy_rates_with_zero_completed_trials(tmp_path, monkeypatch):
     _seed_and_patch_runner(monkeypatch, tmp_path)
     client = _make_client(tmp_path, monkeypatch)
