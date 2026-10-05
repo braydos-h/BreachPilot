@@ -1,7 +1,7 @@
 ---
 title: Kernel — Overview
 package: tools/kernel
-files: [allowlist.py, audit.py, config.py, workspace.py, parse.py]
+files: [allowlist.py, audit.py, segmented_audit.py, config.py, workspace.py, parse.py]
 ---
 
 # Kernel — Overview (`tools/kernel/`)
@@ -13,7 +13,8 @@ Extracted safety/portability shims re-exported by `tools/mcp_shared` for backwar
 | File | LOC | Role | Re-export via |
 |---|---|---|---|
 | `allowlist.py` | 238 | Target-IP allowlist union + extraction | `tools.mcp_shared._allowed_target_list`, `_check_allowlist` |
-| `audit.py` | 374 | Credential redaction + audit decorators | `tools.mcp_shared.make_audit_tool`, `make_require_allowlist` |
+| `audit.py` | 680 | Credential redaction + audit decorators; re-exports segmented audit API | `tools.mcp_shared.make_audit_tool`, `make_require_allowlist` |
+| `segmented_audit.py` | 651 | Segmented audit-chain writer, verifier, checkpoints, and recovery | `tools.kernel.audit` compatibility exports |
 | `config.py` | 25 | YAML `load_config(path)` | `tools.mcp_shared` / `tools.config_cli` |
 | `workspace.py` | 132 | Path containment + per-attempt dirs | `tools.mcp_shared._resolve_workspace_file` |
 | `parse.py` | 15 | Re-export shim | `tools.exploit_agent.context._parse_reasoning_block` + `tool_calls._filter_and_validate_tool_calls` |
@@ -57,6 +58,19 @@ Decorators (`make_require_allowlist`/`make_audit_tool`):
 - `audit_tool` always logs `started` then `completed|blocked`, target from `_extract_audit_target(bound)`.
 
 Lab build: no additional command-content gates; `full_access` bypass is intentional – allowlist is the lock.
+
+## `segmented_audit.py` — segmented chain storage (`segmented_audit.py:1`)
+
+`SegmentedAuditWriter` and `verify_segmented_chain` implement the optional
+segmented JSONL layout. Sealed segments are linked by SHA-256 digests, record
+hashes continue across segment boundaries, and the active tail is fully
+verified. Checkpoints are atomically replaced; incomplete tails are
+quarantined for recovery rather than silently truncated. Segment, checkpoint,
+and quarantined files retain mode `0o600`.
+
+The historical `tools.kernel.audit` names remain aliases to this module, so
+callers do not need to change their imports. `verify_audit_chain` in
+`tools.exploit_agent.policy` remains the separate legacy single-file verifier.
 
 ## `config.py` (`config.py:11`)
 
@@ -107,6 +121,7 @@ No kernel-specific block; kernel reads the same `exploit.*` keys.
 | `tests/test_scanner_target_extraction.py` | yes | `_extract_scanner_targets` argv-walk + value-flag skip |
 | `tests/test_audit_redaction.py` | yes | `_mask_secret_content`, `_redact_args`, 10 regexes |
 | `tests/test_audit_chain.py` | yes | `verify_audit_chain` (policy) + kernel audit log append |
+| `tests/test_segmented_audit.py` | yes | Compatibility exports, segment rotation/modes, torn-tail quarantine |
 | `tests/test_mcp_shared_helpers.py` | yes | `load_config`, `_extract_msf_rhosts` |
 | `tests/test_mcp_workspace.py` | yes | `_resolve_workspace_file`, `_is_inside_workspace`, `_find_file` |
 | `tests/test_workspace_binary_write.py` | yes | `read_workspace` truncation + binary flag |

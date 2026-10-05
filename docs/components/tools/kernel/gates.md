@@ -1,12 +1,12 @@
 ---
 title: Kernel — Gates
 package: tools/kernel
-files: [audit.py, allowlist.py]
+files: [audit.py, segmented_audit.py, allowlist.py]
 ---
 
 # Kernel — Gates (`tools/kernel/`)
 
-Audit decorators + the target-IP allowlist union. Factories in `audit.py` build the `@require_allowlist` / `@audit_tool` decorators every MCP tool registers through (`tools/mcp_tools/registry.py`); the lock itself lives in `allowlist.py`. Re-exported by `tools.mcp_shared` for backwards compat.
+Audit decorators + the target-IP allowlist union. Factories in `audit.py` build the `@require_allowlist` / `@audit_tool` decorators every MCP tool registers through (`tools/mcp_tools/registry.py`); the lock itself lives in `allowlist.py`. The segmented audit-chain implementation is in `segmented_audit.py`; its historical names are re-exported from `audit.py`. Audit decorators and allowlist helpers are re-exported by `tools.mcp_shared` for backwards compatibility.
 
 ## Architecture
 
@@ -108,6 +108,16 @@ def _redact_args(args: dict[str, Any] | None) -> dict[str, Any]
 - `_SECRET_ARG_NAMES` (30): `password, passwd, pass, passphrase, secret, shared_secret, pre_shared_key, secret_key, signing_key, ntlm_hash, ntlm, hash, kerberos_ticket, asrep_key, rc4_key, aes_key, token, auth_token, access_token, refresh_token, session_key, cookies, authorization, api_key, apikey, credential, credentials, creds, private_key, priv_key`. Any arg (or nested dict key, case-insensitive) with one of these names becomes `***REDACTED***` wholesale.
 - `_MASK_RES` (13 regexes over string values): `_MASK_URL_AUTH_RE` (`scheme://user:pass@`), `_MASK_U_FLAG_RE` (`-u user:pass`), `_MASK_LONG_PW_RE` (`--password/--passwd/--passphrase/--pass/--pwd/-pass…`), `_MASK_HYDRA_P_RE` (hydra/medusa/crackmapexec/netexec/cme/evil-winrm `-p/-P`), `_MASK_MSF_SET_RE` (`set SMBPass/PASSWORD/…`), `_MASK_HASHES_RE` (`-hashes lm:nt`), `_MASK_NTLM_FLAG_RE` (`-ntlm <hex>`), `_MASK_KV_SECRET_RE` (`KEY=secret`), `_MASK_KV_COLON_RE` (`password: secret` YAML/JSON forms + `NTLM:` lines), `_MASK_NTLM_PAIR_RE` (bare `32hex:32hex`), `_MASK_PEM_RE` (PEM private-key blocks), `_MASK_AUTH_HDR_RE` (`Authorization: Basic/Bearer/…`), `_MASK_PY_AUTH_TUPLE_RE` (`auth=("u","p")`).
 - `_redact_args`: secret-named args → redacted; `input_text`/`notes` → redacted wholesale when truthy; strings → `_mask_secret_content`; anything else → `_redact_nested` (dicts key-checked recursively, lists/tuples descended element-wise). The `extra` payload on audit rows goes through the same `_redact_args` pipeline.
+
+## Segmented audit chain (`segmented_audit.py`)
+
+`SegmentedAuditWriter` rotates the same JSONL record payload into numbered
+segments and writes an atomic checkpoint. `verify_segmented_chain` checks
+segment links and record hash links; startup recovery quarantines a partial or
+corrupt active tail without truncating it. `tools.kernel.audit` continues to
+export the historical writer, verifier, constants, path helpers, and private
+verification helpers for compatibility. The legacy `verify_audit_chain` in
+`tools.exploit_agent.policy` remains unchanged.
 
 ## Audit JSONL rows (`audit.py:193-338`)
 
