@@ -22,8 +22,6 @@ on:
 
 permissions:
   contents: read
-  id-token: write
-  packages: write
 
 env:
   REGISTRY: ghcr.io
@@ -34,13 +32,55 @@ jobs:
     name: Build, push, sign worker images
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    if: github.event_name == 'schedule' || github.ref == 'refs/heads/main' || (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v'))
+    permissions:
+      contents: read
+      actions: read
+      id-token: write
+      packages: write
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - name: Require protected-main source and successful CI
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          if [[ "$EVENT_NAME" == "push" ]]; then
+            [[ "$GITHUB_REF" == refs/tags/v* ]] || { echo "Only version tags may publish versioned images." >&2; exit 1; }
+            git fetch --no-tags origin main
+            git merge-base --is-ancestor "$GITHUB_SHA" FETCH_HEAD || {
+              echo "Image tag commit is not contained in main." >&2
+              exit 1
+            }
+          else
+            [[ "$GITHUB_REF" == "refs/heads/main" ]] || {
+              echo "Scheduled and manual image builds must use main." >&2
+              exit 1
+            }
+          fi
+          gh run list --workflow ci.yml --commit "$GITHUB_SHA" \
+            --json headSha,status,conclusion --limit 100 |
+            python -c 'import json,sys; sha=sys.argv[1]; runs=json.load(sys.stdin); ok=any(r.get("headSha")==sha and r.get("status")=="completed" and r.get("conclusion")=="success" for r in runs); print("CI success for image source" if ok else "No successful CI run for image source", file=sys.stderr if not ok else sys.stdout); sys.exit(0 if ok else 1)' "$GITHUB_SHA"
       - name: Set image tags
         id: tags
+        env:
+          EVENT_NAME: ${{ github.event_name }}
         run: |
-          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
-            echo "version=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
+          if [[ "$EVENT_NAME" == "push" ]]; then
+            [[ "$GITHUB_REF_NAME" =~ ^v[0-9A-Za-z][0-9A-Za-z._+-]{0,127}$ ]] || {
+              echo "Version tag is not a safe image tag." >&2
+              exit 1
+            }
+            tag_version="${GITHUB_REF_NAME#v}"
+            tree_version="$(python3 -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')"
+            [[ "$tag_version" == "$tree_version" ]] || {
+              echo "Image tag version does not match pyproject.toml." >&2
+              exit 1
+            }
+            echo "version=$GITHUB_REF_NAME" >> "$GITHUB_OUTPUT"
           else
             echo "version=nightly" >> "$GITHUB_OUTPUT"
           fi
@@ -61,32 +101,48 @@ jobs:
           tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.tags.outputs.version }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+      - name: Install cosign
+        uses: sigstore/cosign-installer@f713795cb21599bc4e5c4b58cbad1da852d7eeb9 # v3
+      - name: Sign base image (keyless, GitHub OIDC)
+        env:
+          IMAGE_REPOSITORY: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          BASE_DIGEST: ${{ steps.base.outputs.digest }}
+        run: cosign sign --yes "$IMAGE_REPOSITORY@$BASE_DIGEST"
       - name: Build + push browser worker
         id: browser
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: docker/sandbox
           file: docker/sandbox/Dockerfile.browser
+          build-args: BASE_IMAGE=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.base.outputs.digest }}
           push: true
           tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.tags.outputs.version }}-browser
           cache-from: type=gha
           cache-to: type=gha,mode=max
-      - name: Install cosign
-        uses: sigstore/cosign-installer@f713795cb21599bc4e5c4b58cbad1da852d7eeb9 # v3
-      - name: Sign images (keyless, GitHub OIDC)
-        run: |
-          cosign sign --yes "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.base.outputs.digest }}"
-          cosign sign --yes "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.browser.outputs.digest }}"
+      - name: Sign browser image (keyless, GitHub OIDC)
+        env:
+          IMAGE_REPOSITORY: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          BROWSER_DIGEST: ${{ steps.browser.outputs.digest }}
+        run: cosign sign --yes "$IMAGE_REPOSITORY@$BROWSER_DIGEST"
       - name: Record digests
+        env:
+          VERSION: ${{ steps.tags.outputs.version }}
+          IMAGE_REPOSITORY: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          BASE_DIGEST: ${{ steps.base.outputs.digest }}
+          BROWSER_DIGEST: ${{ steps.browser.outputs.digest }}
+          GH_REPOSITORY: ${{ github.repository }}
+          WORKFLOW_REF: ${{ github.ref }}
         run: |
-          {
-            echo "# Sandbox image digests (${{ steps.tags.outputs.version }})"
-            echo ""
-            echo "- base: \`${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.base.outputs.digest }}\`"
-            echo "- browser: \`${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.browser.outputs.digest }}\`"
-            echo ""
-            echo "Verify: \`cosign verify ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@<digest> --certificate-identity-regexp '.*' --certificate-oidc-issuer https://token.actions.githubusercontent.com\`"
-          } | tee DIGESTS.md
+          printf '%s\n' \
+            "# Sandbox image digests ($VERSION)" \
+            "" \
+            "- base: \`$IMAGE_REPOSITORY@$BASE_DIGEST\`" \
+            "- browser: \`$IMAGE_REPOSITORY@$BROWSER_DIGEST\`" \
+            "" \
+            "Source commit: $GITHUB_SHA" \
+            "Workflow ref: $WORKFLOW_REF" \
+            "Verify: \`cosign verify $IMAGE_REPOSITORY@digest --certificate-identity 'https://github.com/$GH_REPOSITORY/.github/workflows/sandbox-image.yml@$WORKFLOW_REF' --certificate-oidc-issuer https://token.actions.githubusercontent.com\`" \
+            > DIGESTS.md
       - name: Upload digests
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:

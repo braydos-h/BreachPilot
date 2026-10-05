@@ -40,6 +40,14 @@ def _ensure_webui_build(ui: Any, *, force: bool = False) -> int:
     dist_index = webui_dir / "dist" / "index.html"
     if dist_index.exists() and not force:
         return 0
+    packaged_index = REPO_ROOT / "tools" / "webui" / "dist" / "index.html"
+    if packaged_index.is_file() and not force:
+        return 0
+    if not webui_dir.is_dir():
+        ui.error(
+            "The installed package includes a built WebUI but not its source files. Use a source checkout to rebuild it."
+        )
+        return 1
     npm_cmd = shutil.which("npm.cmd") or shutil.which("npm")
     node_cmd = shutil.which("node") or shutil.which("nodejs")
     if not npm_cmd or not node_cmd:

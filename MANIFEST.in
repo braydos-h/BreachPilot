@@ -1,0 +1,3 @@
+# Bytecode is local build output, never a source or wheel package resource.
+global-exclude *.pyc *.pyo
+prune skills/__pycache__
