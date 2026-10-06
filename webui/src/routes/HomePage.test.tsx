@@ -35,7 +35,7 @@ function makeStatus(overrides: Partial<SandboxStatusResponse> = {}): SandboxStat
     user: "sandbox",
     read_only_rootfs: true,
     mode: "contained",
-    fallback_native: true,
+    fallback_native: false,
     fallback_reason: "",
     docker_available: true,
     docker_error: "",
@@ -131,21 +131,21 @@ describe("SandboxBanner", () => {
     expect(screen.getByTestId("sandbox-banner-contained")).toHaveTextContent("Sandbox active");
   });
 
-  it("renders muted info line when disabled", () => {
+  it("treats a legacy disabled mode as unknown instead of implying host execution", () => {
     useSandboxStatusMock.mockReturnValue({
-      data: makeStatus({ mode: "disabled", enabled: false, docker_available: false }),
+      data: makeStatus({ mode: "disabled" as unknown as "contained" | "blocked", docker_available: false }),
       isLoading: false,
       error: null,
       refetch: vi.fn(),
     } as unknown as ReturnType<typeof useSandboxStatus>);
     renderNode(<SandboxBanner />);
-    expect(screen.getByTestId("sandbox-banner-disabled")).toHaveTextContent("Sandbox disabled");
+    expect(screen.getByTestId("sandbox-banner-unknown")).toHaveTextContent("Sandbox status unknown");
   });
 
-  it("warns loudly on native fallback with the failure reason", () => {
+  it("warns that execution is blocked when Docker is unavailable", () => {
     useSandboxStatusMock.mockReturnValue({
       data: makeStatus({
-        mode: "native_fallback",
+        mode: "blocked",
         docker_available: false,
         fallback_reason: "docker daemon unreachable",
       }),
@@ -154,10 +154,10 @@ describe("SandboxBanner", () => {
       refetch: vi.fn(),
     } as unknown as ReturnType<typeof useSandboxStatus>);
     renderNode(<SandboxBanner />);
-    expect(screen.getByTestId("sandbox-banner-fallback")).toBeInTheDocument();
+    expect(screen.getByTestId("sandbox-banner-blocked")).toBeInTheDocument();
     expect(screen.getByText(/docker daemon unreachable/)).toBeInTheDocument();
-    expect(screen.getByText(/Running natively/i)).toBeInTheDocument();
-    expect(screen.getByText(/breachpilot-sandbox:latest/)).toBeInTheDocument();
+    expect(screen.getByText(/Attack execution is blocked/i)).toBeInTheDocument();
+    expect(screen.queryByText(/running natively|directly on this host/i)).not.toBeInTheDocument();
   });
 
   it("renders red fail-closed card when blocked", () => {
@@ -174,30 +174,30 @@ describe("SandboxBanner", () => {
     } as unknown as ReturnType<typeof useSandboxStatus>);
     renderNode(<SandboxBanner />);
     expect(screen.getByTestId("sandbox-banner-blocked")).toBeInTheDocument();
-    expect(screen.getByText(/Execution is blocked/i)).toBeInTheDocument();
-    expect(screen.getByText(/fallback is disabled/i)).toBeInTheDocument();
+    expect(screen.getByText(/Attack execution is blocked/i)).toBeInTheDocument();
+    expect(screen.queryByText(/no host-execution fallback/i)).toBeNull();
   });
 
-  it("renders nothing for an unknown/missing mode (old backend payload)", () => {
+  it("warns when an old backend payload has no recognized mode", () => {
     useSandboxStatusMock.mockReturnValue({
-      data: makeStatus({ mode: undefined as unknown as string, docker_available: true, image_present: true }),
+      data: makeStatus({ mode: undefined as unknown as "contained" | "blocked", docker_available: true, image_present: true }),
       isLoading: false,
       error: null,
       refetch: vi.fn(),
     } as unknown as ReturnType<typeof useSandboxStatus>);
-    const { container } = renderNode(<SandboxBanner />);
-    expect(container).toBeEmptyDOMElement();
+    renderNode(<SandboxBanner />);
+    expect(screen.getByTestId("sandbox-banner-unknown")).toBeInTheDocument();
   });
 
-  it("renders nothing on an unrecognized future mode", () => {
+  it("warns on an unrecognized future mode", () => {
     useSandboxStatusMock.mockReturnValue({
-      data: makeStatus({ mode: "quantum_isolated" }),
+      data: makeStatus({ mode: "quantum_isolated" as unknown as "contained" | "blocked" }),
       isLoading: false,
       error: null,
       refetch: vi.fn(),
     } as unknown as ReturnType<typeof useSandboxStatus>);
-    const { container } = renderNode(<SandboxBanner />);
-    expect(container).toBeEmptyDOMElement();
+    renderNode(<SandboxBanner />);
+    expect(screen.getByTestId("sandbox-banner-unknown")).toBeInTheDocument();
   });
 
   it("renders nothing while loading", () => {
@@ -211,43 +211,32 @@ describe("SandboxBanner", () => {
     expect(container).toBeEmptyDOMElement();
   });
 
-  it("renders nothing on fetch error", () => {
+  it("warns when sandbox status cannot be loaded", () => {
     useSandboxStatusMock.mockReturnValue({
       data: undefined,
       isLoading: false,
       error: new Error("503"),
       refetch: vi.fn(),
     } as unknown as ReturnType<typeof useSandboxStatus>);
-    const { container } = renderNode(<SandboxBanner />);
-    expect(container).toBeEmptyDOMElement();
+    renderNode(<SandboxBanner />);
+    expect(screen.getByTestId("sandbox-banner-status-unavailable")).toBeInTheDocument();
   });
 });
 
 describe("HomePage sandbox banner placement", () => {
   it("surfaced on the home screen", () => {
     useSandboxStatusMock.mockReturnValue({
-      data: makeStatus({ mode: "native_fallback", fallback_reason: "daemon down" }),
+      data: makeStatus({ mode: "blocked", fallback_reason: "daemon down" }),
       isLoading: false,
       error: null,
       refetch: vi.fn(),
     } as unknown as ReturnType<typeof useSandboxStatus>);
     renderNode(<HomePage />);
-    expect(screen.getByTestId("sandbox-banner-fallback")).toBeInTheDocument();
+    expect(screen.getByTestId("sandbox-banner-blocked")).toBeInTheDocument();
   });
 });
 
 describe("SandboxBanner Fix sandbox action", () => {
-  it("native_fallback displays Fix sandbox", () => {
-    useSandboxStatusMock.mockReturnValue({
-      data: makeStatus({ mode: "native_fallback", fallback_reason: "docker daemon unreachable" }),
-      isLoading: false,
-      error: null,
-      refetch: vi.fn(),
-    } as unknown as ReturnType<typeof useSandboxStatus>);
-    renderNode(<SandboxBanner />);
-    expect(screen.getByRole("button", { name: /Fix sandbox/i })).toBeInTheDocument();
-  });
-
   it("blocked displays the remediation action", () => {
     useSandboxStatusMock.mockReturnValue({
       data: makeStatus({ mode: "blocked", fallback_native: false, docker_error: "daemon down" }),
@@ -270,21 +259,22 @@ describe("SandboxBanner Fix sandbox action", () => {
     expect(screen.queryByRole("button", { name: /Fix sandbox/i })).not.toBeInTheDocument();
   });
 
-  it("intentionally disabled mode does not misleadingly display the Docker fix", () => {
+  it("unknown legacy modes do not offer host-mode controls", () => {
     useSandboxStatusMock.mockReturnValue({
-      data: makeStatus({ mode: "disabled", enabled: false }),
+      data: makeStatus({ mode: "disabled" as unknown as "contained" | "blocked", enabled: true }),
       isLoading: false,
       error: null,
       refetch: vi.fn(),
     } as unknown as ReturnType<typeof useSandboxStatus>);
     renderNode(<SandboxBanner />);
+    expect(screen.getByTestId("sandbox-banner-unknown")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Fix sandbox/i })).not.toBeInTheDocument();
   });
 
   it("clicking Fix sandbox opens the explanation dialog with reason and plan", async () => {
     const user = userEvent.setup();
     useSandboxStatusMock.mockReturnValue({
-      data: makeStatus({ mode: "native_fallback", fallback_reason: "Docker CLI not found on PATH" }),
+      data: makeStatus({ mode: "blocked", fallback_reason: "Docker CLI not found on PATH" }),
       isLoading: false,
       error: null,
       refetch: vi.fn(),
@@ -297,7 +287,7 @@ describe("SandboxBanner Fix sandbox action", () => {
     renderNode(<SandboxBanner />);
     await user.click(screen.getByRole("button", { name: /Fix sandbox/i }));
     expect(await screen.findByText(/Fix Docker sandbox/i)).toBeInTheDocument();
-    expect(screen.getByText(/BreachPilot is currently executing commands directly on this machine because the Docker sandbox could not start\./)).toBeInTheDocument();
+    expect(screen.getByText(/Attack execution is blocked because the Docker sandbox is unavailable/)).toBeInTheDocument();
     expect(screen.getAllByText(/Docker CLI not found on PATH/).length).toBeGreaterThan(0);
     expect(screen.getByText(/What BreachPilot will do/i)).toBeInTheDocument();
     expect(screen.getAllByText(/Install Docker/).length).toBeGreaterThan(0);
@@ -307,7 +297,7 @@ describe("SandboxBanner Fix sandbox action", () => {
   it("the current failure reason appears in the dialog", async () => {
     const user = userEvent.setup();
     useSandboxStatusMock.mockReturnValue({
-      data: makeStatus({ mode: "native_fallback", fallback_reason: "custom reason 123" }),
+      data: makeStatus({ mode: "blocked", fallback_reason: "custom reason 123" }),
       isLoading: false,
       error: null,
       refetch: vi.fn(),
@@ -325,7 +315,7 @@ describe("SandboxBanner Fix sandbox action", () => {
   it("the planned host changes are visible before confirmation", async () => {
     const user = userEvent.setup();
     useSandboxStatusMock.mockReturnValue({
-      data: makeStatus({ mode: "native_fallback", fallback_reason: "Docker CLI not found" }),
+      data: makeStatus({ mode: "blocked", fallback_reason: "Docker CLI not found" }),
       isLoading: false,
       error: null,
       refetch: vi.fn(),
@@ -345,7 +335,7 @@ describe("SandboxBanner Fix sandbox action", () => {
     const user = userEvent.setup();
     const mutateMock = vi.fn().mockResolvedValue(makeJob());
     useSandboxStatusMock.mockReturnValue({
-      data: makeStatus({ mode: "native_fallback", fallback_reason: "x" }),
+      data: makeStatus({ mode: "blocked", fallback_reason: "x" }),
       isLoading: false,
       error: null,
       refetch: vi.fn(),
@@ -372,7 +362,7 @@ describe("SandboxBanner Fix sandbox action", () => {
     const user = userEvent.setup();
     const mutateMock = vi.fn().mockResolvedValue(makeJob());
     useSandboxStatusMock.mockReturnValue({
-      data: makeStatus({ mode: "native_fallback", fallback_reason: "x" }),
+      data: makeStatus({ mode: "blocked", fallback_reason: "x" }),
       isLoading: false,
       error: null,
       refetch: vi.fn(),
@@ -400,7 +390,7 @@ describe("SandboxBanner Fix sandbox action", () => {
     const user = userEvent.setup();
     const mutateMock = vi.fn().mockResolvedValue(makeJob({ status: "running" }));
     useSandboxStatusMock.mockReturnValue({
-      data: makeStatus({ mode: "native_fallback", fallback_reason: "x" }),
+      data: makeStatus({ mode: "blocked", fallback_reason: "x" }),
       isLoading: false,
       error: null,
       refetch: vi.fn(),
@@ -427,7 +417,7 @@ describe("SandboxBanner Fix sandbox action", () => {
   it("progress state renders", async () => {
     const user = userEvent.setup();
     useSandboxStatusMock.mockReturnValue({
-      data: makeStatus({ mode: "native_fallback", fallback_reason: "x" }),
+      data: makeStatus({ mode: "blocked", fallback_reason: "x" }),
       isLoading: false,
       error: null,
       refetch: vi.fn(),
@@ -467,7 +457,7 @@ describe("SandboxBanner Fix sandbox action", () => {
   it("successful remediation tells the user a BreachPilot restart is required", async () => {
     const user = userEvent.setup();
     useSandboxStatusMock.mockReturnValue({
-      data: makeStatus({ mode: "native_fallback", fallback_reason: "x" }),
+      data: makeStatus({ mode: "blocked", fallback_reason: "x" }),
       isLoading: false,
       error: null,
       refetch: vi.fn(),
@@ -497,14 +487,14 @@ describe("SandboxBanner Fix sandbox action", () => {
     await user.click(screen.getByRole("button", { name: /Fix sandbox/i }));
     const dialog = await screen.findByRole("dialog");
     await user.click(within(dialog).getByRole("button", { name: /^Start fix$/i }));
-    expect(await within(dialog).findByText(/Docker is ready/i)).toBeInTheDocument();
-    expect(within(dialog).getByText(/Restart BreachPilot to activate containment\./)).toBeInTheDocument();
+    expect(within(dialog).getAllByText(/Docker is ready/i).length).toBeGreaterThan(0);
+    expect(within(dialog).getByText(/The current session remains blocked until restart/)).toBeInTheDocument();
   });
 
   it("a failed remediation displays the failed step/error and Retry", async () => {
     const user = userEvent.setup();
     useSandboxStatusMock.mockReturnValue({
-      data: makeStatus({ mode: "native_fallback", fallback_reason: "x" }),
+      data: makeStatus({ mode: "blocked", fallback_reason: "x" }),
       isLoading: false,
       error: null,
       refetch: vi.fn(),
@@ -544,14 +534,14 @@ describe("SandboxBanner Fix sandbox action", () => {
     expect(within(dialog).getAllByRole("button", { name: /Close/i }).length).toBeGreaterThanOrEqual(1);
   });
 
-  it("unknown sandbox modes retain the existing safe behavior", () => {
+  it("unknown sandbox modes remain visible as warnings", () => {
     useSandboxStatusMock.mockReturnValue({
-      data: makeStatus({ mode: "quantum_isolated" as unknown as string }),
+      data: makeStatus({ mode: "quantum_isolated" as unknown as "contained" | "blocked" }),
       isLoading: false,
       error: null,
       refetch: vi.fn(),
     } as unknown as ReturnType<typeof useSandboxStatus>);
-    const { container } = renderNode(<SandboxBanner />);
-    expect(container).toBeEmptyDOMElement();
+    renderNode(<SandboxBanner />);
+    expect(screen.getByTestId("sandbox-banner-unknown")).toBeInTheDocument();
   });
 });

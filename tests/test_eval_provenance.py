@@ -29,6 +29,22 @@ def test_provenance_has_16_fields():
     assert required <= set(RunProvenance.__dataclass_fields__)
 
 
+def test_code_revision_uses_full_commit_sha(monkeypatch):
+    import subprocess
+    from types import SimpleNamespace
+
+    from tools.eval.live import _git_revision
+
+    expected = "a" * 40
+
+    def fake_run(command, **kwargs):
+        assert command == ["git", "rev-parse", "HEAD"]
+        return SimpleNamespace(returncode=0, stdout=f"{expected}\n")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    assert _git_revision() == expected
+
+
 def test_provenance_roundtrip_gate_passes(tmp_path):
     from tools.eval_harness import build_run_provenance, write_skipped_eval_report
 

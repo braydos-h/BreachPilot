@@ -5,8 +5,10 @@ A Vite + React + TypeScript SPA under `webui/`, served by the local API daemon
 and talking to the same `/api/v1` REST + WebSocket surface documented in
 [api.md](api.md).
 
-> Source: `webui/src/`. Built output: `webui/dist/` (gitignored, created on
-> first `--web` run). App config lives in `config.yaml`, not in the webui tree.
+> Source: `webui/src/`. In a source checkout, built output `webui/dist/` is
+> gitignored and created on first `--web` run. Release Python wheels include
+> their CI-built `webui/dist/`. App config lives in `config.yaml`, not in the
+> webui tree.
 
 ---
 
@@ -39,8 +41,8 @@ guided wizard, streams run events in real time, surfaces pending decisions
 (start-confirm, goal-select, tool-approval), and gives access to artifacts,
 audit, logs, loot, and system config.
 
-- **Stack:** Vite 5.4, React 18.3, TypeScript 5.6, TanStack Query 5.59,
-  react-router-dom 6.27, Tailwind 3.4, Radix UI primitives (shadcn/ui style),
+- **Stack:** Vite 6, React 18, TypeScript 5, TanStack Query 5,
+  react-router-dom 7, Tailwind 4, Radix UI primitives (shadcn/ui style),
   lucide-react icons, react-markdown + remark-gfm.
 - **Theme:** dark only (`<html class="dark">`, HSL CSS vars in `index.css`).
 - **Target browser:** evergreen Chromium/Firefox/Safari. Build target
@@ -62,8 +64,12 @@ operator input and renders server state.
 python main.py --web
 ```
 
-- Builds `webui/dist/` on first run (runs `npm install && npm run build`;
-  requires Node.js + npm on `PATH`).
+- From a source checkout, builds `webui/dist/` on first `--web` run if it is
+  missing (runs `npm ci && npm run build`; requires Node.js + npm on `PATH`).
+  Release wheels install the SPA under the Python environment's data prefix;
+  `tools.paths.get_webui_dist_dir()` lets `breachpilot --web` serve that copy
+  without Node.js or a repository checkout. `--rebuild` requires the source
+  checkout and Node.js + npm.
 - Sets `api.serve_webui: true` **in memory only** (never written to
   `config.yaml`), mounts `dist/` at `/` with a deep-link SPA fallback, and
   opens a browser at `http://127.0.0.1:8765/`.
@@ -118,37 +124,45 @@ npm run preview    # vite preview --port 5173 --strictPort
 main.tsx
   └─ <App/>  (QueryClientProvider + BrowserRouter)
        └─ <TokenGate>            bearer token gate
-            └─ <OnboardingGate>  first-run setup: provider + keys + ChatGPT OAuth
-                 └─ <Routes>
-                      └─ <Layout>  (sidebar + active-run pill + footer)
-                           ├─ "/"                       → HomePage
-                           ├─ "/sessions"               → RunListPage
-                           ├─ "/runs/new"                → NewRunPage → <RunWizard>
-                           ├─ "/runs/:runId"             → RunPage
-                           ├─ "/runs/:runId/artifacts"   → ArtifactsPage
-                           ├─ "/runs/:runId/loot"        → LootPage
-                           ├─ "/runs/:runId/graph"       → GraphPage
-                           ├─ "/skills"                  → SkillsPage
-                           ├─ "/modules"                 → AttackModulesPage
-                           ├─ "/goals"                   → GoalsPage
-                           ├─ "/graph"                   → AttackGraphPage
-                           ├─ "/stats"                   → StatsPage
-                           ├─ "/benchmarks"              → BenchmarksPage
-                           ├─ "/benchmarks/new"          → BenchmarksStartPage
-                           ├─ "/benchmarks/history"      → BenchmarksHistoryPage
-                           ├─ "/benchmarks/:runId"       → BenchmarkRunPage
-                           ├─ "/ops"                     → OpsPage
-                           ├─ "/connections"             → ConnectionsPage
-                           ├─ "/memory"                  → MemoryPage
-                           ├─ "/system"                  → SystemPage
-                           ├─ "/help"                    → HelpPage
-                           └─ "*"                        → <Navigate to="/sessions">
+            └─ <OnboardingGate>  first-run provider/key setup
+                 └─ <ProviderPrivacyGate> cloud-route acknowledgement
+                      └─ <WelcomeGate> first-run intro and product tour
+                            └─ <Routes>
+                                 └─ <Layout>  (sidebar + active-run pill + footer)
+                                      ├─ "/"                       → HomePage
+                                      ├─ "/runs"                   → RunListPage
+                                      ├─ "/sessions"               → redirect to "/runs"
+                                      ├─ "/runs/new"               → NewRunPage → <RunWizard>
+                                      ├─ "/runs/:runId"            → RunPage
+                                      ├─ "/runs/:runId/artifacts"  → ArtifactsPage
+                                      ├─ "/runs/:runId/loot"       → LootPage
+                                      ├─ "/runs/:runId/graph"      → GraphPage
+                                      ├─ "/skills"                 → SkillsPage
+                                      ├─ "/modules"                → AttackModulesPage
+                                      ├─ "/goals"                  → GoalsPage
+                                      ├─ "/graph"                  → AttackGraphPage
+                                      ├─ "/stats"                  → StatsPage
+                                      ├─ "/benchmarks"             → BenchmarksPage
+                                      ├─ "/benchmarks/new"         → BenchmarksStartPage
+                                      ├─ "/benchmarks/history"     → BenchmarksHistoryPage
+                                      ├─ "/benchmarks/:runId"      → BenchmarkRunPage
+                                      ├─ "/ops"                    → OpsPage
+                                      ├─ "/connections"            → ConnectionsPage
+                                      ├─ "/memory"                 → MemoryPage
+                                      ├─ "/system"                 → SystemPage
+                                      ├─ "/help"                   → HelpPage
+                                      └─ "*"                       → <Navigate to="/runs">
 ```
 
-The two gates run before any route renders. `TokenGate` blocks until a valid
-bearer token is verified against `GET /capabilities`. `OnboardingGate` blocks
-only when `GET /secrets` reports ≥1 missing provider key **and** the user
-hasn't dismissed it this session.
+Four gates run before a page route renders. `TokenGate` requires a valid bearer
+token verified through `GET /capabilities`. `OnboardingGate` offers provider
+and secret setup when at least one key is missing unless it was
+dismissed for the browser session. `ProviderPrivacyGate` requires an explicit
+acknowledgement when the active provider sends prompts off-host; changing the
+provider or its egress destination prompts again. `WelcomeGate` shows the
+first-run introduction and optional product tour, which can be skipped or
+dismissed for the browser session. The canonical run-list route is `/runs`;
+`/sessions` redirects there for compatibility.
 
 ### State model
 
@@ -158,7 +172,9 @@ hasn't dismissed it this session.
 | Live run events | `useRunEvents` (`api/ws.ts`) | WS-first, SSE fallback. Local React state, deduped by `sequence`. |
 | Token | module-level `inMemoryToken` (`api/client.ts`) | In-memory only; cleared via shared `expireSession` funnel on 401 / WS 4401 / sign-out. Never `sessionStorage`/`localStorage`. |
 | Onboarding dismissed | `sessionStorage` (`breachpilot.onboarding.v1`) | Per-session flag. |
-| Wizard form state | `run-create/RunWizard.tsx` local `useState` | Goal/target/review state so `buildRequest()` can serialize it. |
+| Provider privacy acknowledgement | `localStorage` (`breachpilot.providerPrivacyAck.v1`) | Bound to provider and egress destination; a changed route requires a new acknowledgement. |
+| Welcome tour dismissed | `sessionStorage` (`breachpilot.welcome.v1`) | Per-session flag. |
+| Wizard form state | `run-create/RunWizard.tsx` local `useState` | Target, intent, and review state so `buildRequest()` can serialize it. |
 | URL state | react-router | `?path=recon\|attack\|fast` preselects wizard path; `:runId` route params. |
 
 There is no global client store (no Redux/Zustand). TanStack Query is the
@@ -176,9 +192,10 @@ cache; `useState`/`useRef` hold the rest.
 - **meta.onErrorAuthClear:** hooks clear the stored token on 401.
 - **refetchOnWindowFocus:** disabled globally in `App.tsx`.
 
-Live polling: `useRuns` every 5s; `useRun` every 5s while `running`/`queued`/
-`cancelling`, stops when terminal; `useDecisions` every 5s while a decision is
-pending.
+Live polling: `useRuns` every 5s while active; `useRun` every 1s while
+`preparing`, then every 5s while `running`, `queued`, or `cancelling` (the live
+event stream also updates run state); run polling stops at terminal states.
+`useDecisions` polls every 5s while a decision is pending.
 
 ---
 
@@ -220,23 +237,24 @@ Close `4401` clears the token and surfaces "Authentication failed". See
 
 ### OnboardingGate
 
-After TokenGate, before routes. Calls `useSecrets`; if any key is `missing`
-and the user hasn't dismissed onboarding this session (`breachpilot.onboarding.v1`
-not `"1"`), renders the first-run setup card. The card asks for three things
-up front so a fresh operator can configure everything before launching a run:
+After TokenGate, before routes. Calls `useSecrets`; if at least one key is
+`missing` and onboarding was not dismissed this browser session
+(`breachpilot.onboarding.v1` is not `"1"`), it renders a four-step setup card:
 
-1. **AI provider** — `<ProviderPicker />` (Ollama / ChatGPT segmented control;
-   persists `models.provider` via `PATCH /config`, flips `chatgpt.enabled` on for
-   ChatGPT). Switching invalidates the `models` / `modelsLive` / `providers`
-   caches immediately.
-2. **Provider API keys** — configured + missing keys with write-only inputs.
-   Submit → `PUT /secrets` → toast "API keys saved" → dismiss.
-3. **ChatGPT (optional)** — `<ChatGptControls />` (always shown, labelled
-   optional): Sign in with ChatGPT / Start proxy / Stop proxy, status badges,
-   and the OAuth URL link. OAuth tokens never reach the UI.
+1. **Connect** — confirms the browser is connected to the local API.
+2. **Provider** — `<ProviderPicker />` offers Ollama / OpenCode Go / ChatGPT
+   and persists `models.provider` through `PATCH /config`. The form also lists
+   configured and missing keys with write-only inputs. Saving supplied values
+   uses `PUT /secrets` and advances to the readiness check; optional keys can
+   be skipped. ChatGPT login/proxy controls are present as optional setup.
+3. **Readiness check** — shows active-provider status and a link to System
+   settings when the provider is not ready.
+4. **First run** — links to the localhost self-test, demo runs, and new runs.
 
-"Skip for now" also dismisses without saving keys. Everything is re-editable
-later under System → Models (provider + ChatGPT) and System → Secrets (keys).
+"Skip for now" dismisses onboarding without saving keys. Provider/model
+settings and keys remain editable later under System → Models and System →
+Secrets. Provider changes invalidate the `models`, `modelsLive`, and `providers`
+caches immediately.
 
 > Provider secrets are stored in `secr.json` (default; override with
 > `BREACHPILOT_API_KEY_FILE`). This is **distinct** from `.webui_secret_key`,
@@ -310,17 +328,18 @@ Hero, live stats strip (total / active / completed / failed, from
 new attack), an active-run banner if any run is live, and a "Recent sessions"
 list (top 5 rows). Footer reminder: loopback only, authorized assets only.
 
-### Sessions (`/sessions`)
+### Runs (`/runs`)
 
 Paginated table of runs (ID, state, target, mode, goal, model, created).
 Per-row actions: Open, Resume (terminal runs only, calls `POST /resume` then
 navigates), Delete (confirm prompt; `purge=true`). Active run disables "New
-run" and surfaces a banner. Polls every 5s.
+run" and surfaces a banner. Polls every 5s. The legacy `/sessions` path
+redirects to `/runs`.
 
 ### New Run (`/runs/new`)
 
-Thin wrapper around [`RunWizard`](#the-run-wizard). On create, navigates to
-`/runs/<runId>`.
+Thin wrapper around [`RunWizard`](#the-run-wizard). After the run is prepared
+and queued or running, it navigates to `/runs/<runId>`.
 
 ### Run (`/runs/:runId`)
 
@@ -414,32 +433,31 @@ See [System Page](#system-page).
 ## The Run Wizard
 
 `run-create/RunWizard.tsx` — steps in `run-create/RunStepper.tsx`
-(`STEPS = ["opsec", "settings", "target", "review"]`), mirroring the CLI
-questionary flow.
+(`STEPS = ["target", "intent", "review"]`). OPSEC is shown as an effective
+posture summary on Review and edited under System → Config.
 
 ```
-opsec ──▶ settings ──▶ target ──▶ review
+Target ──▶ Intent ──▶ Review & launch
 ```
 
 | Step | Collects |
 |------|----------|
-| `opsec` | OPSEC posture settings (see `OpsecSettings`). |
-| `settings` | Execution path + model/profile/power-ups (see below). Preselectable via `?path=recon\|attack\|fast`. |
-| `settings` | Model alias (provider-aware: Ollama live list + registry, or ChatGPT discovered models + `chatgpt.default_model`; refresh button); power-ups grid (filtered by `capabilities.run_options.flags`); recon-first tri-state; observer mode; skills mode + include/exclude multi-select; goal (preset by risk group or custom text, attack path only); run kind; `yes` skip-confirm toggle. |
-| `target` | IPv4/IPv6/FQDN. Client-side `isValidTarget` mirrors `tools.validation_utils` (strict IPv4 octets, IPv6 must contain `:`, FQDN TLD ≥2 alpha). |
-| `review` | Summary card (target/mode/goal/model/transport/permission/destructive/budgets/skill activations) + the start-confirm gate. |
+| `target` | IPv4/IPv6/FQDN. Client-side `isValidTarget` checks target syntax; the server still enforces authorization scope and allowlisting. |
+| `intent` | Recon, attack, or fast mode; preset/custom goal; execution profile; approval policy; model override and optional advanced settings (power-ups, recon-first, observer mode, and skills). `?path=recon\|attack\|fast` preselects the mode. |
+| `review` | Run summary, provider/model/target/sandbox preflight checks, effective OPSEC posture, and launch/confirmation controls. The preflight card has six rows: provider, model, target format, and sandbox readiness are the four readiness checks; approval policy and OPSEC posture are informational. |
 
 ### Create flow
 
-1. On "Create run" from the target step, `POST /runs` with `buildRequest()`.
-2. If the server returns `state` `queued`/`running` (e.g. `yes:true`), the
-   wizard calls `onCreated(runId, state)` and the SPA navigates to the run.
-3. Otherwise the wizard advances to `review`, where the `start_confirm`
-   decision is rendered:
-   - **Destructive** (`permission=full_access` + `attack_mode`): the operator
-     must type the exact `required_confirmation_text` (e.g. `ALLOW 10.0.0.50`).
-     The Confirm button is disabled until the input matches.
-   - **Non-destructive**: a single "Proceed" button sends `"y"`.
+1. On Review, Launch sends `POST /runs`. The server returns a run id and
+   `state: "preparing"` while it resolves and loads run prerequisites in the
+   background. The wizard shows preparation progress and polls run status.
+2. When preparation completes, the run awaits the `start_confirm` decision
+   unless the selected approval policy sets `yes=true`; with `yes=true`, the
+   server queues the run directly.
+3. For confirmation-required runs, Review renders the server's decision.
+   Destructive attack runs require the exact confirmation text (for example,
+   `ALLOW 10.0.0.50`); other runs use a Proceed action. Once the run is queued
+   or running, the SPA navigates to its run page.
 
 ### Power-up gating
 
@@ -447,11 +465,11 @@ opsec ──▶ settings ──▶ target ──▶ review
 `swarm` is on. The request builder forces `critic`/`reflection` to `false`
 when `swarm` is off.
 
-### Manual kind warning
+### Run kind and tool calls
 
-The API advertises `kind: "manual"` (no agent loop, tool gateway only), but
-the SPA renders an amber notice that manual kind currently executes the normal
-agent path, so operators aren't misled.
+The WebUI creates `kind: "agent"` runs. The API currently accepts only this
+kind; manual-only runs are not implemented. While an agent run is active, the
+Tools tab can call its live MCP tools through the policy-gated tool gateway.
 
 ### Goal selection
 
@@ -578,7 +596,7 @@ run always goes through the confirmation gate (`yes=false`).
 |-----|---------|
 | Config | `ConfigEditor` — redacted `GET /config` view + `PATCH /config` form. Atomic write, `400 config_invalid` on validation failure. |
 | Secrets | Per-provider-key status (`configured`/`missing`) + write-only inputs. `PUT /secrets` also loads values into the running daemon's env. Values are never returned. |
-| Models | **AI provider card** — `SegmentedControl` picker (Ollama / ChatGPT) bound to `models.provider`; switching PATCHes `/config` (deep-merge: → chatgpt also sets `chatgpt.enabled: true`, mirroring the CLI menu; `/models` + `/providers` + `/models/live` are invalidated immediately so there's no stale window). When ChatGPT is active the card shows `GET /providers` status (signed-in / proxy-running / started-by-BreachPilot badges, host:port + default_model), a "Sign in with ChatGPT" prompt when not authenticated, "Sign in with ChatGPT" (`POST /providers/chatgpt/login` — backend-driven OAuth, URL shown as a link, tokens never reach the SPA), and Start/Stop proxy (`POST /providers/chatgpt/proxy/{start,stop}` — Stop only enabled when `we_started`). When Ollama is active the card notes embeddings also use Ollama. Below: live model list (`GET /models/live`, source badge `ollama`/`registry`/`chatgpt`, error line — for ChatGPT the proxy auto-starts on fetch so available GPT models populate once signed in) + configured models (registry for Ollama, `chatgpt.configured_models` for ChatGPT) + default. |
+| Models | **AI provider card** — `SegmentedControl` picker (Ollama / OpenCode Go / ChatGPT) bound to `models.provider`; the checked-in config selects OpenCode Go. Switching persists with `PATCH /config` and refreshes provider/model data. Provider-specific status and setup controls appear for the active adapter (OpenCode Go API-key status, ChatGPT sign-in/proxy status, or Ollama availability). Chat and embeddings have independent provider settings; the checked-in config selects `embeddings.provider: none` for provider-aware Flow A consumers, while frozen Flow B still uses legacy Ollama semantic memory when enabled. Below: the live model list (`GET /models/live`), provider status/error, configured models, and default. |
 | Skills | Searchable list (`GET /skills/search?q=`) + detail pane (`GET /skills/<name>`) showing body, sections, tags, NIST CSF, MITRE ATT&CK, references. |
 | Plugins | `GET /plugins` list with name/version/loaded/capabilities. Defensive `[]` on error. |
 | Diagnostics | Buttons to run `POST /diagnostics/doctor` and `POST /diagnostics/self-test`; renders exit code badge + output `<pre>`. |
@@ -693,8 +711,8 @@ showing `loot_type`, `description`, and a collapsible `<pre>` with
 
 ### `client.ts`
 
-- `getStoredToken` / `setStoredToken` / `clearStoredToken` — `sessionStorage`
-  wrapper, defensive against private-mode throws.
+- `getStoredToken` / `setStoredToken` / `clearStoredToken` — module-memory token
+  helpers. The bearer token is never written to browser storage.
 - `apiFetch<T>(path, opts)` — the single fetch wrapper. Injects
   `Authorization: Bearer`, JSON `Content-Type` on writes, normalizes errors to
   `ApiError`. `raw: true` returns a `Blob` (for artifact download). Aborts
@@ -762,8 +780,8 @@ editing in place — they are vendored, not an npm dependency.
 | Component | Role |
 |-----------|------|
 | `Layout` | Sidebar + mobile header + active-run pill + footer. |
-| `TokenGate` / `OnboardingGate` | Pre-route gates. |
-| `run-create/RunWizard` | Multi-step run creation (opsec → settings → target → review). |
+| `TokenGate`, `OnboardingGate`, `ProviderPrivacyGate`, `WelcomeGate` | Token, setup, cloud-route acknowledgement, and first-run introduction gates. |
+| `run-create/RunWizard` | Three-step run creation (target → intent → review). |
 | `run-create/*` | Step sections: `ModeSelector`, `TargetField`, `GoalSelector`, `ModelSelector`, `ExecutionProfile`, `AdvancedExecutionSettings`, `SkillsSettings`, `OpsecSettings`, `RunReview`, `RunStepper`, `RunSummary`. |
 | `ui/segmented` | `SegmentedControl`, `TriStateToggle`, `SkillMultiSelect` shared by the wizard (not a legacy `RunForm`). |
 | `events/EventViewer` + `eventRows` / `BootChecklist` / `ToolCallCard` / `DecisionCard` / `ReconAssessmentCard` / `GoalSuggestionCard` / `SessionSummaryCard` | Event-stream renderers. |
@@ -776,7 +794,8 @@ editing in place — they are vendored, not an npm dependency.
 
 ### Styling
 
-- Tailwind 3.4 with `darkMode: ["class"]`. Colors are HSL CSS vars defined in
+- Tailwind 4.3 loads the legacy `tailwind.config.ts` through `@config`, with
+  `darkMode: ["class"]`. Colors are HSL CSS vars defined in
   `src/index.css` `:root` (dark-only; no light theme).
 - `cn()` (`lib/utils.ts`) = `twMerge(clsx(...))` for class merging.
 - Custom utilities in `index.css`: `bg-grid`, `bg-radial-fade`, `text-gradient`,
@@ -900,6 +919,8 @@ webui/
    │  ├─ Layout.tsx
    │  ├─ TokenGate.tsx
    │  ├─ OnboardingGate.tsx
+   │  ├─ ProviderSetup.tsx    # provider controls + cloud-route acknowledgement
+   │  ├─ WelcomeScreen.tsx    # welcome gate, intro, and product tour
    │  ├─ run-create/RunWizard.tsx # multi-step run creation (+ step sections)
    │  ├─ events/EventViewer.tsx  # event stream renderer (+ eventRows.ts)
    │  ├─ BootChecklist.tsx

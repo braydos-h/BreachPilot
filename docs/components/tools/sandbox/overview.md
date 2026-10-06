@@ -65,21 +65,23 @@ Hot path (`manager.py:58-64`): a verified worker is cached for `_HOT_PATH_TTL_S 
 Boot and status helpers:
 
 ```python
-def resolve_manager(workspace: Path, config: dict | None) -> SandboxManager | None
-def resolve_manager_with_fallback(workspace: Path, config: dict | None, *, probe: Any = None) -> tuple[SandboxManager | None, str]
+def resolve_manager(workspace: Path, config: dict | None) -> SandboxManager
+def resolve_manager_with_fallback(workspace: Path, config: dict | None, *, probe: Any = None) -> tuple[SandboxManager, str]
 def status_report(config: dict | None) -> dict[str, Any]
-def native_fallback_notice(reason: str) -> str
 def boot_state_path(config: dict | None) -> Path
 def read_boot_state(config: dict | None) -> dict[str, Any] | None
 ```
 
-`resolve_manager` returns `None` when the sandbox is disabled (explicit legacy opt-out). A present-but-broken section returns a manager that fail-closes at execution time (`manager.py:91-102`).
+The historical `resolve_manager_with_fallback` name remains for import
+compatibility. It always returns a manager and an empty notice. An unavailable
+Docker daemon or worker image records a `blocked` posture and the manager
+fail-closes at execution time; it never selects host execution.
 
 ## Worker hardening (`docker_backend.py:240`)
 
-Enforced in the pure, unit-tested `_build_create_args(spec, *, cap_raw, read_only_rootfs)`:
+Enforced in the pure, unit-tested `_build_create_args(spec, *, read_only_rootfs)`:
 
-- `--cap-drop ALL`, only `NET_RAW` added back (for raw packet scanning). `NET_ADMIN` is never granted to the worker — the firewall sidecar alone holds it ephemerally.
+- `--cap-drop ALL` with no capability added back. `NET_RAW` is disabled because AF_PACKET can bypass the IP firewall; `NET_ADMIN` is granted only to the ephemeral firewall sidecar. Nmap uses connect scans (`-sT`).
 - `--security-opt no-new-privileges`, non-root `--user sandbox`, never `--privileged`.
 - `--read-only` rootfs (when configured) plus `--tmpfs /tmp:rw,noexec,nosuid,size=<tmpfs_size_mb>m`.
 - `--memory` / `--memory-swap` / `--cpus` / `--pids-limit` from config.
@@ -110,9 +112,9 @@ def apply_network_policy(policy: NetworkPolicy, *, container_id: str, image: str
 | `localhost` / `127.0.0.1` / `::1` | Sandbox loopback only, unless `map_host_loopback` plus a gateway explicitly maps the dev host loopback |
 | `0.0.0.0/0`, `::/0`, `*`, `any`, `all` | `ValueError` — the policy refuses to express "everywhere", caller fail-closes |
 
-Always denied: `METADATA_DESTINATIONS` (`169.254.169.254`, `169.254.0.0/16`, `fd00:ec2::254`, `100.100.100.200`, `fe80::/10`) plus the Docker bridge gateway unless `allow_gateway` is set. `RESEARCH_HOSTS` (`github.com`, `api.github.com`, `codeload.github.com`, `objects.githubusercontent.com`, `raw.githubusercontent.com`, `gitlab.com`) are resolved host-side and authorized only when `allow_research_hosts` is explicitly true (default false). `allow_dns: controlled` keeps the container resolver (`127.0.0.11`); `none` adds explicit port-53 REJECTs.
+Always denied: `METADATA_DESTINATIONS` (`169.254.169.254`, `169.254.0.0/16`, `fd00:ec2::254`, `100.100.100.200`, `fe80::/10`) plus the Docker bridge gateway unless `allow_gateway` is set. `RESEARCH_HOSTS` (`github.com`, `api.github.com`, `codeload.github.com`, `objects.githubusercontent.com`, `raw.githubusercontent.com`, `gitlab.com`) are resolved host-side and authorized only when `allow_research_hosts` is explicitly true (default false). Worker DNS packets are blocked in both modes; `controlled` installs allowlist-pinned host mappings and `none` omits those mappings.
 
-`network.py` renders default-DROP `iptables-restore` / `ip6tables-restore` rulesets installed by the ephemeral `--rm` sidecar sharing the worker netns (`run_netns_sidecar`). Re-application happens at each command boundary only when `NetworkPolicy.fingerprint()` changes, so dynamic targets are picked up deliberately. With `network.enforce: false` no firewall is installed — Docker bridge isolation only, explicitly not containment, and logged as such. A firewall-install failure honors `network.fail_closed` (default `true`): block with `SANDBOX_POLICY_FAILED` + audit row when `true`, degraded-allow with WARNING + `degraded` audit row when `false` (worker runs without the netns firewall). Worker-creation/setup failures always fail closed regardless.
+`network.py` renders default-DROP `iptables-restore` / `ip6tables-restore` rulesets installed by the ephemeral `--rm` sidecar sharing the worker netns (`run_netns_sidecar`). Re-application happens at each command boundary only when `NetworkPolicy.fingerprint()` changes, so dynamic targets are picked up deliberately. Enforcement and fail-closed behavior are mandatory; config parsing rejects explicit `false` values. Any firewall-install failure blocks with `SANDBOX_POLICY_FAILED`, records a blocked audit row, and destroys partial resources.
 
 `authorize_destinations` is the command-level scope re-check (`SANDBOX_SCOPE_DENIED`) using the shared `check_targets_allowlist` matcher; `_enforce_scope` (`manager.py:500`) additionally denies target-less execution whenever any authorization material exists.
 
@@ -128,11 +130,17 @@ Always denied: `METADATA_DESTINATIONS` (`169.254.169.254`, `169.254.0.0/16`, `fd
 
 `mcp_bridge.sandbox_block(exc, *, tool_name)` converts these into structured result blocks. `DockerCommandTimeout` is dual-typed (`SandboxUnavailableError`, `TimeoutError`) on purpose: verb wrappers treat it as unavailable, `DockerBackend.exec` re-raises it as `TimeoutError`.
 
-## `fallback_native` — the one sanctioned fallback
+## Fail-closed configuration and boot status
 
-`SandboxConfig.fallback_native` defaults to `False`. `resolve_manager_with_fallback` (`manager.py:159`) makes the decision once per server process, at boot: Docker stack unusable (CLI, daemon, or worker image probe) plus `fallback_native: true` returns `(None, notice)` so the whole session runs the documented legacy uncontained mode loudly (boot-log warning, WebUI amber card, `SANDBOX_FALLBACK:` line in legacy-path results). With `fallback_native: false` the manager is returned either way and every execution fail-closes. No session ever switches modes mid-stream.
-
-The decision is recorded to `sandbox_boot_state.json` under the exploit workspace dir; `read_boot_state` / `status_report` report that recorded mode (`disabled` / `contained` / `native_fallback` / `blocked`), not a live probe that could drift mid-run.
+`SandboxConfig` requires `sandbox.enabled: true` and
+`sandbox.fallback_native: false`. Explicit `enabled: false` and
+`fallback_native: true` values are rejected. The `fallback_native` field is
+retained as a deprecated compatibility key; it does not enable a fallback.
+When Docker or the image is unavailable, `resolve_manager_with_fallback`
+still returns a manager and records `blocked` in
+`sandbox_boot_state.json`. `read_boot_state` / `status_report` expose only
+`contained` or `blocked`, keeping the session's reported startup posture
+stable if Docker later changes state.
 
 > Commands are scope-checked at the application layer, while the sandbox network boundary independently enforces the effective destination allowlist.
 
@@ -142,26 +150,26 @@ Historical note (fixed 2026-09-15): `docs/sandbox.md` previously misstated this 
 
 | Key | Default | Effect |
 |---|---|---|
-| `sandbox.enabled` | `True` (schema); absent section means disabled (`models.py:99-101`) | `false` is the explicit legacy host-execution opt-out |
+| `sandbox.enabled` | `True` (schema); absent section means contained (`models.py`) | Mandatory; explicit `false` is rejected |
 | `sandbox.backend` | `docker` | Only backend |
-| `sandbox.image` | `breachpilot-sandbox:latest` | Worker image; missing image fails closed or triggers boot fallback |
+| `sandbox.image` | `breachpilot-sandbox:latest` | Worker image; missing image blocks execution |
 | `sandbox.user` | `sandbox` | In-container user |
 | `sandbox.read_only_rootfs` | `true` | `--read-only` rootfs |
-| `sandbox.fallback_native` | `false` | Boot-time whole-session native degrade vs strict fail-closed |
+| `sandbox.fallback_native` | `false` | Deprecated compatibility key; `true` is rejected |
 | `sandbox.auto_manage_docker` | `false` (schema; lab config enables it) | Start Docker on demand; stop it on exit only if BP started it and no containers remain |
 | `sandbox.env_passthrough` | `[]` | Extra host env names the worker may receive |
 | `sandbox.resources.memory_mb` / `cpus` / `pids` / `timeout_seconds` / `output_max_bytes` / `tmpfs_size_mb` | `4096` / `2` / `512` / `300` / `2000000` / `256` | Limits; invalid values fall back to defaults, never to host execution |
-| `sandbox.network.enforce` | `true` | `false` disables the netns firewall (not containment) |
-| `sandbox.network.fail_closed` | `true` | Firewall-install failure blocks (`SANDBOX_POLICY_FAILED` + audit) when `true`; degraded-allow + WARNING/`degraded` audit when `false` (worker setup failures always block) |
-| `sandbox.network.allow_dns` | `controlled` | `controlled` or `none` (port 53 fully blocked) |
+| `sandbox.network.enforce` | `true` | Mandatory; `false` is rejected |
+| `sandbox.network.fail_closed` | `true` | Mandatory; `false` is rejected |
+| `sandbox.network.allow_dns` | `controlled` | `controlled` installs pinned host mappings; both modes block worker DNS packets |
 | `sandbox.network.map_host_loopback` | `false` | Dev-only host-loopback mapping |
 | `sandbox.network.extra_allow_cidrs` | `[]` | Operator-authorized extra CIDRs; invalid entries warn and skip |
 | `sandbox.network.allow_gateway` | `false` | Keep false; gateway reaches host-published services and the daemon |
 | `sandbox.network.allow_research_hosts` | `false` | Pinned github/gitlab egress, host-resolved, opt-in only |
 | `sandbox.cleanup.remove_on_exit` / `remove_stale_on_startup` | `true` / `true` | Destroy worker/network on exit; sweep stale labeled resources at boot |
-| `sandbox.multi_net_raw` | `true` | `NET_RAW` for raw packet scanning; `false` drops even that |
+| `sandbox.multi_net_raw` | `false` | `true` is rejected because raw packet sockets bypass the IP firewall |
 
-`SandboxConfig.from_config` parses defensively (`_as_dict` / `_as_bool` / `_as_int` / `_as_float` floor invalid values to defaults), so partial config dicts stay on the legacy path instead of crashing.
+`SandboxConfig.from_config` parses defensively (`_as_dict` / `_as_bool` / `_as_int` / `_as_float` floor invalid values to defaults), while rejecting explicit attempts to disable network enforcement, fail-closed behavior, or the no-`NET_RAW` boundary.
 
 ## Examples
 
@@ -170,9 +178,7 @@ from pathlib import Path
 from tools.sandbox.manager import resolve_manager_with_fallback
 
 manager, notice = resolve_manager_with_fallback(Path("exploit_workspace/10.0.0.50"), config)
-if manager is None:
-    print(notice)  # whole session runs legacy native mode; no per-command fallback
-    ...
+assert manager is not None and notice == ""  # unavailable Docker still fails closed
 result = manager.execute("nmap -sV 10.0.0.50", target_ip="10.0.0.50")
 print(result.exit_code, result.status)
 manager.destroy()
@@ -199,7 +205,7 @@ docker build -t breachpilot-sandbox:latest docker/sandbox
 | `tests/test_sandbox_models.py` | yes | `TestSandboxConfigFromConfig` |
 | `tests/test_sandbox_backend.py` | yes | `TestBuildCreateArgs`, `TestValidation` |
 | `tests/test_sandbox_hardening.py` | yes | Present; hardening invariants |
-| `tests/test_sandbox_native_fallback.py` | yes | Present; boot-time fallback decision |
+| `tests/test_sandbox_native_fallback.py` | yes | Present; legacy opt-out rejection and fail-closed boot behavior |
 | `tests/test_sandbox_mcp_exec.py` | yes | Present; tool-layer exec funnel |
 | `tests/test_sandbox_docker_lifecycle.py` | yes | Present; daemon lifecycle |
 | `tests/test_sandbox_family_audit.py` | yes | Present; planned vs sandboxed families |

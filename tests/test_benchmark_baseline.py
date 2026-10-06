@@ -1,39 +1,33 @@
-"""TODO 001 + 017: baseline artifacts carry provenance; negative controls hold."""
+"""Offline evaluation gate contracts and negative controls."""
 
 from __future__ import annotations
 
+import importlib.util
 import json
+import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
 
 
-def test_baseline_artifacts_exist_with_provenance():
-    base = REPO / "reports" / "eval" / "2026-09-15-baseline"
-    assert base.is_dir()
-    files = sorted(base.glob("trial-*.json"))
-    assert len(files) >= 5
-    required = {
-        "model_alias",
-        "provider",
-        "model_id",
-        "model_version",
-        "temperature",
-        "scenario_version",
-        "code_revision",
-        "breachpilot_version",
-        "config_hash",
-        "prompt_hash",
-        "tool_catalog_hash",
-        "skill_catalog_hash",
-        "sandbox_image",
-        "sandbox_image_digest",
-        "orchestration_mode",
-        "provider_adapter_version",
-    }
-    for path in files:
-        prov = json.loads(path.read_text(encoding="utf-8"))["provenance"]
-        assert required <= set(prov), f"{path.name} missing {required - set(prov)}"
+def _release_gate():
+    spec = importlib.util.spec_from_file_location(
+        "benchmark_baseline_release_gate", REPO / "scripts" / "release_gate.py"
+    )
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_live_eval_evidence_is_external_without_supplied_reports():
+    result = _release_gate()._verify_eval_dir(None)
+
+    assert not result.passed
+    assert result.external
+    assert "no model backend report supplied" in result.detail
 
 
 def test_negative_controls_hold():
@@ -47,22 +41,46 @@ def test_negative_controls_hold():
         assert not claimed.success and claimed.false_positives == 1
 
 
-def test_gate_passes_with_baseline_dir():
-    import importlib.util
-    import sys
+def test_gate_accepts_complete_synthetic_eval_report(tmp_path: Path):
+    report_path = tmp_path / "trial-001" / "report.json"
+    report_path.parent.mkdir()
+    report_path.write_text(
+        json.dumps(
+            {
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "live_outcome": "PASS",
+                "provenance": {
+                    "model_alias": "fixture-model",
+                    "provider": "fixture-provider",
+                    "model_id": "fixture-model-v1",
+                    "model_version": "fixture",
+                    "temperature": "0",
+                    "scenario_version": "fixture-v1",
+                    "code_revision": "a" * 40,
+                    "breachpilot_version": "0.69.0",
+                    "config_hash": "c" * 64,
+                    "prompt_hash": "p" * 64,
+                    "tool_catalog_hash": "t" * 64,
+                    "skill_catalog_hash": "s" * 64,
+                    "sandbox_image": "breachpilot-sandbox:fixture",
+                    "sandbox_image_digest": "sha256:" + "d" * 64,
+                    "orchestration_mode": "fixture",
+                    "provider_adapter_version": "fixture-v1",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
 
-    spec = importlib.util.spec_from_file_location("release_gate_baseline_check", REPO / "scripts" / "release_gate.py")
-    assert spec and spec.loader
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules["release_gate_baseline_check"] = mod
-    spec.loader.exec_module(mod)
-    live, repeated = mod._verify_eval_dir(REPO / "reports" / "eval" / "2026-09-15-baseline")
-    assert live.passed and repeated.passed
+    result = _release_gate()._verify_eval_dir(tmp_path)
+
+    assert result.passed, result.detail
 
 
 def test_xben_manifests_exist():
     for name in ("dvwa.json", "juice_shop.json", "metasploitable2.json"):
         assert (REPO / "benchmarks" / "xben" / name).exists()
     text = (REPO / "docs" / "benchmarks.md").read_text(encoding="utf-8")
-    assert "bp --benchmark xben --repeat 5" in text
+    assert "bp --config config.loopback-lab.yaml --benchmark xben --trials 5" in text
+    assert "sandbox.network.map_host_loopback: true" in text
     assert "Scope violations" in text

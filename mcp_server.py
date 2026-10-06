@@ -42,6 +42,7 @@ except ImportError as exc:  # pragma: no cover - import guard
 
 from tools.api_key_store import (
     DEFAULT_API_KEY_FILE,
+    configured_api_key_env_names,
     disabled_research_tools_message,
     load_api_keys_into_env,
     research_api_keys_available,
@@ -368,7 +369,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     config = load_config(args.config)
-    load_api_keys_into_env(DEFAULT_API_KEY_FILE)
+    load_api_keys_into_env(DEFAULT_API_KEY_FILE, allowed_names=configured_api_key_env_names(config))
     nvd = build_cve_search(config)
     researcher = build_researcher(config)
     server = create_mcp_server(nvd=nvd, researcher=researcher, config=config)

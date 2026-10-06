@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
-import { MemoryRouter } from "react-router-dom";
+import { createMemoryRouter, MemoryRouter, RouterProvider } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 vi.mock("@/api/hooks", async (importOriginal) => {
@@ -105,19 +105,19 @@ describe("SandboxFirewallCard", () => {
     expect(screen.queryByTestId("sandbox-fallback-reason")).toBeNull();
   });
 
-  it("renders native_fallback badge plus the degradation reason", () => {
-    mockStatus(makeStatus({ mode: "native_fallback", fallback_native: true, fallback_reason: "daemon unreachable", docker_available: false }));
+  it("renders blocked posture plus the Docker reason", () => {
+    mockStatus(makeStatus({ mode: "blocked", fallback_reason: "daemon unreachable", docker_available: false }));
     renderNode(<SandboxFirewallCard />);
-    expect(screen.getByTestId("sandbox-mode-badge").textContent).toMatch(/Native fallback/);
+    expect(screen.getByTestId("sandbox-mode-badge").textContent).toMatch(/Blocked/);
     const reason = screen.getByTestId("sandbox-fallback-reason");
     expect(reason.textContent).toMatch(/daemon unreachable/);
   });
 
-  it("renders disabled mode without a reason line", () => {
-    mockStatus(makeStatus({ mode: "disabled", enabled: false, image_present: null, note: "sandbox disabled" }));
+  it("treats a legacy disabled mode as unknown instead of implying host execution", () => {
+    mockStatus(makeStatus({ mode: "disabled" as unknown as "contained" | "blocked", image_present: null }));
     renderNode(<SandboxFirewallCard />);
-    expect(screen.getByTestId("sandbox-mode-badge").textContent).toMatch(/Disabled/);
-    expect(screen.queryByTestId("sandbox-fallback-reason")).toBeNull();
+    expect(screen.getByTestId("sandbox-mode-badge").textContent).toMatch(/Unknown/);
+    expect(screen.getByRole("status")).toHaveTextContent(/unknown sandbox mode/i);
   });
 
   it("renders blocked mode with fail-closed facts", () => {
@@ -127,6 +127,7 @@ describe("SandboxFirewallCard", () => {
     expect(screen.getByTestId("sandbox-fallback-reason").textContent).toMatch(/not built/);
     // Missing image offers the fix-plan flow
     expect(screen.getByRole("button", { name: /Fix sandbox/i })).toBeTruthy();
+    expect(screen.getByText("unsupported (fail closed)")).toBeTruthy();
   });
 
   it("renders an inline error without blocking the page", () => {
@@ -145,7 +146,15 @@ describe("SandboxFirewallCard", () => {
 describe("SystemPage", () => {
   it("shows the Sandbox/Firewall card above settings", () => {
     mockStatus(makeStatus({ mode: "contained" }));
-    renderNode(<SystemPage />);
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const router = createMemoryRouter([{ path: "/system", element: <SystemPage /> }], {
+      initialEntries: ["/system"],
+    });
+    render(
+      <QueryClientProvider client={qc}>
+        <RouterProvider router={router} />
+      </QueryClientProvider>,
+    );
     expect(screen.getByTestId("sandbox-firewall-card")).toBeTruthy();
     expect(screen.getByTestId("sandbox-mode-badge").textContent).toMatch(/Contained/);
   });

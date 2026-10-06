@@ -220,7 +220,7 @@ export function ProviderPicker() {
       : BUILTIN_PROVIDER_OPTIONS;
   return (
     <div className="space-y-2">
-      <SegmentedControl value={provider} onChange={switchTo} options={options} disabled={isPending} />
+      <SegmentedControl label="AI provider" value={provider} onChange={switchTo} options={options} disabled={isPending} />
       {isPending && <p className="text-xs text-muted-foreground">Switching provider…</p>}
       {error && (
         <p className="text-xs text-destructive">
@@ -379,7 +379,7 @@ export function ProviderSetup() {
   let body: React.ReactNode;
   if (provider === "chatgpt") body = <ChatGptControls />;
   else if (provider === "opencode_go") body = <OpenCodeGoControls />;
-  else body = <p className="text-xs text-muted-foreground">Local Ollama models. Embeddings also use Ollama.</p>;
+  else body = <p className="text-xs text-muted-foreground">Use Ollama for local chat models; configure embeddings separately.</p>;
   return (
     <div className="space-y-3">
       <ProviderPicker />

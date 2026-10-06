@@ -6,7 +6,7 @@ files: [manager.py, interfaces.py, models.py, capabilities.py, errors.py]
 
 # Browser — Overview (`tools/browser/`)
 
-Fail-closed browser session ownership: `BrowserManager` owns lifecycle and metadata, `BrowserBackend` is the only engine seam, `models.py` is the shared vocabulary. With the stock config (`browser.enabled: false`, `backend: none`) every path fails closed — nothing launches, nothing pretends a browser exists.
+Fail-closed browser session ownership: `BrowserManager` owns lifecycle and metadata, `BrowserBackend` is the engine seam, and `SandboxPlaywrightLauncher` runs Chromium in the configured browser worker. `models.py` is the shared vocabulary. With the stock config (`browser.enabled: false`, `backend: none`) browser tools stay unregistered; unavailable workers fail closed without host execution.
 
 ## Package map
 
@@ -22,14 +22,14 @@ Fail-closed browser session ownership: `BrowserManager` owns lifecycle and metad
 ## Architecture
 
 ```
-agent ──► tools/mcp_tools/browser.py ──► BrowserManager ──► BrowserBackend ──► Chromium
-  (@require_allowlist        (transitions +          (engine adapter,
-   target lock)               ownership guards)       never policy)
+agent ──► tools/mcp_tools/browser.py ──► BrowserManager ──► BrowserBackend ──► SandboxPlaywrightLauncher ──► worker Chromium
+  (@require_allowlist        (transitions +          (engine adapter,          (docker exec in
+   target lock)               ownership guards)       never policy)             worker netns)
 ```
 
 - The manager MAY validate transitions, allocate ids, hold metadata, track ownership by run id, and drive the async funnel. It MUST NOT launch browsers, open sockets, visit URLs, or run JS — every capability delegates to the injected backend (`manager.py:15-25`).
 - The backend never touches the allowlist; the MCP layer calling the funnel is target-locked and sandboxed (`interfaces.py:46-51`).
-- Stock builds have no backend injected, so `available()` is never true and every action raises `BrowserBackendUnavailable`.
+- Stock config disables browser registration. Enabled browser runs also require `sandbox.image` to match the browser worker image; a host SDK cannot satisfy this requirement.
 
 ## `manager.py` — `BrowserManager`
 
@@ -113,14 +113,14 @@ Serialization is deterministic (hand-rolled field-order dicts) and tolerant on r
 ```
 available = browser.enabled AND backend != "none"
             AND backend in BACKEND_REGISTRY
-            AND (BACKEND_REGISTRY[backend].is_configured(...) OR sandbox worker configured)
+            AND sandbox worker configured and usable for contained execution
 ```
 
 | Symbol | Kind | Description |
 |---|---|---|
 | `BROWSER_CAPABILITIES` | dict | Name → `BrowserCapability` declaration-ordered vocabulary |
 | `BACKEND_REGISTRY` | dict | Registered backends; empty until `register_playwright_backend(config)` runs at call time (never import) |
-| `browser_runtime_available(config)` | def | The single availability rule above |
+| `browser_runtime_available(config)` | def | The single availability rule above; host Playwright does not grant host execution |
 | `browser_capabilities(config)` | def | Machine-readable `{name, description, read_only, available}` records |
 | `browser_available(config)` | def | Whether ANY browser op can run |
 | `unmet_requirements(required, config)` | def | Benchmark `requires_capabilities` classification (unknown names always unmet) |

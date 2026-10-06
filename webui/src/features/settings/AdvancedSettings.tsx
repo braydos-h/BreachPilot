@@ -11,7 +11,6 @@ import { SettingsSection } from "./SettingsSection";
 import { ConfigEditor } from "./ConfigEditor";
 import { DangerZone } from "./DangerZone";
 import { useBrowserStatus, useDiagnostics, useSandboxStatus, useSystemInfo, useTelemetry } from "@/api/hooks";
-import type { BrowserHealth } from "@/api/hooks";
 import { ApiError } from "@/api/client";
 import { formatRelative } from "@/lib/utils";
 import { SkeletonRows } from "@/components/Loading";
@@ -54,6 +53,7 @@ export function AdvancedSettings() {
 function SandboxPanel() {
   const sandbox = useSandboxStatus();
   const data = sandbox.data;
+  const unknownMode = data != null && data.mode !== "contained" && data.mode !== "blocked";
 
   return (
     <div className="space-y-3 py-3">
@@ -68,30 +68,34 @@ function SandboxPanel() {
       {data && (
         <>
           <div className="flex flex-wrap items-center gap-2">
-            {data.enabled ? (
-              data.docker_available ? (
-                data.image_present === false ? (
-                  <Badge variant="warn">Image missing</Badge>
-                ) : (
-                  <Badge variant="success">
-                    <ShieldCheck className="mr-1 h-3 w-3" />
-                    Contained ({data.backend})
-                  </Badge>
-                )
-              ) : (
-                <Badge variant="danger">Docker unreachable</Badge>
-              )
+            {data.mode === "contained" ? (
+              <Badge variant="success">
+                <ShieldCheck className="mr-1 h-3 w-3" />
+                Contained ({data.backend})
+              </Badge>
+            ) : data.mode === "blocked" ? (
+              <Badge variant="danger">Execution blocked</Badge>
             ) : (
-              <Badge variant="warn">Disabled (host exec)</Badge>
+              <Badge variant="warn">Unknown sandbox status</Badge>
             )}
             {data.docker_error && <span className="text-xs text-muted-foreground">{data.docker_error}</span>}
           </div>
-          {data.enabled && data.image_present === false && (
+          {unknownMode && (
+            <div className="rounded-md border border-amber-500/40 bg-amber-500/10 p-2 text-xs" role="status">
+              The server returned an unknown sandbox mode. Refresh status before starting an assessment.
+            </div>
+          )}
+          {data.mode === "blocked" && data.image_present === false && (
             <div className="rounded-md border border-yellow-500/40 bg-yellow-500/10 p-2 text-xs">
               <p>The worker image is not built — every attack command will be blocked (fail closed).</p>
               <pre className="mt-1 overflow-x-auto font-mono text-xs scrollbar-thin">
                 docker build -t {data.image} docker/sandbox
               </pre>
+            </div>
+          )}
+          {data.mode === "blocked" && data.image_present !== false && !data.docker_available && (
+            <div className="rounded-md border border-destructive/40 bg-destructive/10 p-2 text-xs">
+              Docker is unavailable — attack execution is blocked until the daemon is ready.
             </div>
           )}
           <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
@@ -141,7 +145,7 @@ function BrowserPanel() {
   return (
     <div className="space-y-3 py-3">
       <div className="flex items-center justify-between">
-        <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Playwright Chromium</span>
+        <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Browser worker</span>
         <Button size="sm" variant="ghost" onClick={() => browser.refetch()} disabled={browser.isFetching}>
           <RefreshCw className={cn("h-3.5 w-3.5", browser.isFetching && "animate-spin")} />
         </Button>
@@ -161,18 +165,17 @@ function BrowserPanel() {
             ) : (
               <Badge variant="danger">Not ready</Badge>
             )}
-            <span className="text-xs text-muted-foreground">{data.health?.detail || ""}</span>
+            <span className="text-xs text-muted-foreground">Chromium runs only inside the required sandbox worker.</span>
           </div>
-          {data.enabled && !data.available && <BrowserSetupHints health={data.health} />}
+          {data.enabled && !data.available && <BrowserSetupHints />}
           <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
             <Stat label="Backend" value={data.backend || "—"} />
+            <Stat label="Execution" value="sandbox worker only" />
             <Stat label="Headless" value={data.config.headless ? "yes" : "no"} />
             <Stat label="Max sessions" value={String(data.config.max_sessions)} />
             <Stat label="Mutating JS" value={data.config.allow_mutating_actions ? "allowed (lab)" : "blocked"} />
             <Stat label="Screenshots" value={data.config.capture_screenshots ? "on" : "off"} />
             <Stat label="Network capture" value={data.config.capture_network ? "on" : "off"} />
-            <Stat label="SDK" value={data.health?.playwright_present ? (data.health.playwright_version || "installed") : "missing"} />
-            <Stat label="Chromium" value={data.health?.chromium_present ? "installed" : "missing"} />
           </div>
           {data.capabilities.length > 0 && (
             <div>
@@ -202,23 +205,16 @@ function BrowserPanel() {
   );
 }
 
-function BrowserSetupHints({ health }: { health: BrowserHealth | undefined }) {
-  const hints: string[] = [];
-  if (health && !health.playwright_present) hints.push('python -m pip install -e ".[browser]"');
-  if (health && health.playwright_present && !health.chromium_present)
-    hints.push("python -m playwright install chromium");
-  if (hints.length === 0)
-    hints.push(
-      "docker build -t breachpilot-sandbox:browser -f docker/sandbox/Dockerfile.browser docker/sandbox",
-    );
+function BrowserSetupHints() {
+  const hint = "docker build -t breachpilot-sandbox:browser -f docker/sandbox/Dockerfile.browser docker/sandbox";
   return (
     <div className="rounded-md border border-yellow-500/40 bg-yellow-500/10 p-2 text-xs">
-      <p>The browser backend is enabled but not runnable — tools stay unregistered (fail closed).</p>
-      {hints.map((hint) => (
-        <pre key={hint} className="mt-1 overflow-x-auto font-mono text-xs scrollbar-thin">
-          {hint}
-        </pre>
-      ))}
+      <p>
+        Browser tools require the matching contained worker; host Playwright does not enable execution. Build the worker
+        and set <code>sandbox.image</code> to the same image.
+      </p>
+      <pre className="mt-1 overflow-x-auto font-mono text-xs scrollbar-thin">{hint}</pre>
+      <pre className="mt-1 overflow-x-auto font-mono text-xs scrollbar-thin">sandbox.image: breachpilot-sandbox:browser</pre>
     </div>
   );
 }

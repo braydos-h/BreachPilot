@@ -145,7 +145,7 @@ def test_redteam_workspace_escape_rejected():
         pids_limit=256,
         read_only_rootfs=True,
     )
-    args = _db._build_create_args(spec, cap_raw=False, read_only_rootfs=True)
+    args = _db._build_create_args(spec, read_only_rootfs=True)
     binds = [args[i + 1] for i, a in enumerate(args[:-1]) if a == "-v"]
     assert len(binds) == 1, f"worker must mount exactly one host path, got {binds}"
     assert binds[0].startswith("/tmp/bp-run-ws:/workspace:"), binds
@@ -176,13 +176,18 @@ def test_redteam_provenance_and_reports_carry_no_secrets():
 # 9. Host filesystem access ------------------------------------------------
 
 
-def test_redteam_host_execution_requires_explicit_consent(monkeypatch):
-    from tools.sandbox.manager import NATIVE_CONSENT_ENV, native_execution_consent
+@pytest.mark.parametrize(
+    ("config", "message"),
+    [
+        ({"sandbox": {"enabled": False}}, "sandbox.enabled=false is unsafe"),
+        ({"sandbox": {"enabled": True, "fallback_native": True}}, "sandbox.fallback_native is unsupported"),
+    ],
+)
+def test_redteam_legacy_host_execution_modes_are_rejected(config, message):
+    from tools.sandbox.models import SandboxConfig
 
-    monkeypatch.delenv(NATIVE_CONSENT_ENV, raising=False)
-    allowed, reason = native_execution_consent({"sandbox": {"enabled": False}})
-    assert allowed is False
-    assert NATIVE_CONSENT_ENV in reason
+    with pytest.raises(ValueError, match=message):
+        SandboxConfig.from_config(config)
 
 
 # 10. Docker gateway access -------------------------------------------------

@@ -41,8 +41,24 @@ Three distinct provider surfaces:
 | Embeddings | `tools/providers/embeddings.py` → `EmbeddingProvider` | `ollama` (default), `none` |
 | Research (web search/fetch) | `tools/web_researcher.py` → `ResearchProvider` | `ollama`, `serpapi` |
 
-**Ollama is optional.** A zero-Ollama install (no `ollama` Python package, no
-Ollama endpoints/traffic) runs the engine on another provider:
+For embeddings, “default” means the schema fallback when the key is omitted.
+The checked-in `config.yaml` explicitly selects `embeddings.provider: none`,
+which disables requests in provider-aware Flow A memory and skill consumers,
+leaving those paths on their keyword/tag fallbacks. Frozen Flow B's
+`legacy/agent_loop.py` still builds the legacy Ollama semantic-memory provider
+when semantic memory is enabled; the `embeddings.provider` setting does not
+disable that frozen path.
+
+Chat/generate can use a non-Ollama provider without installing or selecting
+the Ollama chat adapter. That does not make every Flow A integration
+Ollama-free: research is a separate provider surface, and the checked-in config
+enables research with `provider: ollama` and `fallback_provider: serpapi`.
+Research may try Ollama when its API key is available before falling back to
+SerpAPI. For a Flow A configuration that avoids Ollama across chat, embeddings,
+and research, select a non-Ollama chat provider, set the embedding provider to
+`none`, and set the research provider to `serpapi` (with its key configured) or
+disable research. Frozen Flow B's legacy agent loop still uses direct Ollama
+semantic memory when enabled, regardless of `embeddings.provider`.
 
 ```yaml
 models:
@@ -58,10 +74,12 @@ embeddings:
 ```
 
 The `ollama` pip dependency is an extra (`pip install -e ".[ollama]"`; the
-dev extra includes it). Selecting Ollama without the package raises an
+dev extra includes it). Selecting Ollama chat without the package raises an
 actionable `ProviderMissingDependencyError`; `tests/test_no_ollama_regression.py`
-enforces the guarantee, and `docs/provider-development.md` shows how provider
-#4 plugs in with ZERO engine edits.
+covers provider-isolated chat, doctor, and titler paths, and
+`docs/provider-development.md` shows how provider #4 plugs in without edits to
+generic chat consumers. Research and frozen Flow B retain their separate
+Ollama integration paths.
 
 ## Chat/generate path
 
@@ -185,7 +203,7 @@ fallback so the API degrades to `source: "registry"` instead of failing.
 ## The OpenCode Go provider
 
 `tools/providers/opencode_go_provider.py` — an OpenAI **Responses API**
-cloud backend, the reference zero-Ollama provider:
+cloud backend, the reference non-Ollama chat provider:
 
 ```yaml
 models:
@@ -350,11 +368,14 @@ embeddings) are unchanged: they call `.embed(text)` through
 
 ## Research path
 
-The research subsystem (web search/fetch) has its own provider abstraction —
-`ResearchProvider` (`tools/web_researcher.py`) with `OllamaResearchProvider`
-(dynamic `import_module("ollama")`, degrade-graceful when absent) and
-`SerpAPIResearchProvider`. It is independent of the chat provider selection.
-See [research.md](research.md) for the full walkthrough.
+The research subsystem has its own provider abstraction — `ResearchProvider`
+(`tools/web_researcher.py`) with `OllamaResearchProvider` for remote search
+(dynamic `import_module("ollama")`, degrade-graceful when absent),
+`SerpAPIResearchProvider` for fallback search, and a local stdlib fetcher that
+validates and pins URL destinations. The Ollama remote URL fetch API is not
+used because its resolver cannot enforce local destination policy. This
+subsystem is independent of chat provider selection. See [research.md](research.md)
+for the full walkthrough.
 
 ## Provider-aware surfaces
 

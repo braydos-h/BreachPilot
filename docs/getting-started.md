@@ -5,11 +5,11 @@
 | Need | Minimum | Notes |
 |------|---------|-------|
 | Python | 3.11+ (`pyproject.toml` `requires-python = ">=3.11"`; `tools/doctor.py:31` rejects older; CI 3.11–3.13) | `python --version` |
-| Docker | Docker Desktop (Win/macOS) or Engine (Linux) + image `breachpilot-sandbox:latest` | Sandbox is default-on (`sandbox.fallback_native: false` default, fail-closed); without Docker attacks block, unless explicit opt-in `sandbox.fallback_native: true` degrades to native. Build: `docker build -t breachpilot-sandbox:latest docker/sandbox` |
-| Node.js + npm | Node 18+ | Only for first WebUI build (`webui/dist/` auto-built, ~600s timeout) |
+| Docker | Docker Desktop (Win/macOS) or Engine (Linux) + image `breachpilot-sandbox:latest` | Sandbox is required and fail-closed; without Docker, attack execution is blocked. `sandbox.enabled: false` and `sandbox.fallback_native: true` are rejected. Build: `docker build -t breachpilot-sandbox:latest docker/sandbox` |
+| Node.js + npm | Node 20.19+ (20.x), 22.12+ (22.x), or 24+ for the complete locked WebUI toolchain | Vite 6 and the installer accept Node 18+, but locked frontend dependencies require the listed Node ranges (for example, jsdom requires `^20.19.0 || ^22.12.0 || >=24.0.0`). CI uses Node 22. Release wheels bundle the SPA for `breachpilot --web`. |
 | nmap | On `PATH` or `nmap.path` in `config.yaml` | Linux `-O`/`-sS` need root (`nmap.sudo: true` with `sudo -n`) or `nmap.priv_fallback` auto-downgrade |
-| Ollama endpoint | Cloud default (`https://api.ollama.com` + `OLLAMA_API_KEY`) or local (`http://localhost:11434`) | Embeddings stay local via `ollama.embed_host`. Alt providers: `opencode_go` (`OPENCODE_GO_API_KEY`), `chatgpt` (browser OAuth, tokens in `~/.codex/auth.json` — never config) |
-| Disk / rights | ~4GB free, admin for `install.bat`/winget (Win) or apt (Linux) | Git required for clone |
+| Chat provider credential | The checked-in config selects OpenCode Go (`OPENCODE_GO_API_KEY`). Ollama is optional; when selected, use `https://api.ollama.com` + `OLLAMA_API_KEY` or a local endpoint. | Embeddings are selected separately. In provider-aware Flow A paths, the checked-in `embeddings.provider: none` uses keyword/tag fallbacks without embedding requests; the schema fallback when omitted is `ollama`. Frozen Flow B's legacy agent loop still uses direct Ollama semantic memory when enabled. Chat provider options: `opencode_go`, `ollama`, and `chatgpt` (browser OAuth; tokens in `~/.codex/auth.json` — never config). |
+| Disk / rights | ~4GB free; Windows install is per-user by default, while a machine-wide install or system package install may need administrator rights; Linux package setup may need `sudo` | Git required for clone |
 | Optional | Metasploit, `searchsploit`, `tmux`, impacket/hydra (Linux Kali arsenal; Windows = Python-only exploits) | Probed at boot (`tools/env_probe.py`); agent pivots to Python fallbacks |
 
 > **Auth trifecta (don't conflate):** (a) model keys → `secr.json`/env (`OLLAMA_API_KEY`, `OPENCODE_GO_API_KEY`, `NVD_API_KEY`, `GITHUB_TOKEN`, `SERPAPI_API_KEY` — app never auto-loads `.env`); (b) WebUI bearer → `.webui_secret_key`/`BREACHPILOT_API_TOKEN` + WS `{"auth":…}` (HTTP 401 vs WS 4401); (c) scope → `allowed_targets`/`EXPLOIT_TARGET` (`BLOCKED` = off-allowlist destination vs `SCOPE_DENIED` = `forbidden_actions`/`disallowed_assets` vs `SANDBOX_*` = execution containment).
@@ -22,17 +22,21 @@ From the repository root.
 
 ```powershell
 # Double-click install.bat in Explorer, or from PowerShell:
-.\install.bat          # checks/installs Python/Node/Nmap/Ollama, venv, WebUI, --doctor
+.\install.bat          # provider-aware setup, dependencies, WebUI, --doctor
 .\START.bat            # after install: double-click to launch (WebUI at http://127.0.0.1:8765)
 ```
 
-`install.bat` does everything: it checks for Python 3.11+, Node.js, Nmap and Ollama
-(offering to install anything missing via `winget` when you approve), creates
-`.venv`, installs `requirements.txt`, builds `webui/dist/` if Node is present,
-starts Ollama, pulls the default model + embedding model, walks you through
-`OLLAMA_API_KEY`, runs `python main.py --doctor`, and wires the `breachpilot`
-launcher. Safe to re-run; try `install.bat --check` for an audit-only pass
-or `install.bat --help` for options.
+`install.bat` is a wrapper for `install.ps1`. It checks the configured chat and
+embedding providers before deciding whether Ollama or model pulls are needed.
+With the checked-in config (`models.provider: opencode_go` and
+`embeddings.provider: none`), it skips Ollama installation and model pulls.
+Configure `OPENCODE_GO_API_KEY` with `python main.py --setup-api-keys` or in
+the process environment before `--doctor`. If you select Ollama for chat or
+embeddings, the installer handles the corresponding optional setup. It also
+creates `.venv`, installs dependencies, builds the WebUI when Node/npm are
+available, and wires the `breachpilot` launcher. Safe to re-run; try
+`install.bat --check` for an audit-only pass or `install.bat --help` for
+options.
 
 **Windows — manual (PowerShell):**
 
@@ -49,9 +53,18 @@ python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install -r requirements.txt
 # one-shot bootstrap (installs the `breachpilot` and `bp` launchers):
-./install.sh               # full bootstrap (OS prereqs + Ollama + venv + launchers)
+./install.sh               # full bootstrap with provider-aware optional Ollama/model setup
 ./scripts/setup-linux.sh   # lightweight: venv + deps + doctor
 ```
+
+On Linux/macOS, both scripts decide whether to prepare Ollama from
+`models.provider`; if you select Ollama only for embeddings while using another
+chat provider, install/configure the Ollama daemon and embedding model yourself.
+The Windows `install.ps1` checks both the chat and embedding provider settings.
+These installer choices do not configure the separate research provider; the
+checked-in config selects Ollama for research with SerpAPI as fallback. To keep
+research from trying Ollama, select SerpAPI or disable research. Frozen Flow B
+also keeps its legacy Ollama semantic-memory path when enabled.
 
 For editable package metadata and dev extras (either shell):
 

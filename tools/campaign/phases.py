@@ -12,7 +12,11 @@ body can stay verbatim from the monolith.
 from __future__ import annotations
 
 import asyncio
+import ipaddress
+import json
 import re
+import socket
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
@@ -28,6 +32,71 @@ logger = get_logger()
 from tools.attack_ui import get_ui
 
 ui = get_ui()
+
+_CT_RESPONSE_LIMIT = 250_000
+_CT_ROW_LIMIT = 4_096
+_SUBDOMAIN_CANDIDATE_LIMIT = 32
+_SUBDOMAIN_DNS_WORKERS = 8
+_SUBDOMAIN_DNS_TIMEOUT_SECONDS = 2.0
+
+
+def _discover_domain_targets(domain: str) -> list[tuple[str, str]]:
+    """Fetch bounded CT results and resolve a small set under deadlines."""
+    from tools.research.http_fetch import FetchPolicy, fetch_response, resolve_addresses_bounded
+    from tools.validation_utils import is_subdomain_of
+
+    url = f"https://crt.sh/?q=%25.{domain}&output=json"
+    status, _headers, body, _final_url = fetch_response(
+        url,
+        policy=FetchPolicy(allowed_domains=("crt.sh",)),
+        timeout=5.0,
+        user_agent="BreachPilot-Orchestrator/1.0",
+        max_bytes=_CT_RESPONSE_LIMIT,
+    )
+    if status != 200 or not body:
+        return []
+
+    rows = json.loads(body)
+    if not isinstance(rows, list):
+        return []
+    candidates: set[str] = set()
+    for row in rows[:_CT_ROW_LIMIT]:
+        if not isinstance(row, dict):
+            continue
+        for name_value in str(row.get("name_value", "")).splitlines():
+            for candidate in name_value.split(","):
+                subdomain = candidate.strip().lstrip("*.").strip().lower()
+                if subdomain and subdomain != domain and is_subdomain_of(subdomain, domain):
+                    candidates.add(subdomain)
+                    if len(candidates) >= _SUBDOMAIN_CANDIDATE_LIMIT:
+                        break
+            if len(candidates) >= _SUBDOMAIN_CANDIDATE_LIMIT:
+                break
+        if len(candidates) >= _SUBDOMAIN_CANDIDATE_LIMIT:
+            break
+
+    def _resolve(subdomain: str) -> tuple[str, str] | None:
+        try:
+            addresses = resolve_addresses_bounded(
+                subdomain,
+                443,
+                _SUBDOMAIN_DNS_TIMEOUT_SECONDS,
+            )
+        except (OSError, TimeoutError, ValueError):
+            return None
+        for family, address in addresses:
+            if family != socket.AF_INET:
+                continue
+            try:
+                ip = str(ipaddress.IPv4Address(address))
+            except ipaddress.AddressValueError:
+                continue
+            return subdomain, ip
+        return None
+
+    with ThreadPoolExecutor(max_workers=_SUBDOMAIN_DNS_WORKERS, thread_name_prefix="campaign-ct-dns") as pool:
+        resolved = pool.map(_resolve, sorted(candidates)[:_SUBDOMAIN_CANDIDATE_LIMIT])
+        return [entry for entry in resolved if entry is not None]
 
 
 async def _phase_local_takeover(self, state: AttackState) -> None:
@@ -120,7 +189,15 @@ async def _phase_reconnaissance(self, state: AttackState) -> None:
         )
         return
 
-    recon_result = await self._recon.recon_host(state.target)
+    if self._sandbox_recon_provider is not None:
+        recon_result = await self._sandbox_recon_provider(state.target)
+    elif self._require_sandbox_recon:
+        raise RuntimeError("campaign reconnaissance requires the sandbox worker, but no provider is configured")
+    else:
+        # Retained for non-MCP library callers and characterization tests.
+        # Target-active MCP campaigns set require_sandbox_recon and inject the
+        # same pinned worker adapter as run_full_recon.
+        recon_result = await self._recon.recon_host(state.target)
     state.recon_result = recon_result
 
     if recon_result.open_ports:
@@ -144,40 +221,25 @@ async def _phase_reconnaissance(self, state: AttackState) -> None:
     if state.original_target and state.original_target != state.target:
         try:
             from tools.mcp_shared import add_discovered_target
-            from tools.validation_utils import is_fqdn, is_subdomain_of, resolve_target_to_ip
+            from tools.validation_utils import is_fqdn
 
             if is_fqdn(state.original_target):
                 logger.info(
                     f"[RECON] Domain target {state.original_target} -- "
                     f"expanding attack surface via subdomain enumeration"
                 )
-                # Reuse the crt.sh passive source (no external dep).
-                import json as _json
-                import urllib.request as _urlreq
-
                 dom = state.original_target.strip().lower()
                 try:
-                    req = _urlreq.Request(
-                        f"https://crt.sh/?q=%25.{dom}&output=json",
-                        headers={"User-Agent": "BreachPilot-Orchestrator/1.0"},
-                    )
-                    with _urlreq.urlopen(req, timeout=20) as resp:  # noqa: S310
-                        body = resp.read().decode(errors="replace")
-                    subs: set[str] = set()
-                    if body:
-                        for row in _json.loads(body):
-                            for nv in str(row.get("name_value", "")).splitlines():
-                                for s in nv.split(","):
-                                    s = s.strip().lstrip("*.").strip().lower()
-                                    if s and is_subdomain_of(s, dom) and s != dom:
-                                        subs.add(s)
-                    for sub in sorted(subs)[:200]:
-                        ip = resolve_target_to_ip(sub)
-                        if ip:
-                            state.discovered_subdomains.append({"subdomain": sub, "ip": ip})
-                            add_discovered_target(sub, ip, source="campaign:subdomain_expansion")
+                    discovered = await asyncio.to_thread(_discover_domain_targets, dom)
+                    known_subdomains = {str(item.get("subdomain", "")) for item in state.discovered_subdomains}
+                    for subdomain, address in discovered:
+                        if subdomain in known_subdomains:
+                            continue
+                        state.discovered_subdomains.append({"subdomain": subdomain, "ip": address})
+                        add_discovered_target(subdomain, address, source="campaign:subdomain_expansion")
+                        known_subdomains.add(subdomain)
                 except Exception as exc:
-                    logger.warning(f"[RECON] Subdomain expansion failed for {dom}: {exc}")
+                    logger.warning(f"[RECON] Subdomain expansion failed for {dom}: {type(exc).__name__}")
                 if state.discovered_subdomains:
                     state.add_timeline_event(
                         "subdomain_expansion",
@@ -792,25 +854,11 @@ def _get_killchain_machine(self, state: AttackState) -> Any | None:
         async def _executor(tool_name: str, args: dict[str, Any]) -> str:
             return await asyncio.to_thread(_sync_exec, tool_name, args)
 
-        # shell_command verifies route through the same campaign tool layer
-        # (sync callable shape); unwired -> UNVERIFIED fail-closed as before.
-        _check_executor: Any | None = None
-        if self._tool_executor is not None:
-            from tools.eval_checks import default_check_executor
-
-            _exec = self._tool_executor
-
-            def _shell_call(tool_name: str, args: dict[str, Any]) -> str:
-                return str(_exec(tool_name, args))
-
-            _check_executor = default_check_executor(session=_shell_call, workspace=self._workspace)
-
         self._killchain_machine = KillChainMachine(
             graph_store=AttackGraphStore(db_path, scope=f"target:{state.target}"),
             workspace=self._workspace,
             config=self._mission,
             tool_executor=_executor,
-            check_executor=_check_executor,
             run_dir=self._workspace,
             decision_log_enabled=bool(
                 (((self._mission or {}).get("agent", {}) or {}).get("decision_log_enabled", True))

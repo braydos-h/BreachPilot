@@ -77,30 +77,24 @@ def _patch_subprocess_run_nospawn(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_apt_install_pivots_without_sudo(monkeypatch, tmp_path: Path) -> None:
-    """No passwordless sudo -> BLOCKED pivot, no subprocess spawned (no hang)."""
-    monkeypatch.setattr("tools.env_probe._can_passwordless_sudo", lambda: False)
+    """Legacy install tools are blocked before any host process is created."""
     _patch_subprocess_run_nospawn(monkeypatch)
     _patch_pgrp_nospawn(monkeypatch)
     mcp = _make_server(tmp_path)
     text = _text(await mcp.call_tool("apt_install", {"packages": "nmap hydra"}))
     assert text.startswith("BLOCKED:")
-    assert "passwordless sudo" in text
-    assert "PIVOT" in text
-    assert "write_python_file" in text
+    assert "MCP host process" in text
 
 
 @pytest.mark.asyncio
-async def test_apt_install_proceeds_with_sudo(monkeypatch, tmp_path: Path) -> None:
-    """Passwordless sudo available -> normal apt path runs (mocked)."""
-    monkeypatch.setattr("tools.env_probe._can_passwordless_sudo", lambda: True)
-    monkeypatch.setattr(
-        subprocess,
-        "run",
-        lambda *a, **k: subprocess.CompletedProcess(args=a, returncode=0, stdout="", stderr=""),
-    )
+async def test_apt_install_is_blocked_even_when_sudo_exists(monkeypatch, tmp_path: Path) -> None:
+    """Host sudo availability never enables agent-driven package install."""
+    _patch_subprocess_run_nospawn(monkeypatch)
+    _patch_pgrp_nospawn(monkeypatch)
     mcp = _make_server(tmp_path)
     text = _text(await mcp.call_tool("apt_install", {"packages": "nmap"}))
-    assert text.startswith("APT_INSTALL_RESULT: completed")
+    assert text.startswith("BLOCKED:")
+    assert "MCP host process" in text
 
 
 # ── run_as_root ─────────────────────────────────────────────────────────────
@@ -149,47 +143,39 @@ async def test_run_as_root_target_lock_still_wins(monkeypatch, tmp_path: Path) -
 
 @pytest.mark.asyncio
 async def test_install_package_apt_branch_pivots_without_sudo(monkeypatch, tmp_path: Path) -> None:
-    monkeypatch.setattr("tools.env_probe._can_passwordless_sudo", lambda: False)
     _patch_subprocess_run_nospawn(monkeypatch)
+    _patch_pgrp_nospawn(monkeypatch)
     mcp = _make_server(tmp_path)
     text = _text(await mcp.call_tool("install_package", {"manager": "apt", "packages": "nmap"}))
     assert text.startswith("BLOCKED:")
-    assert "passwordless sudo" in text
+    assert "MCP host process" in text
 
 
 @pytest.mark.asyncio
 async def test_install_package_snap_branch_pivots_without_sudo(monkeypatch, tmp_path: Path) -> None:
-    monkeypatch.setattr("tools.env_probe._can_passwordless_sudo", lambda: False)
     _patch_subprocess_run_nospawn(monkeypatch)
+    _patch_pgrp_nospawn(monkeypatch)
     mcp = _make_server(tmp_path)
     text = _text(await mcp.call_tool("install_package", {"manager": "snap", "packages": "nmap"}))
     assert text.startswith("BLOCKED:")
-    assert "passwordless sudo" in text
+    assert "MCP host process" in text
 
 
 @pytest.mark.asyncio
-async def test_install_package_pip_branch_unaffected_by_sudo(monkeypatch, tmp_path: Path) -> None:
-    """pip does not use sudo; even with no sudo it proceeds (mocked)."""
-    monkeypatch.setattr("tools.env_probe._can_passwordless_sudo", lambda: False)
-    monkeypatch.setattr(
-        subprocess,
-        "run",
-        lambda *a, **k: subprocess.CompletedProcess(args=a, returncode=0, stdout="", stderr=""),
-    )
+async def test_install_package_pip_branch_never_runs_on_host(monkeypatch, tmp_path: Path) -> None:
+    """pip installation is also host code execution and is denied."""
+    _patch_subprocess_run_nospawn(monkeypatch)
     mcp = _make_server(tmp_path)
     text = _text(await mcp.call_tool("install_package", {"manager": "pip", "packages": "requests"}))
-    assert text.startswith("INSTALL_RESULT: completed")
+    assert text.startswith("BLOCKED:")
+    assert "MCP host process" in text
 
 
 @pytest.mark.asyncio
-async def test_apt_install_pivots_on_windows(monkeypatch, tmp_path: Path) -> None:
-    """On Windows _can_passwordless_sudo returns False -> pivot, no bogus sudo spawn."""
-    import tools.env_probe as ep
-
-    monkeypatch.setattr(ep.platform, "system", lambda: "Windows")
-    # _can_passwordless_sudo checks platform.system() first -> returns False
+async def test_apt_install_never_spawns_on_windows(monkeypatch, tmp_path: Path) -> None:
+    """Platform-specific sudo checks cannot re-enable host install execution."""
     _patch_subprocess_run_nospawn(monkeypatch)
     mcp = _make_server(tmp_path)
     text = _text(await mcp.call_tool("apt_install", {"packages": "nmap"}))
     assert text.startswith("BLOCKED:")
-    assert "passwordless sudo" in text
+    assert "MCP host process" in text

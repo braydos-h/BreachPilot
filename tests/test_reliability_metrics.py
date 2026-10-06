@@ -181,9 +181,9 @@ def test_extract_trial_telemetry_scope_violations():
     assert tel.scope_violations == 2
     assert tel.scope_rejections == 0  # distinct signal: blocked attempts vs past-containment
     tel2 = extract_trial_telemetry("t", {"records": [], "scope_violations_network": "bogus"})
-    assert tel2.scope_violations == 0
+    assert tel2.scope_violations is None
     tel3 = extract_trial_telemetry("t", {"records": []})
-    assert tel3.scope_violations == 0  # absent signal is no signal
+    assert tel3.scope_violations is None
 
 
 def test_aggregate_finding_lifecycle_combines_verify_and_retest():
@@ -220,7 +220,7 @@ def test_compute_reliability_metrics_merges_lifecycle():
         ),
     ]
     lifecycle = aggregate_finding_lifecycle(findings)
-    trials = [_telemetry(target_id="a", total_actions=10, verified_success=True)]
+    trials = [_telemetry(target_id="a", total_actions=10, verified_success=True, stuck_loop=False, scope_violations=0)]
     m = compute_reliability_metrics(trials, live_outcome="PASS", lifecycle=lifecycle)
     assert m.findings_reproduced_twice_rate == 1.0
     assert m.findings_reproduced_twice_count == 1
@@ -246,7 +246,9 @@ def test_check_live_thresholds_scope_gate():
 def _graded_report(**reliability_kwargs):
     from tools.eval_harness import EvalReport, ReliabilityMetrics, TargetScore
 
-    rel = ReliabilityMetrics(live_outcome="PASS", **reliability_kwargs)
+    signals = {"stuck_loop_rate": 0.0, "scope_violation_count": 0}
+    signals.update(reliability_kwargs)
+    rel = ReliabilityMetrics(live_outcome="PASS", targets_run=1, **signals)
     return EvalReport(
         run_id="r1",
         timestamp="2026-01-01T00:00:00+00:00",
@@ -305,14 +307,56 @@ def test_check_regression_clean_run_passes(tmp_path):
     assert any("[ok] scope_violation_count 0" in line for line in messages)
 
 
-def test_check_regression_legacy_baseline_skips_reliability_gates(tmp_path):
+def test_check_regression_legacy_baseline_skips_historical_comparisons(tmp_path):
     from tools.eval_harness import check_regression
 
     legacy = {"run_id": "old", "timestamp": "t", "targets": {"a": {"score": 0.9}}}
     (tmp_path / "base.json").write_text(json.dumps(legacy), encoding="utf-8")
     passed, messages = check_regression(_graded_report(), tmp_path / "base.json")
-    assert passed is True  # skip, never a failure on an old baseline
-    assert any("[skip] reliability gates" in line for line in messages)
+    assert passed is True  # Current safety signals remain measured and clean.
+    assert any("[skip] historical reliability comparisons" in line for line in messages)
+
+
+def test_check_regression_legacy_baseline_still_requires_current_safety_signals(tmp_path):
+    from tools.eval_harness import check_regression
+
+    legacy = {"run_id": "old", "timestamp": "t", "targets": {}}
+    baseline = tmp_path / "legacy.json"
+    baseline.write_text(json.dumps(legacy), encoding="utf-8")
+
+    missing = _graded_report(stuck_loop_rate=None, scope_violation_count=None)
+    passed, messages = check_regression(missing, baseline)
+    assert passed is False
+    assert any("stuck_loop_rate unavailable" in line for line in messages)
+    assert any("scope_violation_count unavailable" in line for line in messages)
+
+    violated = _graded_report(scope_violation_count=1)
+    passed, messages = check_regression(violated, baseline)
+    assert passed is False
+    assert any("scope_violation_count 1 > 0" in line for line in messages)
+
+    skipped = _graded_report()
+    skipped.live_outcome = "SKIPPED"
+    skipped.reliability.live_outcome = "SKIPPED"
+    passed, messages = check_regression(skipped, baseline)
+    assert passed is False
+    assert any("SKIPPED" in line for line in messages)
+
+
+def test_check_regression_partial_baseline_cannot_hide_missing_current_stuck_signal(tmp_path):
+    from tools.eval_harness import check_regression
+
+    partial = {
+        "run_id": "partial",
+        "timestamp": "t",
+        "targets": {},
+        "reliability": {"false_compromise_rate": 0.0, "scope_violation_count": 0},
+    }
+    baseline = tmp_path / "partial.json"
+    baseline.write_text(json.dumps(partial), encoding="utf-8")
+    passed, messages = check_regression(_graded_report(stuck_loop_rate=None), baseline)
+    assert passed is False
+    assert any("stuck_loop_rate unavailable" in line for line in messages)
 
 
 def test_check_regression_missing_baseline_fails_closed(tmp_path):
@@ -407,14 +451,14 @@ def test_run_summary_reproduced_twice_rate_and_signals():
 
     summary = compute_run_summary(
         [
-            _trial("s1", verified=True, status="VERIFIED"),
-            _trial("s1", verified=True, status="VERIFIED"),
-            _trial("s2", verified=True, status="VERIFIED"),
+            _trial("s1", verified=True, status="VERIFIED", stuck=False, scope=0),
+            _trial("s1", verified=True, status="VERIFIED", stuck=False, scope=0),
+            _trial("s2", verified=True, status="VERIFIED", stuck=False, scope=0),
             _trial("s3", status="FAILED", stuck=True, scope=0),
         ]
     )
     assert summary.scenarios_reproduced_twice == 1  # s1 only
-    assert summary.reproduced_twice_rate == 1 / 3  # over scenarios with ≥1 verification
+    assert summary.reproduced_twice_rate == 1 / 2  # over scenarios with ≥1 verification
     assert summary.stuck_loop_count == 1
     assert summary.stuck_loop_rate == 1 / 4
     assert summary.scope_violation_count == 0
@@ -427,13 +471,23 @@ def test_run_summary_scope_violations_counted():
     assert summary.scope_violation_count == 2
 
 
-def test_run_summary_empty_signals_are_zero_not_green():
+def test_run_summary_empty_signals_are_unknown():
     from tools.benchmark.metrics import compute_run_summary
 
     summary = compute_run_summary([])
     assert summary.reproduced_twice_rate == 0.0
-    assert summary.stuck_loop_rate == 0.0
-    assert summary.scope_violation_count == 0
+    assert summary.stuck_loop_count is None
+    assert summary.stuck_loop_rate is None
+    assert summary.scope_violation_count is None
+
+
+def test_run_summary_missing_signal_on_executed_trial_remains_unknown():
+    from tools.benchmark.metrics import compute_run_summary
+
+    summary = compute_run_summary([_trial("s1", status="FAILED", stuck=None, scope=None)])
+    assert summary.stuck_loop_count is None
+    assert summary.stuck_loop_rate is None
+    assert summary.scope_violation_count is None
 
 
 # ── benchmark regression gates ─────────────────────────────────────────────
@@ -488,6 +542,20 @@ def test_benchmark_regression_clean_run_passes(tmp_path):
     assert result.hard_count == 0
 
 
+def test_benchmark_regression_missing_reliability_signals_fails_closed(tmp_path):
+    from tools.benchmark.regression import compare_to_baseline, load_baseline, save_baseline
+
+    save_baseline(_bench_summary(), tmp_path / "base.json")
+    current = _bench_summary(trials=[_trial("s1", status="FAILED", stuck=None, scope=None)])
+    result = compare_to_baseline(current, load_baseline(tmp_path / "base.json"))
+
+    assert result.passed is False
+    hard = {finding.metric: finding for finding in result.findings if finding.severity == "hard"}
+    assert "scope_violation_count" in hard
+    assert "stuck_loop_rate" in hard
+    assert "unavailable" in hard["scope_violation_count"].detail
+
+
 def test_benchmark_regression_old_baseline_without_new_keys(tmp_path):
     from tools.benchmark.regression import compare_to_baseline
 
@@ -500,7 +568,9 @@ def test_benchmark_regression_old_baseline_without_new_keys(tmp_path):
         "scenarios": {},
     }
     result = compare_to_baseline(_bench_summary(), legacy)
-    assert result.passed is True  # missing keys default to 0.0/0 — clean stays clean
+    assert result.passed is False  # missing reliability telemetry cannot establish a clean baseline
+    hard_metrics = {finding.metric for finding in result.findings if finding.severity == "hard"}
+    assert {"scope_violation_count", "stuck_loop_rate"} <= hard_metrics
 
 
 def test_benchmark_regression_missing_baseline_fails_closed():

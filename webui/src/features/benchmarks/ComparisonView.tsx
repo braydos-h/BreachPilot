@@ -25,7 +25,12 @@ const CATEGORY_LABELS: Record<string, string> = {
   regressed: "Regressed",
   still_solved: "Still solved",
   still_failing: "Still failing",
+  unknown: "Unmeasured",
 };
+
+function formatProbability(value: number | null): string {
+  return value == null || !Number.isFinite(value) ? "n/a" : value.toFixed(2);
+}
 
 function formatMetricValue(metric: string, value: number | null): string {
   if (value === null || value === undefined) return "n/a";
@@ -176,10 +181,13 @@ export function ComparisonView({ runs }: ComparisonViewProps) {
                             <span className="text-red-700 dark:text-red-300">{formatDelta(row.metric, row)}</span>
                           </>
                         )}
-                        {row.direction !== "improved" && row.direction !== "regressed" && (
+                        {row.direction === "unknown" && (
+                          <span className="text-muted-foreground">unmeasured</span>
+                        )}
+                        {row.direction === "unchanged" && (
                           <>
                             <Minus className="h-3.5 w-3.5 text-muted-foreground" aria-label="unchanged" />
-                            <span className="text-muted-foreground">{formatDelta(row.metric, row) || "—"}</span>
+                            <span className="text-muted-foreground">—</span>
                           </>
                         )}
                       </span>
@@ -227,12 +235,14 @@ export function ComparisonView({ runs }: ComparisonViewProps) {
                   comparison.comparison.scenarios.map((row) => (
                     <tr key={row.scenario_id} className="border-t">
                       <td className="px-3 py-2 font-mono text-xs">{row.scenario_id}</td>
-                      <td className="px-3 py-2 tabular-nums">{row.baseline.toFixed(2)}</td>
-                      <td className="px-3 py-2 tabular-nums">{row.current.toFixed(2)}</td>
+                      <td className="px-3 py-2 tabular-nums">{formatProbability(row.baseline)}</td>
+                      <td className="px-3 py-2 tabular-nums">{formatProbability(row.current)}</td>
                       <td className="px-3 py-2">
                         <StatusBadge
                           status={
-                            row.category === "newly_solved"
+                            row.category === "unknown"
+                              ? "UNMEASURED"
+                              : row.category === "newly_solved"
                               ? "VERIFIED"
                               : row.category === "regressed"
                                 ? "REGRESSED"

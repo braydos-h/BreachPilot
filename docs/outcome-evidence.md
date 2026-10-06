@@ -50,8 +50,9 @@ outcome_truth.py:54-60, `ExploitOutcome`):
 
 | Verdict | Required signal |
 |---|---|
-| `compromise` | Strong shell marker: `meterpreter session N`, `nt authority\system`, `command shell session N`, `uid=0(`, `whoami` → root, `root@host:~# ` + command (outcome_truth.py:91-104) |
-| `cred_dump` | Explicit credential/hash/dump marker requiring a colon or `dumped` verb, e.g. `credentials:`, `ntlm: 0x…`, pwdump lines (outcome_truth.py:109-117) |
+| `compromise` | Reserved for a trusted, target-bound structured verifier. Raw shell-shaped text such as `uid=0(root)` or `meterpreter session N` is an unverified claim. |
+| `cred_dump` | Reserved for a trusted, target-bound structured verifier. Credential-shaped text such as `credentials:` is an unverified claim. |
+| `unverified_claim` | Raw output contains a shell, credential, or generated success marker, but the source is not authenticated as the target. This is the current Flow A result for those markers. |
 | `partial` | Access-denied / limited / not-authorized markers — a partial outcome is **not** a failure (outcome_classify.py:58-68) |
 | `failure` | Explicit error or non-zero exit marker with no stronger signal (outcome_classify.py:72-86) |
 | `unknown` | Nothing matched — caller falls back to exit code / structured signals (outcome_classify.py:121-122) |
@@ -80,12 +81,12 @@ the same layer:
   - classifies only `_EXPLOIT_VALIDATION_TOOLS` (outcome_truth.py:66-81);
   - uses the tightened `_STRONG_SHELL_PATTERNS` (outcome_truth.py:91-104).
 
-`ActionResult.verified_success` (outcome_truth.py:284-290) is the flag that gates
-`access_achieved`, `compromised_hosts`, finding creation, and post-exploit phases —
-**not** the judge alone and **not** `operational_success` (which is only
-"completed and non-failing", outcome_truth.py:274-281). `judge_flow_a` threads the
-same tightened `ActionResult` classification into the judge so it can never
-re-classify via the loose legacy path (outcome_adapter.py:412-432).
+`ActionResult.verified_success` is reserved to gate `access_achieved`,
+`compromised_hosts`, finding creation, and post-exploit phases. The current Flow A
+tools do not supply a target-bound structured verifier, so raw MCP text cannot
+set it. `operational_success` only means the tool call completed without a known
+operational error; it is not an exploit verdict. `judge_flow_a` receives the
+same unverified classification and cannot promote raw text to access.
 
 ## Canonical contract (one outcome vocabulary)
 
@@ -142,10 +143,15 @@ Evidence is a persisted, hash-stamped, filesystem artifact with SQLite metadata
 `EvidenceStore.get` re-attaches content on read; binary types come back base64-encoded
 (evidence.py:127-146). `compare` checks `same_hash` for two items (evidence.py:148-162).
 
-### Flow A audit trail: `exploit_workspace/<target_ip>/exploit_audit.jsonl`
+### Flow A audit trail: `reports/<run_id>/exploit_audit.jsonl`
 
-Every exploit MCP call and every `ExploitRecord` is appended to a shared
-append-only JSONL (tools/mcp_shared.py:459-491, tools/exploit_agent/policy.py:128-131).
+Every exploit MCP call, sandbox event, and `ExploitRecord` is appended to the
+run's host-owned JSONL audit file. For RunService, the file is
+`reports/<run_id>/exploit_audit.jsonl`, outside the worker's writable
+`reports/<run_id>/exploit_workspace/` bind. Direct and benchmark callers keep
+their audit file beside (not inside) the worker workspace. The MCP server
+creates this canonical file before starting the worker, so API readers do not
+fall back to a worker-writable copy for current runs.
 Two schemas coexist in one file (policy.py:213-218):
 
 - **MCP-tool rows** (`_audit_log`): `tool_name`, `args`, `approved`, `status`,
@@ -164,7 +170,7 @@ Two schemas coexist in one file (policy.py:213-218):
 | Artifact | Location |
 |---|---|
 | Flow B evidence | `<mission_workspace>/evidence/<subdir>/` (evidence.py:93) |
-| Flow A audit log | `exploit_workspace/<target_ip>/exploit_audit.jsonl` |
+| Flow A audit log | `reports/<run_id>/exploit_audit.jsonl` (host-owned; outside the sandbox bind) |
 | Exploit attempts | `exploit_workspace/<target_ip>/<attempt_id>/` |
 | Per-run reports | `reports/<run_id>/` |
 | Eval reports | `reports/eval/<run_id>/` (eval_harness.py:6, 343) |
@@ -250,26 +256,28 @@ needed to fill missing evidence/reproduction steps.
 ## Proof-of-Execution Verification (tools/verification/poe_verifier.py)
 
 **Status: available primitive, NOT wired into the live execution path.** No
-production code calls `verify_compromise` today — the exploit loop
-(`tools/exploit_agent/runner/_impl.py`), the report generators, and the eval harness never
-invoke it; only `tests/test_poe_verifier.py` exercises it. Do not describe a
-PoE-verified foothold as a runtime guarantee.
+production code calls `verify_compromise` today. The generic
+`run_exploit_terminal` executor runs inside the sandbox worker and is not a
+target shell. The primitive now requires a dedicated `target_shell_executor`
+bound to an authenticated session on the exact target; its legacy generic
+executor argument is retained only for compatibility and is never invoked.
+Do not describe a PoE-verified foothold as a runtime guarantee.
 
-When a caller does wire it in, the primitive works as follows. `_verify_sync`
-(poe_verifier.py:172-237):
+When a caller supplies that dedicated target-bound callback, the primitive
+works as follows:
 
-1. Writes a unique canary token (`PoE-<ip>-<uuid>`, poe_verifier.py:67-80) to a
-   temp file on the target via `run_exploit_terminal`.
+1. Writes a unique canary token (`PoE-<ip>-<uuid>`) to a temp file through the
+   target shell callback.
 2. Reads it back in the same shell call — a missing echo means the write/read did
    not land on the target → `verified=False` (poe_verifier.py:200-211).
 3. Collects `id` / `whoami` / `hostname` probes and classifies privilege via
    `classify_privilege` → `root`/`system`/`user`/`unknown` (poe_verifier.py:134-153).
 
-Any executor failure (`BLOCKED:`, `TOOL_EXECUTION_ERROR:`, exception, timeout)
+Any callback failure (`BLOCKED:`, `TOOL_EXECUTION_ERROR:`, exception, timeout)
 collapses to `verified=False` with the reason captured in `evidence` — the verifier
 never raises into the campaign (poe_verifier.py:14-17, 262-281, 305-327). Async
-entry `verify_compromise` offloads the blocking executor to a thread and shields
-with an asyncio timeout (poe_verifier.py:284-327). The returned verdict dict is
+entry `verify_compromise` offloads the blocking callback to a thread and applies
+an asyncio timeout. The returned verdict dict is
 `{verified, evidence, privilege, shell_type, token, target_ip}` (poe_verifier.py:230-237).
 
 ## Summarization and Report Generation
@@ -360,8 +368,9 @@ time-to-first-verified-success. Baseline disables the smart features
           v                       │                   -> OutcomeAssessment
    classify_exploit_outcome       │                   (status, confidence,
    (outcome_truth.py:187)         │                    information_value,
-   -> compromise/cred_dump/       │                    check_fingerprint)
-     partial/failure/unknown      │                          │
+   -> unverified_claim / suspected /      │                    check_fingerprint)
+      vulnerability_signal / partial /   │                          │
+      failure / unknown / none           │                          │
           │                      │                          v
           v                       │               HypothesisRepository
    build_observation        ┌─────┴──────────►   persist_assessment (SQLite)

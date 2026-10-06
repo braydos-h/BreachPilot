@@ -8,9 +8,8 @@ module adds the *browser capability vocabulary* at that same metadata level:
 - stable ``browser.*`` capability names for planner reasoning and future
   benchmark ``requires_capabilities`` scenario metadata,
 - an availability rule that reports every browser capability **unavailable**
-  until a browser backend is enabled + registered + runnable (``browser.enabled``
-  + ``backend`` + a registry entry whose ``is_configured`` passes AND a host
-  SDK or a sandbox worker to run it in),
+  until a backend is enabled, registered, and configured to run in a sandbox
+  worker,
 - :func:`unmet_requirements` used by future benchmark scenario classification.
 
 Contracts:
@@ -154,7 +153,7 @@ def register_playwright_backend(config: dict[str, Any] | None = None) -> bool:
 
 
 def _sandbox_execution_possible(config: dict[str, Any] | None) -> bool:
-    """Whether contained browser execution is configured (worker at runtime)."""
+    """Whether contained browser execution is configured (worker checked at runtime)."""
     sandbox = (config or {}).get("sandbox")
     # SandboxConfig intentionally defaults a missing section to enabled so
     # generic execution paths fail closed. Browser capability metadata has a
@@ -188,13 +187,11 @@ def backend_configured(backend_id: str, config: dict[str, Any] | None = None) ->
 
 
 def browser_runtime_available(config: dict[str, Any] | None = None) -> bool:
-    """Single availability rule: enabled + registered + runnable somewhere.
+    """Whether a registered browser backend has a configured sandbox worker.
 
-    Runnable means the host SDK is present (``is_configured``) OR a sandbox
-    worker is configured to run it contained (image presence is verified at
-    execution time, like every other sandboxed tool — the worker, not the
-    host, owns Chromium there). ``browser.backend: playwright`` alone never
-    flips this (fail closed).
+    Host Playwright/Chromium availability never authorizes agent browser
+    execution. The worker image and its Playwright runtime are verified when
+    the sandbox launcher is resolved, and failure blocks the tool.
     """
     cfg = (config or {}).get("browser", {}) or {}
     backend = str(cfg.get("backend", "none") or "none")
@@ -203,9 +200,16 @@ def browser_runtime_available(config: dict[str, Any] | None = None) -> bool:
         return False
     if backend not in BACKEND_REGISTRY:
         return False
-    if backend_configured(backend, config):
-        return True
-    return _sandbox_execution_possible(config)
+    if not _sandbox_execution_possible(config):
+        return False
+    sandbox_cfg = (config or {}).get("sandbox")
+    if not isinstance(sandbox_cfg, dict):
+        return False
+    sandbox_image = str(sandbox_cfg.get("image", "breachpilot-sandbox:latest") or "").strip()
+    worker_image = str(cfg.get("worker_image", "") or "breachpilot-sandbox:browser").strip()
+    # The MCP session owns one manager/image shared by tools. A separate
+    # browser.worker_image hint cannot switch that manager to another image.
+    return bool(sandbox_image and sandbox_image == worker_image)
 
 
 def browser_capabilities(config: dict[str, Any] | None = None) -> list[dict[str, Any]]:

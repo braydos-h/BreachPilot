@@ -41,6 +41,29 @@ def test_orchestrator_emits_agent_started_and_complete():
     assert "agent_complete" in types
 
 
+def test_orchestrator_converts_base_exception_group_to_failed_result():
+    """A worker group failure is contained and still reaches terminal state."""
+    from tools.swarm.base import Agent, AgentResult, AgentStatus
+    from tools.swarm.orchestrator import SwarmOrchestrator
+
+    class GroupFailureAgent(Agent):
+        def run(self, task: dict[str, Any], _context: dict[str, Any]) -> AgentResult:
+            raise BaseExceptionGroup("agent worker group failed", [KeyboardInterrupt("worker stopped")])
+
+    events: list[tuple[str, dict[str, Any]]] = []
+    orchestrator = SwarmOrchestrator(
+        {},
+        agent_registry={"recon": GroupFailureAgent},
+        event_callback=lambda event_type, data: events.append((event_type, data)),
+    )
+
+    result = orchestrator.route({"task_id": "T-GROUP", "phase": "recon", "target": "10.0.0.5"})
+
+    assert result.status == AgentStatus.FAILED
+    assert "agent worker group failed" in result.error
+    assert any(event == "agent_failed" for event, _data in events)
+
+
 def test_orchestrator_emits_blocked_when_critic_denies():
     """Critic deny decision should emit critic_decision and agent_blocked."""
     from tools.swarm.base import Agent, AgentResult, AgentStatus

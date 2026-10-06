@@ -227,7 +227,7 @@ main-loop-bound MCP `ClientSession`:
 | `EXPLOIT_WORKSPACE` | `mcp_session.py:256` — workspace root | `cve_lookup.py:171` (KEV cache), `tools/kernel/workspace.py:139` |
 | `AI_NMAP_MULTI_MODEL_ENABLED` | `mcp_session.py:268` | `tools/mcp_tools/registry.py:220` |
 | `AI_NMAP_ACTIVE_MODEL_ALIAS` | `mcp_session.py:270` | `tools/mcp_tools/registry.py:201`, `mcp_tools/peer_models.py:80` |
-| `MCP_HTTP_TOKEN` | operator env (optional) | server: `run_mcp_http_server` `mcp_shared.py:1081`; client: `_streamable_http_transport` `mcp_session.py:706-725` |
+| `MCP_HTTP_TOKEN` | operator env (required for public binds; optional on loopback) | server: `run_mcp_http_server`; client: `_streamable_http_transport` |
 | `MCP_ALLOW_PUBLIC_BIND` | operator env (optional) | `assert_loopback_bind` `mcp_shared.py:1022` |
 
 The allowlist lock unions the env vars with `exploit.allowed_targets` at check
@@ -241,7 +241,8 @@ All three servers share `run_mcp_http_server` (`tools/mcp_shared.py:1064-1084`):
 1. **Loopback gate** — `assert_loopback_bind` (`mcp_shared.py:1014-1030`)
    refuses any non-loopback host unless BOTH `--allow-public-bind` AND
    `MCP_ALLOW_PUBLIC_BIND=1` are set (two-person rule).
-2. **Optional bearer auth** — when `MCP_HTTP_TOKEN` is set, the ASGI app is
+2. **Bearer auth on public binds** — a non-loopback bind is refused unless
+   `MCP_HTTP_TOKEN` is set; loopback may omit it. When configured, the ASGI app is
    wrapped by `_wrap_http_auth` (`mcp_shared.py:1033-1061`): a pure-ASGI
    middleware requiring `Authorization: Bearer <token>`, compared with
    `hmac.compare_digest` (no timing side channel); otherwise 401.

@@ -1,7 +1,8 @@
 """Tool-family containment audit for the sandbox.
 
-The contract (docs/sandbox.md, docs/benchmarks.md): when ``sandbox.enabled``
-is true, NO offensive/target-touching execution may silently run on the host.
+The contract (docs/sandbox.md, docs/benchmarks.md): agent-generated attack
+execution always uses the sandbox; no configuration permits it to silently run
+on the host.
 This module is the explicit, reviewable registry of every tool family in
 ``tools/mcp_tools/`` that spawns processes, and its containment status:
 
@@ -36,7 +37,13 @@ __all__ = [
 
 _MCP_TOOLS_DIR = Path(__file__).resolve().parent.parent / "mcp_tools"
 
-_SANDBOX_SEAM_SYMBOLS = {"run_command_in_sandbox", "run_argv_in_sandbox", "manager_from_ctx", "sandbox_error_block"}
+_SANDBOX_SEAM_SYMBOLS = {
+    "run_command_in_sandbox",
+    "run_argv_in_sandbox",
+    "run_tool_argv_in_sandbox",
+    "manager_from_ctx",
+    "sandbox_error_block",
+}
 
 
 @dataclass
@@ -74,6 +81,13 @@ _SANDBOX_FAMILY_NOTES: dict[str, list[str]] = {
         "per docker exec inside the sandbox worker netns via SandboxPlaywrightLauncher "
         "(tools/browser/sandbox_launcher.py); strict fail-closed, never host fallback"
     ],
+    "recon": [
+        "check_os, quick_scan, run_full_recon, and get_service_fingerprint use fixed Nmap argv through "
+        "run_argv_in_sandbox after DNS pinning. run_udp_recon is blocked because the worker intentionally "
+        "drops NET_RAW. OSINT is bounded passive access to fixed public providers and does not connect to the target. "
+        "This entry covers tools/mcp_tools/recon.py only; direct ReconPipeline callers in campaign and opt-in swarm "
+        "paths remain host-side and are outside this module-level audit."
+    ],
 }
 SANDBOXED_FAMILIES: dict[str, FamilyStatus] = {
     name: FamilyStatus(
@@ -86,25 +100,18 @@ SANDBOXED_FAMILIES: dict[str, FamilyStatus] = {
         "terminal/execute",  # run_exploit_terminal (sandboxed path)
         "web_scan",  # nikto/nuclei/sqlmap/... argv funnel
         "metasploit",  # msf module execution argv funnel
+        "credentials",  # impacket lateral/credential tools use the shared argv funnel
+        "ad",  # AD enumeration and execution tools use the shared argv funnel
+        "payloads",  # msfvenom payload generation uses the shared argv funnel
         "workspace",  # run_python_file argv funnel (sandbox path)
         "browser",  # Playwright ops via SandboxPlaywrightLauncher (sandboxed path)
+        "recon",  # target-active scanners via argv funnel; UDP scan is explicitly unsupported
     )
 }
 
-#: Documented host-execution exceptions. Every entry needs a reason a reviewer
-#: can verify; target-touching exceptions are bugs to fix, not features.
+#: Documented host-execution exceptions for local/operator utilities and
+#: passive recon. Agent-generated attack execution is never listed here.
 HOST_EXCEPTIONS: dict[str, FamilyStatus] = {
-    "terminal": FamilyStatus(
-        module="terminal",
-        status="host_exception",
-        reason=(
-            "run_exploit_terminal's host path (wrapper-shell Popen); used ONLY when "
-            "sandbox.enabled is false — the documented, explicit operator opt-out. "
-            "When the sandbox is enabled, terminal/execute funnels the same tool "
-            "through the worker instead."
-        ),
-        target_touching=True,
-    ),
     "terminal/package": FamilyStatus(
         module="terminal/package",
         status="host_exception",
@@ -123,30 +130,6 @@ HOST_EXCEPTIONS: dict[str, FamilyStatus] = {
         ),
         target_touching=False,
     ),
-    "recon": FamilyStatus(
-        module="recon",
-        status="host_exception",
-        reason=(
-            "check_os/quick_scan run TTL pings and banner socket sweeps from the operator host "
-            "(pending sandbox migration — target-locked at the MCP layer)"
-        ),
-        target_touching=True,
-    ),
-    "credentials": FamilyStatus(
-        module="credentials",
-        status="host_exception",
-        reason=(
-            "lateral_exec/dump_credentials/kerberoast still execute impacket on the host "
-            "(documented gap; pending sandbox migration — target-locked by the MCP allowlist in the meantime)"
-        ),
-        target_touching=True,
-    ),
-    "payloads": FamilyStatus(
-        module="payloads",
-        status="host_exception",
-        reason="msfvenom payload generation runs on the host (generates a file; touches no target)",
-        target_touching=False,
-    ),
     "cracking": FamilyStatus(
         module="cracking",
         status="host_exception",
@@ -160,12 +143,6 @@ HOST_EXCEPTIONS: dict[str, FamilyStatus] = {
             "DNS tools execute dig/host/subfinder on the host (pending sandbox migration; "
             "reads are passive recon and the families are allowlist-locked at the MCP layer)"
         ),
-        target_touching=True,
-    ),
-    "ad": FamilyStatus(
-        module="ad",
-        status="host_exception",
-        reason="AD enumeration helpers run ldapsearch-class tools on the host (pending sandbox migration)",
         target_touching=True,
     ),
     "operator_connection": FamilyStatus(
@@ -242,9 +219,13 @@ def audit_families(mcp_tools_dir: Path | None = None) -> list[dict[str, Any]]:
     for path in sorted(root.rglob("*.py")):
         if path.name == "__init__.py" or "__pycache__" in path.parts:
             continue
-        if not _uses_subprocess(path):
-            continue
         key = _module_key(path)
+        # Structured process wrappers may delegate subprocess creation to the
+        # sandbox funnel, so they do not import subprocess themselves. Keep
+        # registered worker-process families visible in the audit summary.
+        uses_worker_process = key in SANDBOXED_FAMILIES and _uses_sandbox_seam(path)
+        if not (_uses_subprocess(path) or uses_worker_process):
+            continue
         entry = SANDBOXED_FAMILIES.get(key) or HOST_EXCEPTIONS.get(key)
         if entry is not None:
             row = entry.to_dict()

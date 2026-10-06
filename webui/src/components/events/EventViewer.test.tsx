@@ -59,6 +59,72 @@ describe("EventViewer", () => {
     expect(screen.getByText("nmap")).toBeInTheDocument();
   });
 
+  it("keeps production-shaped failure output visible beside its generic error status", async () => {
+    const user = userEvent.setup();
+    render(
+      <EventViewer
+        {...defaultProps([
+          event(1, "tool_request", { name: "nmap", action: 1 }),
+          event(2, "tool_result", { action: 1, success: false, result: "connection refused" }),
+        ])}
+      />,
+    );
+
+    expect(screen.getByText("error")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /nmap/ }));
+    expect(screen.getByText("tool failed")).toBeInTheDocument();
+    expect(screen.getByText("connection refused")).toBeInTheDocument();
+  });
+
+  it("labels normalized claims unverified and does not infer trust from result text", async () => {
+    const user = userEvent.setup();
+    render(
+      <EventViewer
+        {...defaultProps([
+          event(1, "tool_request", { name: "run_exploit_terminal", action: 4 }),
+          event(2, "tool_result", {
+            action: 4,
+            success: true,
+            result: "COMPROMISE: uid=0",
+            operational_status: "completed",
+            exploit_outcome: "unverified_claim",
+            verified_success: false,
+          }),
+        ])}
+      />
+    );
+
+    expect(screen.getByText("Not verified")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /run_exploit_terminal/ }));
+    expect(screen.getByText("completed")).toBeInTheDocument();
+    expect(screen.getByText("unverified claim")).toBeInTheDocument();
+    expect(screen.getByText("COMPROMISE: uid=0")).toBeInTheDocument();
+    expect(screen.queryByText("Verified", { exact: true })).not.toBeInTheDocument();
+  });
+
+  it("shows unknown and not verified for legacy results that lack normalized fields", async () => {
+    const user = userEvent.setup();
+    render(
+      <EventViewer
+        {...defaultProps([
+          event(1, "tool_request", {
+            name: "run_exploit_terminal",
+            action: 5,
+            exploit_outcome: "compromise",
+            verified_success: true,
+          }),
+          event(2, "tool_result", { action: 5, success: true, result: "COMPROMISE: uid=0" }),
+        ])}
+      />
+    );
+
+    expect(screen.getByText("Not verified")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /run_exploit_terminal/ }));
+    expect(screen.getAllByText("unknown")).toHaveLength(2);
+    expect(screen.getAllByText("Not verified")).toHaveLength(2);
+    expect(screen.queryByText("Verified", { exact: true })).not.toBeInTheDocument();
+  });
+
   it("filters by free text, case-insensitively, and clears", async () => {
     const user = userEvent.setup();
     render(<EventViewer {...defaultProps()} />);

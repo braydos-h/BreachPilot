@@ -10,9 +10,10 @@ from __future__ import annotations
 
 import json
 import re
-import shutil
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
+from unittest.mock import patch
 
 import pytest
 import yaml
@@ -44,18 +45,56 @@ def _make_server(tmp_path: Path, *, require_allowlist: bool = True):
     from mcp_exploit_server import create_mcp_server
     from tools.cve_lookup import CVESearchSettings, NVDClient
     from tools.exploit_search import ExploitSearch, ExploitSearchSettings
+    from tools.sandbox.models import SandboxResult
     from tools.web_researcher import WebResearcher, WebResearcherSettings
+
+    class FakeSandbox:
+        def __init__(self) -> None:
+            self.workspace = tmp_path
+            self.cfg = SimpleNamespace(remove_stale_on_startup=False)
+            self.calls: list[dict[str, Any]] = []
+            self.events: list[dict[str, Any]] = []
+
+        def container_path(self, path: Path) -> str:
+            return f"/workspace/{Path(path).relative_to(self.workspace).as_posix()}"
+
+        def execute_argv(self, argv: list[str], **kwargs: Any) -> SandboxResult:
+            call = {"argv": list(argv), **kwargs}
+            self.calls.append(call)
+            if "-o" in argv and kwargs.get("cwd"):
+                name = argv[argv.index("-o") + 1]
+                relative_cwd = str(kwargs["cwd"]).removeprefix("/workspace/")
+                output_path = self.workspace / relative_cwd / name
+                output_path.parent.mkdir(parents=True, exist_ok=True)
+                output_path.write_text("\n".join(json.dumps(event) for event in self.events), encoding="utf-8")
+            return SandboxResult(
+                exit_code=0,
+                stdout="scan tail\n",
+                stderr="",
+                timed_out=False,
+                duration_seconds=0.1,
+                status="completed",
+            )
+
+        def __getitem__(self, key: str) -> Any:
+            call = self.calls[-1]
+            return call["argv"] if key == "argv" else call.get("cwd")
+
+    sandbox = FakeSandbox()
 
     config: dict[str, Any] = {
         "exploit": {"require_explicit_allowlist": require_allowlist, "allowed_targets": ["10.0.0.50"]}
     }
-    return create_mcp_server(
-        ExploitSearch(ExploitSearchSettings()),
-        NVDClient(CVESearchSettings()),
-        WebResearcher(WebResearcherSettings()),
-        tmp_path,
-        config,
-    )
+    with patch("tools.sandbox.resolve_manager_with_fallback", return_value=(sandbox, "")):
+        server = create_mcp_server(
+            ExploitSearch(ExploitSearchSettings()),
+            NVDClient(CVESearchSettings()),
+            WebResearcher(WebResearcherSettings()),
+            tmp_path,
+            config,
+        )
+    server._test_sandbox = sandbox
+    return server
 
 
 def _text(result) -> str:
@@ -77,25 +116,10 @@ def _attempt_id(text: str) -> str:
     return re.search(r"ATTEMPT_ID: (\S+)", text).group(1)
 
 
-def _patch_nuclei_run(monkeypatch, events: list[dict[str, Any]], out: str = "scan tail\n"):
-    """Fake the subprocess runner; emulate nuclei writing its -o JSONL into cwd."""
-    import mcp_exploit_server as mes
-
-    captured: dict[str, Any] = {"argv": [], "cwd": None}
-
-    def _fake(args, timeout, stdout=None, stderr=None, cwd=None, env=None, input_text=None, **popen_kwargs):
-        captured["argv"] = list(args)
-        captured["cwd"] = cwd
-        if "-o" in list(args) and cwd:
-            idx = list(args).index("-o")
-            (Path(str(cwd))).mkdir(parents=True, exist_ok=True)
-            (Path(str(cwd)) / str(list(args)[idx + 1])).write_text(
-                "\n".join(json.dumps(e) for e in events), encoding="utf-8"
-            )
-        return 0, out, ""
-
-    monkeypatch.setattr(mes, "_run_with_pgrp_timeout", _fake)
-    return captured
+def _patch_nuclei_run(_monkeypatch, mcp, events: list[dict[str, Any]]):
+    """Configure the fake worker response and return its latest invocation."""
+    mcp._test_sandbox.events = events
+    return mcp._test_sandbox
 
 
 @pytest.mark.asyncio
@@ -109,8 +133,7 @@ async def test_nuclei_tools_are_registered(tmp_path: Path) -> None:
 @pytest.mark.asyncio
 async def test_nuclei_scan_appends_jsonl_flags(tmp_path: Path, monkeypatch) -> None:
     mcp = _make_server(tmp_path, require_allowlist=False)
-    monkeypatch.setattr(shutil, "which", lambda name: f"/usr/bin/{name}")
-    captured = _patch_nuclei_run(monkeypatch, [HIGH_EVENT])
+    captured = _patch_nuclei_run(monkeypatch, mcp, [HIGH_EVENT])
 
     text = _text(await mcp.call_tool("run_web_scan", {"scanner": "nuclei", "target_ip": "10.0.0.50"}))
     assert "WEB_SCAN_RESULT: completed" in text
@@ -119,17 +142,17 @@ async def test_nuclei_scan_appends_jsonl_flags(tmp_path: Path, monkeypatch) -> N
     assert "-nc" in argv
     assert "-o" in argv
     assert argv[argv.index("-o") + 1] == "nuclei.jsonl"
-    # File lands in the attempt dir (cwd), next to nuclei.log.
+    # The worker's /workspace cwd maps to this host-side attempt directory.
     assert captured["cwd"] is not None
-    assert (Path(str(captured["cwd"])) / "nuclei.jsonl").is_file()
-    assert (Path(str(captured["cwd"])) / "nuclei.log").is_file()
+    attempt_dir = tmp_path / _attempt_id(text)
+    assert (attempt_dir / "nuclei.jsonl").is_file()
+    assert (attempt_dir / "nuclei.log").is_file()
 
 
 @pytest.mark.asyncio
 async def test_nuclei_scan_honors_operator_json_flags(tmp_path: Path, monkeypatch) -> None:
     mcp = _make_server(tmp_path, require_allowlist=False)
-    monkeypatch.setattr(shutil, "which", lambda name: f"/usr/bin/{name}")
-    captured = _patch_nuclei_run(monkeypatch, [HIGH_EVENT])
+    captured = _patch_nuclei_run(monkeypatch, mcp, [HIGH_EVENT])
 
     await mcp.call_tool(
         "run_web_scan",
@@ -144,8 +167,7 @@ async def test_nuclei_scan_honors_operator_json_flags(tmp_path: Path, monkeypatc
 @pytest.mark.asyncio
 async def test_parse_maps_events_to_findings(tmp_path: Path, monkeypatch) -> None:
     mcp = _make_server(tmp_path, require_allowlist=False)
-    monkeypatch.setattr(shutil, "which", lambda name: f"/usr/bin/{name}")
-    _patch_nuclei_run(monkeypatch, [HIGH_EVENT, MEDIUM_EVENT])
+    _patch_nuclei_run(monkeypatch, mcp, [HIGH_EVENT, MEDIUM_EVENT])
 
     scan = _text(await mcp.call_tool("run_web_scan", {"scanner": "nuclei", "target_ip": "10.0.0.50"}))
     text = _text(await mcp.call_tool("parse_nuclei_results", {"attempt_id": _attempt_id(scan)}))
@@ -174,9 +196,8 @@ async def test_parse_maps_events_to_findings(tmp_path: Path, monkeypatch) -> Non
 @pytest.mark.asyncio
 async def test_parse_dedups_by_template_and_host(tmp_path: Path, monkeypatch) -> None:
     mcp = _make_server(tmp_path, require_allowlist=False)
-    monkeypatch.setattr(shutil, "which", lambda name: f"/usr/bin/{name}")
     other_host = dict(MEDIUM_EVENT, **{"matched-at": "http://10.0.0.50:8080/", "host": "http://10.0.0.50:8080"})
-    _patch_nuclei_run(monkeypatch, [MEDIUM_EVENT, dict(MEDIUM_EVENT), other_host, {"info": {}}])
+    _patch_nuclei_run(monkeypatch, mcp, [MEDIUM_EVENT, dict(MEDIUM_EVENT), other_host, {"info": {}}])
 
     scan = _text(await mcp.call_tool("run_web_scan", {"scanner": "nuclei", "target_ip": "10.0.0.50"}))
     text = _text(await mcp.call_tool("parse_nuclei_results", {"attempt_id": _attempt_id(scan)}))
@@ -197,15 +218,13 @@ async def test_parse_blocked_and_missing(tmp_path: Path) -> None:
 @pytest.mark.asyncio
 async def test_generate_template_valid_yaml(tmp_path: Path, monkeypatch) -> None:
     mcp = _make_server(tmp_path, require_allowlist=False)
-    monkeypatch.setattr(shutil, "which", lambda name: f"/usr/bin/{name}")
-    _patch_nuclei_run(monkeypatch, [HIGH_EVENT])
+    _patch_nuclei_run(monkeypatch, mcp, [HIGH_EVENT])
 
     scan = _text(await mcp.call_tool("run_web_scan", {"scanner": "nuclei", "target_ip": "10.0.0.50"}))
     aid = _attempt_id(scan)
     parsed = _text(await mcp.call_tool("parse_nuclei_results", {"attempt_id": aid}))
     fid = re.search(r"FINDING: (\S+)", parsed).group(1)
 
-    monkeypatch.setattr(shutil, "which", lambda name: None)  # schema-only path: deterministic
     text = _text(await mcp.call_tool("generate_nuclei_template", {"finding_id": fid}))
     assert text.startswith("NUCLEI_TEMPLATE: VALID")
     assert f"TEMPLATE_ID: {fid}" in text or "TEMPLATE_ID:" in text
@@ -229,27 +248,25 @@ async def test_generate_blocked_paths(tmp_path: Path) -> None:
     assert "unknown finding_id" in unknown
 
 
-def test_validate_reports_invalid_without_nuclei(monkeypatch) -> None:
+def test_validate_rejects_invalid_schema_without_host_process(monkeypatch) -> None:
     import tools.mcp_tools.web_scan as ws
 
-    monkeypatch.setattr(shutil, "which", lambda name: f"/usr/bin/{name}")
+    def forbidden(*args, **kwargs):
+        raise AssertionError("template validation must not launch a process on the MCP host")
 
-    def _fail(args, timeout, **kwargs):
-        return 1, "", "template validation failed: bad matcher"
-
-    monkeypatch.setattr(ws, "_run_with_pgrp_timeout", _fail)
+    monkeypatch.setattr(ws, "subprocess", forbidden, raising=False)
     verdict, detail = ws._validate_nuclei_template(
         Path("dummy.yaml"),
         yaml.safe_dump(
             {
                 "id": "x",
                 "info": {"name": "n", "severity": "high", "description": "d"},
-                "http": [{"matchers": [{"type": "word", "words": ["w"]}]}],
+                "http": [{"matchers": []}],
             }
         ),
     )
     assert verdict == "INVALID"
-    assert "bad matcher" in detail
+    assert "missing matchers" in detail
 
 
 def test_prompt_prefers_parse_over_scan_tail() -> None:

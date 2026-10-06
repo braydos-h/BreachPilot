@@ -8,9 +8,9 @@ outside ``tools/sandbox`` may see raw Docker internals.
 
 Worker hardening is enforced in ``_build_create_args``:
 
-- ``--cap-drop ALL`` with only ``NET_RAW`` added back (no ``NET_ADMIN``: the
-  worker can never edit its own netns firewall; that grant belongs exclusively
-  to the ephemeral firewall sidecar in ``tools/sandbox/network.py``)
+- ``--cap-drop ALL`` with no capability added back (packet sockets could
+  bypass the IP firewall; ``NET_ADMIN`` belongs exclusively to the ephemeral
+  firewall sidecar in ``tools/sandbox/network.py``)
 - ``--security-opt no-new-privileges``, no ``--privileged``
 - ``--read-only`` rootfs (when configured) + ``--tmpfs /tmp``
 - ``--memory`` / ``--memory-swap`` / ``--cpus`` / ``--pids-limit``
@@ -23,12 +23,16 @@ Worker hardening is enforced in ``_build_create_args``:
 
 from __future__ import annotations
 
+import ipaddress
 import logging
+import re
 import subprocess
+import threading
 import time
+from collections.abc import Mapping, Sequence
 from typing import Any
 
-from tools.sandbox.exceptions import SandboxUnavailableError
+from tools.sandbox.exceptions import SandboxPolicyError, SandboxUnavailableError
 from tools.sandbox.models import SandboxSpec
 
 logger = logging.getLogger(__name__)
@@ -49,14 +53,60 @@ __all__ = [
     "docker_network_rm",
     "docker_network_disconnect",
     "run_netns_sidecar",
+    "start_netns_counter_keeper",
+    "read_netns_counter_keeper",
+    "stop_netns_counter_keeper",
+    "read_netns_firewall_counter",
     "DockerBackend",
     "_build_create_args",
     "DOCKER_TIMEOUT",
+    "host_mapping_argv",
 ]
 
 DOCKER_TIMEOUT = 60
+_DOCKER_OUTPUT_LIMIT = 1024 * 1024
+_DOCKER_OUTPUT_TRUNCATION = b"\n...[docker output truncated]"
 # Host-side hard stop runs this much beyond the container-inner `timeout` TERM.
 EXEC_KILL_GRACE_SECONDS = 10
+
+_HOSTS_MARKER = "# breachpilot-pinned"
+_HOST_LABEL = re.compile(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?", re.ASCII)
+# Fixed trusted worker administration, never agent-generated code. Docker
+# bind-mounts /etc/hosts, so replace(2) is unavailable: serialize updates,
+# write+fsync+readback before allowing the next command. Background readers
+# may transiently fail resolution; the firewall bounds destinations throughout.
+_INSTALL_HOSTS = """import os, pathlib, sys
+path = pathlib.Path('/etc/hosts')
+marker = '# breachpilot-pinned'
+retained = [line for line in path.read_text().splitlines() if not line.endswith(marker)]
+content = '\\n'.join(retained + sys.argv[1].splitlines()) + '\\n'
+with path.open('r+', encoding='utf-8') as stream:
+    stream.seek(0)
+    stream.write(content)
+    stream.truncate()
+    stream.flush()
+    os.fsync(stream.fileno())
+if path.read_text(encoding='utf-8') != content:
+    raise RuntimeError('pinned hosts readback failed')
+"""
+
+
+def host_mapping_argv(mappings: Mapping[str, Sequence[str]]) -> list[str]:
+    """Build a fixed worker command from validated host-side DNS results."""
+    entries: list[str] = []
+    for hostname, addresses in sorted(mappings.items()):
+        name = hostname.lower().rstrip(".")
+        if len(name) > 253 or not all(_HOST_LABEL.fullmatch(label) for label in name.split(".")):
+            raise SandboxPolicyError("invalid hostname in pinned DNS mapping")
+        for address in sorted(set(addresses)):
+            try:
+                ip = ipaddress.ip_address(address)
+            except ValueError as exc:
+                raise SandboxPolicyError("invalid address in pinned DNS mapping") from exc
+            if "%" in str(ip):
+                raise SandboxPolicyError("scoped address in pinned DNS mapping")
+            entries.append(f"{ip} {name} {_HOSTS_MARKER}")
+    return ["python3", "-c", _INSTALL_HOSTS, "\n".join(entries)]
 
 
 class DockerCommandTimeout(SandboxUnavailableError, TimeoutError):
@@ -78,28 +128,99 @@ def _docker(*args: str, timeout: int = DOCKER_TIMEOUT, input_text: str = "") -> 
     fail-closes; a host-side timeout raises ``DockerCommandTimeout``.
     """
     try:
-        # Binary mode on purpose: text-mode pipes translate "\n" to os.linesep
-        # ("\r\n" on Windows), which corrupts iptables-restore rulesets fed on
-        # stdin ("table name 'filter' invalid", Windows-only failure).
-        proc = subprocess.run(  # noqa: S603 -- fixed binary, args fully constructed
+        # Drain both pipes concurrently but retain only bounded prefixes. Docker
+        # exec output can be controlled by worker processes; capture_output=True
+        # would buffer the entire response in host memory before callers trim it.
+        proc = subprocess.Popen(  # noqa: S603 -- fixed binary, args fully constructed
             ["docker", *args],
-            capture_output=True,
-            timeout=timeout,
-            input=input_text.encode("utf-8") if input_text else None,
+            stdin=subprocess.PIPE if input_text else subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
         )
-        out = proc.stdout.decode("utf-8", errors="replace") if isinstance(proc.stdout, bytes) else (proc.stdout or "")
-        err = proc.stderr.decode("utf-8", errors="replace") if isinstance(proc.stderr, bytes) else (proc.stderr or "")
-        return proc.returncode, out, err
+        deadline = time.monotonic() + timeout
+        if proc.stdout is None or proc.stderr is None:
+            proc.kill()
+            raise OSError("Docker CLI output pipes were unavailable")
+
+        captured: dict[str, bytes] = {}
+        readers = [
+            threading.Thread(target=_read_bounded_pipe, args=("stdout", proc.stdout, captured), daemon=True),
+            threading.Thread(target=_read_bounded_pipe, args=("stderr", proc.stderr, captured), daemon=True),
+        ]
+        for reader in readers:
+            reader.start()
+        stdin_errors: list[OSError] = []
+        writer: threading.Thread | None = None
+        stdin = proc.stdin
+        if input_text and stdin is not None:
+
+            def _write_stdin() -> None:
+                try:
+                    stdin.write(input_text.encode("utf-8"))
+                except BrokenPipeError as exc:
+                    stdin_errors.append(exc)
+                except OSError as exc:
+                    stdin_errors.append(exc)
+                finally:
+                    try:
+                        stdin.close()
+                    except BrokenPipeError as exc:
+                        stdin_errors.append(exc)
+                    except OSError as exc:
+                        stdin_errors.append(exc)
+
+            writer = threading.Thread(target=_write_stdin, daemon=True)
+            writer.start()
+        try:
+            returncode = proc.wait(timeout=max(0.0, deadline - time.monotonic()))
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait()
+            for reader in readers:
+                reader.join()
+            if writer is not None:
+                writer.join()
+            raise DockerCommandTimeout(f"docker {' '.join(args[:2])} timed out after {timeout}s") from None
+        for reader in readers:
+            reader.join()
+        if writer is not None:
+            writer.join()
+        if stdin_errors:
+            raise SandboxUnavailableError(f"docker {' '.join(args[:2])} input failed: {stdin_errors[0]}")
+        out = captured.get("stdout", b"").decode("utf-8", errors="replace")
+        err = captured.get("stderr", b"").decode("utf-8", errors="replace")
+        return returncode, out, err
+    except DockerCommandTimeout:
+        raise
+    except SandboxUnavailableError:
+        raise
     except FileNotFoundError:
         raise SandboxUnavailableError(
             "Docker CLI not found on PATH. Install Docker Desktop (Windows/macOS) or "
-            "'docker.io'/'docker-ce' (Linux), or set sandbox.enabled: false to keep the "
-            "legacy (uncontained) host-execution mode."
+            "'docker.io'/'docker-ce' (Linux). Agent execution remains blocked until "
+            "the sandbox worker is available."
         ) from None
-    except subprocess.TimeoutExpired:
-        raise DockerCommandTimeout(f"docker {' '.join(args[:2])} timed out after {timeout}s") from None
     except OSError as exc:
         raise SandboxUnavailableError(f"docker {' '.join(args[:2])} failed: {exc}") from None
+
+
+def _read_bounded_pipe(name: str, pipe: Any, captured: dict[str, bytes]) -> None:
+    """Drain a subprocess pipe while retaining at most the configured limit."""
+    retained = bytearray()
+    truncated = False
+    while True:
+        chunk = pipe.read(64 * 1024)
+        if not chunk:
+            break
+        remaining = _DOCKER_OUTPUT_LIMIT - len(retained)
+        if remaining > 0:
+            retained.extend(chunk[:remaining])
+        if len(chunk) > remaining:
+            truncated = True
+    if truncated:
+        retained = retained[: _DOCKER_OUTPUT_LIMIT - len(_DOCKER_OUTPUT_TRUNCATION)]
+        retained.extend(_DOCKER_OUTPUT_TRUNCATION)
+    captured[name] = bytes(retained)
 
 
 def docker_version() -> tuple[bool, str]:
@@ -339,7 +460,13 @@ def docker_network_rm(name: str, *, retries: int = 5, retry_delay: float = 0.5) 
     return False
 
 
-def run_netns_sidecar(container_id: str, image: str, binary: str, rules_text: str) -> tuple[int, str, str]:
+def run_netns_sidecar(
+    container_id: str,
+    image: str,
+    binary: str,
+    rules_text: str,
+    args: tuple[str, ...] = (),
+) -> tuple[int, str, str]:
     """Named seam: firewall installer.
 
     Runs an ephemeral sidecar sharing the WORKER's network namespace with a
@@ -347,6 +474,8 @@ def run_netns_sidecar(container_id: str, image: str, binary: str, rules_text: st
     exits). The ruleset arrives on stdin; the sidecar is ``--rm``. The worker
     itself never receives NET_ADMIN, so agent commands cannot undo this.
     """
+    if args not in ((), ("--noflush",)):
+        raise SandboxPolicyError("unsupported sandbox firewall restore arguments")
     return _docker(
         "run",
         "--rm",
@@ -358,9 +487,87 @@ def run_netns_sidecar(container_id: str, image: str, binary: str, rules_text: st
         "--entrypoint",
         binary,
         image,
+        *args,
         timeout=90,
         input_text=rules_text,
     )
+
+
+def start_netns_counter_keeper(container_id: str, image: str) -> str:
+    """Start a short-lived, isolated NET_ADMIN sidecar to pin the worker netns.
+
+    It is used only while finalizing telemetry: the worker is stopped first,
+    then counters are read from the still-pinned namespace. The sidecar has no
+    host mounts, drops every capability except NET_ADMIN, and runs only sleep.
+    """
+    cid = _validate_container_id(container_id)
+    rc, out, err = _docker(
+        "run",
+        "--detach",
+        "--rm",
+        "--network",
+        f"container:{cid}",
+        "--cap-drop",
+        "ALL",
+        "--cap-add",
+        "NET_ADMIN",
+        "--security-opt",
+        "no-new-privileges",
+        "--read-only",
+        "--pids-limit",
+        "16",
+        "--entrypoint",
+        "sleep",
+        image,
+        "infinity",
+        timeout=30,
+    )
+    if rc != 0:
+        raise SandboxUnavailableError(f"network counter sidecar failed to start: {(err or out).strip()[:300]}")
+    return _validate_container_id(out.strip())
+
+
+def read_netns_counter_keeper(container_id: str, binary: str) -> tuple[int, str, str]:
+    """Read one address-family firewall snapshot from the trusted keeper."""
+    cid = _validate_container_id(container_id)
+    if binary not in ("iptables-save", "ip6tables-save"):
+        raise SandboxPolicyError("unsupported sandbox firewall counter command")
+    return _docker("exec", cid, binary, "-c", timeout=15)
+
+
+def read_netns_firewall_counter(container_id: str, image: str, binary: str) -> tuple[int, str, str]:
+    """Read counters using an ephemeral NET_ADMIN sidecar while the worker runs."""
+    cid = _validate_container_id(container_id)
+    if binary not in ("iptables-save", "ip6tables-save"):
+        raise SandboxPolicyError("unsupported sandbox firewall counter command")
+    return _docker(
+        "run",
+        "--rm",
+        "--network",
+        f"container:{cid}",
+        "--cap-drop",
+        "ALL",
+        "--cap-add",
+        "NET_ADMIN",
+        "--security-opt",
+        "no-new-privileges",
+        "--read-only",
+        "--entrypoint",
+        binary,
+        image,
+        "-c",
+        timeout=20,
+    )
+
+
+def stop_netns_counter_keeper(container_id: str) -> bool:
+    """Stop/remove the temporary telemetry sidecar, including error cleanup."""
+    cid = _validate_container_id(container_id)
+    rc, out, err = _docker("stop", "-t", "1", cid, timeout=15)
+    if rc == 0 or _is_not_found_error(out, err):
+        return True
+    logger.warning("sandbox counter sidecar stop failed: %s", (err or out).strip()[:200])
+    return docker_rm(cid)
 
 
 def _validate_container_id(container_id: str) -> str:
@@ -379,7 +586,7 @@ def _tmpfs_size_mb(spec: SandboxSpec) -> int:
     return size if size >= 64 else 64
 
 
-def _build_create_args(spec: SandboxSpec, *, cap_raw: bool, read_only_rootfs: bool) -> list[str]:
+def _build_create_args(spec: SandboxSpec, *, read_only_rootfs: bool) -> list[str]:
     """The hardened ``docker create`` argv. Pure function -- fully unit-tested.
 
     Host-protection invariants asserted here: no docker.sock, no host root /
@@ -404,13 +611,12 @@ def _build_create_args(spec: SandboxSpec, *, cap_raw: bool, read_only_rootfs: bo
         "breachpilot=true",
         "--label",
         f"run_id={spec.labels.get('run_id', '')}",
-        # Capabilities: drop everything; NET_RAW only when configured for raw
-        # packet scanning. NET_ADMIN is deliberately NEVER granted here.
+        # Packet sockets bypass the IP-layer destination firewall, so workers
+        # receive no capabilities. NET_ADMIN belongs only to the ephemeral
+        # firewall sidecar, never to the worker.
         "--cap-drop",
         "ALL",
     ]
-    if cap_raw:
-        args += ["--cap-add", "NET_RAW"]
     args += [
         "--security-opt",
         "no-new-privileges",
@@ -433,12 +639,10 @@ def _build_create_args(spec: SandboxSpec, *, cap_raw: bool, read_only_rootfs: bo
     ]
     if read_only_rootfs:
         args.append("--read-only")
-    args.append(image)
-    # Keepalive: the worker must stay alive for `docker exec` and netns firewall.
-    # The image's CMD is /bin/bash (exits immediately when not interactive), so
-    # the manager must override it with a long-lived process. `sleep infinity`
-    # is tiny, handles SIGTERM cleanly, and exists in the debian image.
-    args += ["sleep", "infinity"]
+    # Override both ENTRYPOINT and CMD: a configured derived image must not run
+    # image-controlled startup code before the manager installs its netns
+    # firewall. The base image contract includes this fixed keepalive binary.
+    args += ["--entrypoint", "sleep", image, "infinity"]
     return args
 
 
@@ -449,8 +653,7 @@ class DockerBackend:
     (offensive execution blocked; never a silent host fallback).
     """
 
-    def __init__(self, *, cap_raw: bool = True, exec_seam: Any = None) -> None:
-        self.cap_raw = cap_raw
+    def __init__(self, *, exec_seam: Any = None) -> None:
         # exec_seam allows callers (tests) to swap the docker-exec wrapper.
         self._exec_seam = exec_seam
 
@@ -459,7 +662,7 @@ class DockerBackend:
         if not ok:
             raise SandboxUnavailableError(
                 f"Docker daemon unreachable: {reason}. Offensive execution is blocked "
-                "(fail-closed); start Docker or set sandbox.enabled: false."
+                "(fail-closed); start Docker and keep sandbox containment enabled."
             )
 
     def ensure_image(self, image: str) -> None:
@@ -472,7 +675,7 @@ class DockerBackend:
         return docker_network_create(name)
 
     def create_worker(self, spec: SandboxSpec, *, read_only_rootfs: bool) -> str:
-        argv = _build_create_args(spec, cap_raw=self.cap_raw, read_only_rootfs=read_only_rootfs)
+        argv = _build_create_args(spec, read_only_rootfs=read_only_rootfs)
         rc, out, err = _docker(*argv)
         if rc != 0:
             raise SandboxUnavailableError(f"docker create failed: {(err or out).strip()[:300]}")
@@ -524,6 +727,11 @@ class DockerBackend:
         if workdir and (not workdir.startswith("/") or ".." in workdir.split("/")):
             raise SandboxUnavailableError(f"invalid sandbox workdir {workdir!r}")
         docker_argv: list[str] = ["exec"]
+        if input_text:
+            # Docker exec does not attach/forward stdin unless interactive
+            # mode is enabled. Structured worker protocols use stdin instead
+            # of argv/environment to keep request bodies out of process lists.
+            docker_argv.append("-i")
         if workdir:
             docker_argv += ["-w", workdir]
         if user:
@@ -535,7 +743,7 @@ class DockerBackend:
         if self._exec_seam is not None:
             return self._exec_seam(docker_argv, timeout, input_text=input_text)
         try:
-            return _docker(*docker_argv, timeout=timeout)
+            return _docker(*docker_argv, timeout=timeout, input_text=input_text)
         except DockerCommandTimeout as exc:
             # A long-running agent command is a normal timeout, not sandbox breakage.
             raise TimeoutError(str(exc)) from None

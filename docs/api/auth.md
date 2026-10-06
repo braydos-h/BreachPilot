@@ -3,7 +3,7 @@ title: API Auth — Bearer Token, Loopback, CORS, WebSocket, Password Hashing
 sources:
   - tools/api/auth.py
   - app.py
-  - tools/api/routes/system.py
+  - tools/api/routes/system/
 tests:
   - tests/test_api_auth.py
 subsystem: api
@@ -40,9 +40,9 @@ if creds is None or creds.scheme.lower() != "bearer":  raise 401 Missing/Invalid
 if not hmac.compare_digest(creds.credentials, self._token): raise 401 Invalid bearer token
 ```
 
-Wired as a FastAPI dependency `_require_auth` in every route module except `system.health`:
+Wired as a FastAPI dependency in every route module except `system.core.health`. The system package uses `SystemContext.require_auth`:
 
-- `tools/api/routes/system.py:49`
+- `tools/api/routes/system/_shared.py`
 - `tools/api/routes/runs.py:37`
 - `tools/api/routes/decisions.py:25`
 - `tools/api/routes/events.py:50`
@@ -50,7 +50,7 @@ Wired as a FastAPI dependency `_require_auth` in every route module except `syst
 - `tools/api/routes/graph_explorer.py:55`
 - `tools/api/routes/users.py:44`
 
-`GET /api/v1/health` (`tools/api/routes/system.py:56`) has no dependency and always returns `200 {version:"v1", ready:true}`.
+`GET /api/v1/health` (`tools/api/routes/system/core.py`) has no dependency and always returns `200 {version:"v1", ready:true}`.
 
 ## CORS & Allowed Origins
 
@@ -63,7 +63,7 @@ Wired as a FastAPI dependency `_require_auth` in every route module except `syst
 
 Factory validates `api.allowed_origins` is a `list[str]` of loopback origins or raises `ValueError` (`app.py:114`). `CORSMiddleware` allowlist is `allowed_origins + ["http://127.0.0.1","http://localhost","http://[::1]"]` with `allow_credentials=True` (`app.py:120`).
 
-`PATCH /api/v1/config` re-validates the merged `api.allowed_origins` with the same predicate before writing (`tools/api/routes/system.py:152`).
+`PATCH /api/v1/config` re-validates the merged `api.allowed_origins` with the same predicate before writing (`tools/api/routes/system/config.py`; shared write validation is in `tools/api/routes/system/_shared.py`).
 
 ## WebSocket Auth
 

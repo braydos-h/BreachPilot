@@ -31,6 +31,7 @@ from tools.benchmark.events import BenchmarkEventLogger
 from tools.benchmark.models import BenchmarkScenario, SandboxSnapshot, TrialTelemetry
 from tools.exceptions import _EXC_GROUP_CATCH, _is_exception_group, _log_nested_exceptions
 from tools.exploit_agent import ExploitPermission, ExploitSettings
+from tools.kernel.audit_paths import external_audit_path
 
 __all__ = ["MissionResult", "MissionRunner"]
 
@@ -78,20 +79,27 @@ class MissionResult:
     timed_out: bool = False
     aborted: bool = False
     duration_seconds: float = 0.0
+    stuck_loop: bool | None = None
+    scope_violations: int | None = None
 
 
-def _extract_sandbox_facts(workspace: Path, required: bool) -> SandboxSnapshot:
-    """Parse the trial workspace audit JSONL for sandbox rows (best-effort)."""
+def _extract_sandbox_facts(
+    workspace: Path,
+    required: bool,
+    *,
+    audit_path: Path | None = None,
+) -> SandboxSnapshot:
+    """Parse the selected trial audit JSONL for sandbox rows (best-effort)."""
     snapshot = SandboxSnapshot(enabled=False, required=required)
-    audit_path = workspace / "exploit_audit.jsonl"
-    if not audit_path.exists():
+    selected_audit_path = audit_path or workspace / "exploit_audit.jsonl"
+    if not selected_audit_path.exists():
         return snapshot
     blocked = 0
     failures = 0
     authorized: list[str] = []
     last_error = ""
     try:
-        lines = audit_path.read_text(encoding="utf-8", errors="replace").splitlines()
+        lines = selected_audit_path.read_text(encoding="utf-8", errors="replace").splitlines()
     except OSError:
         return snapshot
     for line in lines:
@@ -141,7 +149,12 @@ class MissionRunner:
     ) -> None:
         self.config = config
         self.config_path = Path(config_path)
-        self.model_alias = model_alias or str((config.get("models", {}) or {}).get("default_alias", "") or "glm")
+        if model_alias:
+            self.model_alias = model_alias
+        else:
+            from tools.config_manager import resolve_default_model_alias
+
+            self.model_alias = resolve_default_model_alias(config)
         self._run_session = run_session  # None = the real run_exploit_session
 
     # ------------------------------------------------------------- telemetry
@@ -313,7 +326,12 @@ class MissionRunner:
 
         result.duration_seconds = round(time.monotonic() - start, 3)
         result.final_result = final if isinstance(final, dict) else {}
-        result.audit_path = str(result.final_result.get("audit_path", "") or "")
+        stuck_loop = result.final_result.get("stuck_loop")
+        result.stuck_loop = stuck_loop if type(stuck_loop) is bool else None
+        scope_violations = result.final_result.get("scope_violations_network")
+        if isinstance(scope_violations, int) and not isinstance(scope_violations, bool) and scope_violations >= 0:
+            result.scope_violations = scope_violations
+        result.audit_path = str(result.final_result.get("audit_path", "") or external_audit_path(workspace))
         result.workspace = str(workspace)
         result.total_actions = int(result.final_result.get("total_actions", 0) or 0)
 
@@ -327,7 +345,7 @@ class MissionRunner:
                 target=scenario.target_host,
                 duration_seconds=result.duration_seconds,
             )
-            result.agent_claimed_success = metrics.verdict in {"compromised", "cred_dump"}
+            result.agent_claimed_success = metrics.verdict in {"compromised", "cred_dump", "unverified_claim"}
             result.claimed_summary = metrics.outcome_summary
         except Exception as exc:  # noqa: BLE001 -- claim detection is best-effort
             result.errors.append(f"claim detection failed: {exc}")
@@ -338,7 +356,9 @@ class MissionRunner:
         result.telemetry.tool_errors = tool_errors
         result.telemetry.sandbox_blocked_actions = sandbox_blocked
         result.sandbox = _extract_sandbox_facts(
-            workspace, required=bool((self.config.get("benchmark", {}) or {}).get("sandbox_required", True))
+            workspace,
+            required=bool((self.config.get("benchmark", {}) or {}).get("sandbox_required", True)),
+            audit_path=Path(result.audit_path),
         )
 
         if event_logger is not None:

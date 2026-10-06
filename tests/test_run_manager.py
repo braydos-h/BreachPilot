@@ -105,6 +105,103 @@ async def test_second_run_409_when_cap_is_one(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_create_run_releases_broker_and_slot_when_initial_event_fails(tmp_path, monkeypatch):
+    manager = _make_manager(tmp_path, monkeypatch)
+
+    async def fail_emit(self, event_type, payload):
+        raise OSError("event persistence unavailable")
+
+    monkeypatch.setattr("tools.api.event_broker.RunEventBroker.emit", fail_emit)
+    with pytest.raises(OSError, match="event persistence unavailable"):
+        await manager.create_run(RunRequest(target="10.0.0.50"))
+
+    assert manager.active_run_ids == []
+    assert manager._events._owners == {}
+    persisted = manager._persistence.list_runs(limit=1)
+    assert persisted[0]["state"] == "failed"
+    await manager.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_prepared_preview_persistence_failure_releases_run_slot(tmp_path, monkeypatch):
+    """A failed final preview write must not strand a run in preparing."""
+    manager = _make_manager(tmp_path, monkeypatch)
+    original_update_preview = manager._persistence.update_run_preview
+    calls = 0
+
+    def fail_first_preview_write(run_id, preview):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise OSError("temporary persistence failure")
+        return original_update_preview(run_id, preview)
+
+    monkeypatch.setattr(manager._persistence, "update_run_preview", fail_first_preview_write)
+    run_id, _, _ = await manager.create_run(RunRequest(target="10.0.0.50"))
+    handle = manager.active_for(run_id)
+    assert handle is not None and handle.prep_task is not None
+
+    await handle.prep_task
+
+    assert manager.active_for(run_id) is None
+    persisted = manager._persistence.get_run(run_id)
+    assert persisted is not None
+    assert persisted["state"] == "failed"
+    assert persisted["error"] == "temporary persistence failure"
+    assert handle.event_broker is not None
+    events = await handle.event_broker.replay(after=0)
+    assert any(event["type"] == "error" for event in events)
+    assert any(event["type"] == "state" and event["payload"].get("state") == "failed" for event in events)
+    await manager.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_post_run_annotation_reopens_event_broker(tmp_path, monkeypatch):
+    manager = _make_manager(tmp_path, monkeypatch)
+    broker = manager._events.get_or_create("finished-run")
+    await broker.emit("completed", {"state": "completed"})
+    broker.close()
+
+    await manager.emit_run_event("finished-run", "hitl_decision", {"actor": "human"})
+
+    events = await broker.replay(after=0)
+    assert [event["type"] for event in events] == ["completed", "hitl_decision"]
+    assert events[-1]["payload"] == {"actor": "human"}
+    await manager.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_execution_cancellation_tolerates_closed_event_broker(tmp_path, monkeypatch):
+    import asyncio
+
+    execute_started = asyncio.Event()
+
+    class _BlockingService(_FakeService):
+        async def execute(self, *_args, **_kwargs):
+            execute_started.set()
+            await asyncio.Event().wait()
+
+    manager = _make_manager(tmp_path, monkeypatch)
+    monkeypatch.setattr("tools.run_service.AssessmentService", _BlockingService)
+    run_id, _preview, _decision = await manager.create_run(RunRequest(target="10.0.0.50"))
+    handle = await manager.wait_for_prepared(run_id)
+    decisions = await manager.list_decisions(run_id)
+    start_decision = next(row for row in decisions if row["kind"] == "start_confirm")
+
+    await manager.confirm_and_start(run_id, start_decision["id"], "yes")
+    await asyncio.wait_for(execute_started.wait(), timeout=1.0)
+    assert handle.task is not None
+    assert handle.event_broker is not None
+    handle.event_broker.close()
+
+    await manager.cancel_run(run_id)
+
+    assert handle.task.cancelled()
+    assert manager._persistence.get_run(run_id)["state"] == "cancelled"
+    await manager.shutdown()
+
+
+@pytest.mark.asyncio
 async def test_legacy_has_active_and_active(tmp_path, monkeypatch):
     """``has_active`` / ``active`` still work with cap=1 (legacy compat)."""
     manager = _make_manager(tmp_path, monkeypatch, max_concurrent_runs=1)

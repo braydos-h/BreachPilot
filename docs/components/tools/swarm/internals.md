@@ -176,7 +176,7 @@ Implementation note: `run-service` construction wiring for `max_parallel`/`explo
 | `tests/test_swarm_negotiation.py` | Negotiation deadlock + scope reject |
 | `tests/test_swarm_observability.py` | Events + `swarm_state.json` + provider |
 | `tests/test_swarm_history_bound.py` | `_trim_history` 500 cap |
-| `tests/test_swarm_recon_fix.py` | ReconAgent via `ReconPipeline` (plain-dict blackboard path) |
+| `tests/test_swarm_recon_fix.py` | ReconAgent sandbox adapter routing, missing-context fail-closed behavior, and plain-dict blackboard path |
 | `tests/test_blackboard_concurrency.py` | `extend_list` atomicity |
 | `tests/test_swarm_mcp_bridge.py` | `SwarmMcpBridge` dispatch/attach |
 | `tests/test_swarm_bridge_contract.py` | Bridge contract |

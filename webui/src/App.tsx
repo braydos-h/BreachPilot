@@ -1,7 +1,7 @@
 // BreachPilot by @braydos-h — https://github.com/braydos-h/BreachPilot
 import { lazy, Suspense, type ReactNode } from "react";
 import { QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Navigate, Route, Routes, useLocation } from "react-router-dom";
+import { createBrowserRouter, Navigate, Route, Routes, RouterProvider, useLocation } from "react-router-dom";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { Layout } from "@/components/Layout";
 import { OnboardingGate } from "@/components/OnboardingGate";
@@ -44,54 +44,62 @@ function RouteErrorBoundary({ children }: { children: ReactNode }) {
   return <ErrorBoundary resetKey={pathname}>{children}</ErrorBoundary>;
 }
 
+/** Keep the declarative page routes under a data router so route-level
+ *  navigation blockers (for example, unsaved settings) can stop navigation. */
+function ApplicationRoutes() {
+  return (
+    <TokenGate>
+      <OnboardingGate>
+        <ProviderPrivacyGate>
+          <WelcomeGate>
+            <Suspense
+              fallback={
+                <div className="flex min-h-[50vh] items-center justify-center">
+                  <Spinner label="Loading..." />
+                </div>
+              }
+            >
+              <Routes>
+                <Route element={<RouteErrorBoundary><Layout /></RouteErrorBoundary>}>
+                  <Route path="/" element={<HomePage />} />
+                  <Route path="/runs" element={<RunListPage />} />
+                  <Route path="/sessions" element={<Navigate to="/runs" replace />} />
+                  <Route path="/runs/new" element={<NewRunPage />} />
+                  <Route path="/runs/:runId" element={<RunPage />} />
+                  <Route path="/runs/:runId/artifacts" element={<ArtifactsPage />} />
+                  <Route path="/runs/:runId/loot" element={<LootPage />} />
+                  <Route path="/runs/:runId/graph" element={<GraphPage />} />
+                  <Route path="/skills" element={<SkillsPage />} />
+                  <Route path="/modules" element={<AttackModulesPage />} />
+                  <Route path="/goals" element={<GoalsPage />} />
+                  <Route path="/graph" element={<AttackGraphPage />} />
+                  <Route path="/stats" element={<StatsPage />} />
+                  <Route path="/benchmarks" element={<BenchmarksPage />} />
+                  <Route path="/benchmarks/new" element={<BenchmarksStartPage />} />
+                  <Route path="/benchmarks/history" element={<BenchmarksHistoryPage />} />
+                  <Route path="/benchmarks/:runId" element={<BenchmarkRunPage />} />
+                  <Route path="/ops" element={<OpsPage />} />
+                  <Route path="/connections" element={<ConnectionsPage />} />
+                  <Route path="/help" element={<HelpPage />} />
+                  <Route path="/memory" element={<MemoryPage />} />
+                  <Route path="/system" element={<SystemPage />} />
+                  <Route path="*" element={<Navigate to="/runs" replace />} />
+                </Route>
+              </Routes>
+            </Suspense>
+          </WelcomeGate>
+        </ProviderPrivacyGate>
+      </OnboardingGate>
+    </TokenGate>
+  );
+}
+
+const router = createBrowserRouter([{ path: "*", element: <ApplicationRoutes /> }]);
+
 export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <BrowserRouter>
-        <TokenGate>
-          <OnboardingGate>
-            <ProviderPrivacyGate>
-              <WelcomeGate>
-              <Suspense
-                fallback={
-                  <div className="flex min-h-[50vh] items-center justify-center">
-                    <Spinner label="Loading..." />
-                  </div>
-                }
-              >
-                <Routes>
-                  <Route element={<RouteErrorBoundary><Layout /></RouteErrorBoundary>}>
-                    <Route path="/" element={<HomePage />} />
-                    <Route path="/runs" element={<RunListPage />} />
-                    <Route path="/sessions" element={<Navigate to="/runs" replace />} />
-                    <Route path="/runs/new" element={<NewRunPage />} />
-                    <Route path="/runs/:runId" element={<RunPage />} />
-                    <Route path="/runs/:runId/artifacts" element={<ArtifactsPage />} />
-                    <Route path="/runs/:runId/loot" element={<LootPage />} />
-                    <Route path="/runs/:runId/graph" element={<GraphPage />} />
-                    <Route path="/skills" element={<SkillsPage />} />
-                    <Route path="/modules" element={<AttackModulesPage />} />
-                    <Route path="/goals" element={<GoalsPage />} />
-                    <Route path="/graph" element={<AttackGraphPage />} />
-                    <Route path="/stats" element={<StatsPage />} />
-                    <Route path="/benchmarks" element={<BenchmarksPage />} />
-                    <Route path="/benchmarks/new" element={<BenchmarksStartPage />} />
-                    <Route path="/benchmarks/history" element={<BenchmarksHistoryPage />} />
-                    <Route path="/benchmarks/:runId" element={<BenchmarkRunPage />} />
-                    <Route path="/ops" element={<OpsPage />} />
-                    <Route path="/connections" element={<ConnectionsPage />} />
-                    <Route path="/help" element={<HelpPage />} />
-                    <Route path="/memory" element={<MemoryPage />} />
-                    <Route path="/system" element={<SystemPage />} />
-                    <Route path="*" element={<Navigate to="/runs" replace />} />
-                  </Route>
-                </Routes>
-              </Suspense>
-              </WelcomeGate>
-            </ProviderPrivacyGate>
-          </OnboardingGate>
-        </TokenGate>
-      </BrowserRouter>
+      <RouterProvider router={router} />
       <Toaster />
     </QueryClientProvider>
   );

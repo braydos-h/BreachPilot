@@ -54,6 +54,22 @@ class _FakeResp:
         return False
 
 
+def test_runtime_doctor_does_not_require_pytest(monkeypatch):
+    from tools import doctor
+
+    imported: list[str] = []
+
+    def record_import(name: str):
+        imported.append(name)
+        return object()
+
+    monkeypatch.setattr(doctor.importlib, "import_module", record_import)
+    result = doctor._check_imports()
+
+    assert result["ok"] is True
+    assert "pytest" not in imported
+
+
 def _fake_urlopen(payload: dict[str, Any]):
     """Return a callable matching ``urllib.request.urlopen(url, timeout=...)``."""
     return MagicMock(return_value=_FakeResp(payload))
@@ -283,7 +299,7 @@ mcp:
 exploit:
   permission: read_only
 sandbox:
-  enabled: false
+  enabled: true
 research:
   workspace_dir: research_workspace
 """,
@@ -306,6 +322,7 @@ research:
         patch("tools.doctor.urllib.request.urlopen", _fake_urlopen(payload)),
         patch("tools.doctor._ping_cloud_model", side_effect=_ping),
         patch("tools.doctor._check_port", return_value={"name": "port_free", "ok": True}),
+        patch("tools.doctor._check_sandbox", return_value={"name": "sandbox", "ok": True}),
     ):
         rc = doctor.run_doctor(config_path)
 
@@ -332,7 +349,7 @@ mcp:
 exploit:
   permission: read_only
 sandbox:
-  enabled: false
+  enabled: true
 research:
   workspace_dir: research_workspace
 """,
@@ -349,6 +366,7 @@ research:
         patch("tools.doctor.urllib.request.urlopen", _fake_urlopen(payload)),
         patch("tools.doctor._ping_cloud_model", return_value=False),
         patch("tools.doctor._check_port", return_value={"name": "port_free", "ok": True}),
+        patch("tools.doctor._check_sandbox", return_value={"name": "sandbox", "ok": True}),
         patch("builtins.print") as _print,
     ):
         rc = doctor.run_doctor(config_path)
@@ -381,7 +399,7 @@ mcp:
 exploit:
   permission: read_only
 sandbox:
-  enabled: false
+  enabled: true
 research:
   workspace_dir: research_workspace
 """,
@@ -404,6 +422,7 @@ research:
         patch("tools.doctor._check_ollama", return_value={"name": "ollama_reachable", "ok": True}),
         patch("tools.doctor.urllib.request.urlopen", _fake_urlopen(payload)),
         patch("tools.doctor._check_port", return_value={"name": "port_free", "ok": True}),
+        patch("tools.doctor._check_sandbox", return_value={"name": "sandbox", "ok": True}),
     ):
         rc = doctor.run_doctor(config_path)
 

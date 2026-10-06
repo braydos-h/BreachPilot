@@ -1,126 +1,75 @@
-"""Sessions MCP tool registration."""
+"""Fail-closed session tool registration.
+
+PersistentSessionManager launches and controls processes on the BreachPilot
+host. These MCP tools remain registered for API compatibility, but they are
+unavailable until a worker-backed persistent-session implementation exists.
+Agent-controlled activity must not escape the disposable sandbox.
+"""
 
 from __future__ import annotations
 
 from typing import Any
 
-from tools.mcp_shared import check_targets_allowlist
 from tools.mcp_tools.registry import ToolContext
-from tools.mcp_tools.terminal import _target_lock_block
-from tools.persistent_session_manager import PersistentSessionManager, get_session_manager
+from tools.mcp_tools.sandbox_exec import sandbox_error_block
+from tools.sandbox.exceptions import SandboxUnsupportedError
 
 
 def register_session_tools(mcp: Any, *, ctx: ToolContext) -> None:
-    workspace = ctx.workspace
-    config = ctx.config
-    search = ctx.search
-    nvd = ctx.nvd
-    researcher = ctx.researcher
-    audit_tool = ctx.audit_tool
-    require_allowlist = ctx.require_allowlist
+    """Register compatible session names that deny host-process operations."""
 
-    _session_mgr: PersistentSessionManager | None = None
-    mcp._session_mgr = None
-
-    def _get_session_mgr() -> PersistentSessionManager:
-        if mcp._session_mgr is None:
-            mcp._session_mgr = get_session_manager(workspace)
-        return mcp._session_mgr
-
-    @mcp.tool()
-    @audit_tool
-    def start_tmux_session(name: str, command: str) -> str:
-        """Start a named persistent tmux session for interactive commands. The session runs in the background and can be interacted with later via send_to_session and read_session_output. Use for: reverse shells, interactive msfconsole, long-running scans, ssh sessions, etc."""
-        # Target-IP lock: the session command may connect to an off-allowlist host
-        # (reverse shell callback, ssh, scanner). Gate it the same way as
-        # run_exploit_terminal so free-text commands can't pivot past the target.
-        _lock_reason = _target_lock_block(command, config)
-        if _lock_reason:
-            return f"BLOCKED: target-IP lock — {_lock_reason}"
-        mgr = _get_session_mgr()
-        result = mgr.start_tmux_session(name, command, cwd=workspace)
-        if result["success"]:
-            return f"SESSION_STARTED: {name}\nTYPE: tmux\nCOMMAND: {command}\nPID: {result.get('pid')}\nSTATUS: running"
-        return f"SESSION_FAILED: {result.get('error', 'unknown error')}"
-
-    @mcp.tool()
-    @audit_tool
-    def send_to_session(name: str, input_text: str) -> str:
-        """Send text/keystrokes to a named tmux session. The text is sent followed by Enter. Use this to interact with running sessions: type commands in a shell, navigate msfconsole menus, respond to prompts, etc."""
-        # Target-IP lock: keystrokes sent into a running session can issue a
-        # command that pivots to an off-allowlist host. Gate the input text the
-        # same way as a free-text terminal command (defense-in-depth).
-        _lock_reason = _target_lock_block(input_text, config)
-        if _lock_reason:
-            return f"BLOCKED: target-IP lock — {_lock_reason}"
-        mgr = _get_session_mgr()
-        result = mgr.send_to_session(name, input_text)
-        if result["success"]:
-            return f"SENT_TO_SESSION: {name}\nINPUT: {input_text[:200]}"
-        return f"SEND_FAILED: {result.get('error', 'unknown error')}"
-
-    @mcp.tool()
-    @audit_tool
-    def read_session_output(name: str, lines: int = 100) -> str:
-        """Read the last N lines from a named tmux session. Use this to see the output after sending commands via send_to_session."""
-        mgr = _get_session_mgr()
-        result = mgr.read_session_output(name, lines=lines)
-        if result["success"]:
-            return f"SESSION_OUTPUT: {name}\nLINES: {lines}\nOUTPUT:\n{result.get('output', '')}"
-        return f"READ_FAILED: {result.get('error', 'unknown error')}"
-
-    @mcp.tool()
-    @audit_tool
-    def kill_session(name: str) -> str:
-        """Kill a named persistent session (tmux, background job, or listener)."""
-        mgr = _get_session_mgr()
-        result = mgr.kill_session(name)
-        return f"SESSION_KILLED: {name}\nSUCCESS: {result['success']}\nMESSAGE: {result.get('message', '')}"
-
-    @mcp.tool()
-    @audit_tool
-    def start_background_job(name: str, command: str) -> str:
-        """Start a named background job using nohup. The job runs detached from the terminal and logs output to a file. Use for: long-running scans, listeners, file transfers, brute force attacks that take hours, etc."""
-        # Target-IP lock: same gate as start_tmux_session / run_exploit_terminal.
-        _lock_reason = _target_lock_block(command, config)
-        if _lock_reason:
-            return f"BLOCKED: target-IP lock — {_lock_reason}"
-        mgr = _get_session_mgr()
-        result = mgr.start_background_job(name, command, cwd=workspace)
-        if result["success"]:
-            return (
-                f"JOB_STARTED: {name}\n"
-                f"TYPE: background\n"
-                f"COMMAND: {command}\n"
-                f"PID: {result.get('pid')}\n"
-                f"LOG: {result.get('log')}\n"
-                f"STATUS: running"
-            )
-        return f"JOB_FAILED: {result.get('error', 'unknown error')}"
-
-    @mcp.tool()
-    @audit_tool
-    def read_job_output(name: str, lines: int = 100) -> str:
-        """Read the last N lines from a background job's log file."""
-        mgr = _get_session_mgr()
-        result = mgr.read_job_output(name, lines=lines)
-        return (
-            f"JOB_OUTPUT: {name}\n"
-            f"RUNNING: {result.get('running', False)}\n"
-            f"LINES: {lines}\n"
-            f"OUTPUT:\n{result.get('output', '')}"
+    def _blocked(tool_name: str) -> str:
+        return sandbox_error_block(
+            SandboxUnsupportedError(
+                "persistent sessions are unavailable because this tool family has no sandbox-backed implementation"
+            ),
+            tool_name=tool_name,
         )
 
     @mcp.tool()
-    @audit_tool
-    def stop_background_job(name: str) -> str:
-        """Stop a named background job."""
-        mgr = _get_session_mgr()
-        result = mgr.stop_background_job(name)
-        return f"JOB_STOPPED: {name}\nSUCCESS: {result['success']}\nMESSAGE: {result.get('message', '')}"
+    @ctx.audit_tool
+    def start_tmux_session(name: str, command: str) -> str:
+        """Unavailable: persistent sessions are not yet backed by the sandbox worker."""
+        return _blocked("start_tmux_session")
 
     @mcp.tool()
-    @audit_tool
+    @ctx.audit_tool
+    def send_to_session(name: str, input_text: str) -> str:
+        """Unavailable: host sessions cannot be controlled by agent-generated input."""
+        return _blocked("send_to_session")
+
+    @mcp.tool()
+    @ctx.audit_tool
+    def read_session_output(name: str, lines: int = 100) -> str:
+        """Unavailable: session output is not exposed from host processes."""
+        return _blocked("read_session_output")
+
+    @mcp.tool()
+    @ctx.audit_tool
+    def kill_session(name: str) -> str:
+        """Unavailable: session lifecycle operations are not host-backed."""
+        return _blocked("kill_session")
+
+    @mcp.tool()
+    @ctx.audit_tool
+    def start_background_job(name: str, command: str) -> str:
+        """Unavailable: background jobs require a sandbox-backed implementation."""
+        return _blocked("start_background_job")
+
+    @mcp.tool()
+    @ctx.audit_tool
+    def read_job_output(name: str, lines: int = 100) -> str:
+        """Unavailable: job output is not read from host processes."""
+        return _blocked("read_job_output")
+
+    @mcp.tool()
+    @ctx.audit_tool
+    def stop_background_job(name: str) -> str:
+        """Unavailable: background jobs are not started on the host."""
+        return _blocked("stop_background_job")
+
+    @mcp.tool()
+    @ctx.audit_tool
     def start_listener(
         name: str,
         port: int,
@@ -130,98 +79,35 @@ def register_session_tools(mcp: Any, *, ctx: ToolContext) -> None:
         upstream_host: str = "",
         upstream_port: int = 0,
     ) -> str:
-        """Start a named network listener. Types: netcat (nc/ncat), socat, http (python http.server), tls (openssl/socat TLS), dns (dnscat2), https-beacon (socat TLS HTTP), socks_pivot (chisel/ligolo-ng/socat TCP forward). socks_pivot forwards to upstream_host:upstream_port which MUST be in allowed_targets (pivot lock)."""
-        # Phase 3 config-off guard for the new C2 listener types. The legacy
-        # netcat/socat/http types stay ungated (pre-existing behavior).
-        _NEW_LISTENER_TYPES = {"tls", "dns", "https-beacon", "socks_pivot"}
-        if listener_type in _NEW_LISTENER_TYPES:
-            listeners_cfg = ((config or {}).get("exploit", {}) or {}).get("listeners", {}) or {}
-            key = {"tls": "tls", "dns": "dns", "https-beacon": "https_beacon", "socks_pivot": "socks_pivot"}[
-                listener_type
-            ]
-            if not listeners_cfg.get(key, False):
-                return f"BLOCKED: exploit.listeners.{key} is disabled. Listener: {listener_type}"
-            # socks_pivot upstream must be allowlist-gated (the allowlist is the
-            # pivot lock — no forwarding to off-list hosts).
-            if listener_type == "socks_pivot" and upstream_host:
-                allowed, reason = check_targets_allowlist([upstream_host], config)
-                if not allowed:
-                    return f"BLOCKED: {reason}\nTOOL: start_listener\nUPSTREAM: {upstream_host}"
-        mgr = _get_session_mgr()
-        result = mgr.start_listener(name, port, listener_type, protocol, directory, upstream_host, upstream_port)
-        if result["success"]:
-            return (
-                f"LISTENER_STARTED: {name}\n"
-                f"TYPE: {listener_type}\n"
-                f"PORT: {port}/{protocol}\n"
-                f"PID: {result.get('pid')}\n"
-                f"LOG: {result.get('log')}\n"
-                f"STATUS: running"
-            )
-        return f"LISTENER_FAILED: {result.get('error', 'unknown error')}"
+        """Unavailable: listeners and pivot processes require sandbox support."""
+        return _blocked("start_listener")
 
     @mcp.tool()
-    @audit_tool
+    @ctx.audit_tool
     def read_listener_output(name: str, lines: int = 100) -> str:
-        """Read the last N lines from a listener's log file."""
-        mgr = _get_session_mgr()
-        result = mgr.read_listener_output(name, lines=lines)
-        return (
-            f"LISTENER_OUTPUT: {name}\n"
-            f"RUNNING: {result.get('running', False)}\n"
-            f"LINES: {lines}\n"
-            f"OUTPUT:\n{result.get('output', '')}"
-        )
+        """Unavailable: listener output is not read from host processes."""
+        return _blocked("read_listener_output")
 
     @mcp.tool()
-    @audit_tool
+    @ctx.audit_tool
     def stop_listener(name: str) -> str:
-        """Stop a named network listener."""
-        mgr = _get_session_mgr()
-        result = mgr.stop_listener(name)
-        return f"LISTENER_STOPPED: {name}\nSUCCESS: {result['success']}\nMESSAGE: {result.get('message', '')}"
+        """Unavailable: listeners are not started on the host."""
+        return _blocked("stop_listener")
 
     @mcp.tool()
-    @audit_tool
+    @ctx.audit_tool
     def list_sessions() -> str:
-        """List all persistent sessions (tmux, background jobs, listeners) with their status, PIDs, and types."""
-        mgr = _get_session_mgr()
-        sessions = mgr.list_all_sessions()
-        if not sessions:
-            return "SESSIONS: No active sessions."
-        lines = [f"SESSIONS: {len(sessions)} active", ""]
-        for s in sessions:
-            status_icon = "Ã¢â€”Â" if s.get("running") else "Ã¢â€”â€¹"
-            lines.append(
-                f"  {status_icon} [{s['type']}] {s['name']} Ã¢â‚¬â€ {s.get('status', 'unknown')} "
-                f"(pid={s.get('pid')}, cmd={s['command'][:60]})"
-            )
-            if s.get("log"):
-                lines.append(f"      log: {s['log']}")
-        return "\n".join(lines)
+        """Unavailable: host process/session inventory is not exposed to agents."""
+        return _blocked("list_sessions")
 
     @mcp.tool()
-    @audit_tool
+    @ctx.audit_tool
     def list_processes(pattern: str = "") -> str:
-        """List system processes. Optionally filter by a pattern string. Use to find running tools, check if a listener is active, or locate a specific process."""
-        mgr = _get_session_mgr()
-        processes = mgr.list_processes(pattern)
-        if not processes:
-            return f"PROCESSES: No processes matching '{pattern}'."
-        lines = [f"PROCESSES: {len(processes)} matching '{pattern}'", ""]
-        for p in processes:
-            if "error" in p:
-                lines.append(f"  ERROR: {p['error']}")
-            else:
-                lines.append(
-                    f"  PID {p['pid']} ({p['user']}) CPU:{p['cpu']}% MEM:{p['mem']}% Ã¢â‚¬â€ {p['command'][:80]}"
-                )
-        return "\n".join(lines)
+        """Unavailable: host process inventory is not exposed to agents."""
+        return _blocked("list_processes")
 
     @mcp.tool()
-    @audit_tool
+    @ctx.audit_tool
     def kill_process(name_or_pid: str) -> str:
-        """Kill a process by tracked name or raw PID. Use to stop runaway processes, kill old listeners, or clean up after exploitation."""
-        mgr = _get_session_mgr()
-        result = mgr.kill_process(name_or_pid)
-        return f"KILL_RESULT: {name_or_pid}\nSUCCESS: {result['success']}\nMESSAGE: {result.get('message', '')}"
+        """Unavailable: agent tools cannot signal host processes."""
+        return _blocked("kill_process")

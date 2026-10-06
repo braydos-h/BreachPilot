@@ -26,7 +26,7 @@ subsystem: mcp
 - **Registration source:** `tools/mcp_tools/terminal/__init__.py:31 register_terminal_tools(mcp, *, ctx)` — aggregates three sub-registrars; auto-discovered via `collect_tools()`, no edit to `mcp_exploit_server.py` needed.
 - **Workspace:** per-attempt dirs via `_attempt_dir(workspace)` (`tools/kernel/workspace.py`).
 - **Subprocess:** `_run_with_pgrp_timeout` (`tools/mcp_shared.py`) with POSIX `killpg` on timeout; live results are secret-masked via `_mask_secret_content` before return/emit.
-- **Sandbox:** execution tools funnel through `tools/mcp_tools/sandbox_exec.py` (`run_command_in_sandbox` / `run_argv_in_sandbox`) when `ctx.sandbox` is set, failing closed with `SANDBOX_*` blocks instead of falling back to host execution; otherwise the legacy host path runs.
+- **Sandbox:** execution tools always funnel through `tools/mcp_tools/sandbox_exec.py` (`run_command_in_sandbox` / `run_argv_in_sandbox`). Missing workers and sandbox errors fail closed with `SANDBOX_*` blocks; there is no legacy host execution path.
 
 ## Module split
 

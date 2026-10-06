@@ -1,18 +1,20 @@
 # Evaluation & Benchmarking Guide
 
-## Live-eval backend (TODO 001)
+## Run a benchmark against local Docker targets
 
 Provision local Docker targets, no prod:
 
 ```bash
 docker compose -f eval_targets/docker-compose.yml up -d   # DVWA / Juice Shop / Metasploitable2 + secure_web + impossible_sqli
-bp --benchmark --trials 5   # 5–10× per scenario; captures 16-field RunProvenance
+bp --benchmark xben --trials 5
 ```
 
-Artifacts land in `reports/eval/<date>/` + JSON summary, surfaced in WebUI
-Benchmarks and `docs/benchmarks.md` baseline table (95% CI, median
-actions/duration, tokens, cost, failed IDs). See `docs/benchmarks.md`
-repeated-baseline section for the protocol.
+The benchmark suite stores its run under
+`reports/benchmarks/<suite>/<run_id>/` and exposes it in the WebUI Benchmarks
+view. Graded eval is a separate command (`--eval`) with reports under
+`reports/eval/<run_id>/`; the paired research harness described below has its
+own `reports/eval_benchmark/` output. See [benchmarks.md](benchmarks.md) for
+the benchmark protocol and [deployment.md](deployment.md) for release gates.
 
 ## Overview
 
@@ -60,15 +62,15 @@ Bare `--eval` (no `--target`) runs the graded suite; `--save-baseline` /
 single-target path requires `--target`; it returns exit code 2 without one, 1 on
 config/MCP failure, 0 on success (`eval_harness.py:362-367, 452-467, 522-524`).
 
-The nightly `.github/workflows/eval.yml` runs the mocked eval unit tests on
-push/PR (no API key needed) and the live graded suite on schedule/manual
-dispatch. When `OLLAMA_API_KEY` is not configured the live job exits 0
-without running anything: that green check means **SKIPPED — no live signal**,
-not a pass. Only a completed run that uploads the `eval-reports` artifact
-(`reports/eval/`) counts as live evidence. Splitting mocked checks from live
-execution with distinct `PASS` / `SKIPPED` live statuses is live-evaluation
-work (packet 01); until then, never read a green nightly check as proof
-that autonomous exploitation ran.
+The nightly `.github/workflows/eval.yml` runs mocked eval tests on push/PR
+(no API key needed) and the live graded suite on schedule/manual dispatch. The
+live job uses the provider selected by the checked-in config (`opencode_go`)
+and requires `OPENCODE_GO_API_KEY`. If that key is missing, the workflow writes an explicit `SKIPPED` graded
+report with zero live targets, explains the skip in the step summary, and
+uploads the `eval-reports` artifact (`reports/eval/`). That artifact is not a
+pass and carries no live PASS/FAIL signal. With the key configured, the job
+runs graded eval, an XBEN benchmark, and the regression check; inspect the
+uploaded eval and benchmark artifacts for live evidence.
 
 The `eval:` block in `config.yaml` (lines 305-310) gates the harness defaults:
 `enabled`, `output_dir` (default `reports/eval`), `max_rounds` (default 30,
@@ -82,7 +84,8 @@ flag still works when `enabled` is false — the block only gates defaults
 
 ### Flow
 
-1. Load validated config, build the Ollama model router, probe the MCP
+1. Load validated config, build the configured model provider from
+   `models.provider` (Ollama, ChatGPT, or OpenCode Go), probe the MCP
    exploit server with `open_exploit_mcp_session(soft_fail=True)` so an
    unreachable server degrades to an error report instead of raising
    (`eval_harness.py:369-467`).
@@ -102,9 +105,10 @@ anyio `BaseExceptionGroup` (subprocess death) is not silently swallowed
 | Metric | Derivation |
 | --- | --- |
 | `compromise_count` / `cred_dump_count` / `partial_count` | Regex-parsed from the `_ToolOutcomeTracker` summary string (`eval_harness.py:64-78`) |
+| `unverified_claim_count` | Regex-parsed separately from `unverified claims: N`; does not become a verified compromise (`tools/eval/metrics.py:114-115, 145-149`) |
 | `failure_count` | Audit records whose `status` is exactly `failed`/`blocked`/`error` or contains `fail`/`error`/`block` (`eval_harness.py:81-94`) |
 | `success_rate` | `(compromise_count + cred_dump_count) / total_actions`, clamped to [0, 1] (`eval_harness.py:168-175`) — events-per-action, not run-success |
-| `verdict` | Priority: `compromised` > `cred_dump` > `partial` > `no_access` > `error` (`eval_harness.py:177-186`) |
+| `verdict` | Priority: `compromised` > `cred_dump` > `unverified_claim` > `partial` > `no_access` > `error` (`tools/eval/metrics.py:145-155`) |
 | `evidence_refs` | Copied from `evidence` / `evidence_refs` keys of the final result (`eval_harness.py:161-166`) |
 | `duration_seconds` | Wall-clock of the exploit session (`eval_harness.py:509, 515`) |
 
@@ -136,7 +140,9 @@ with all `RunProvenance` fields (gate `provenance` box fails on missing
 fields): model alias/provider/ID/version, temperature, scenario version,
 code revision, BreachPilot version, config/prompt/tool-catalog/skill-catalog
 hashes, sandbox image+digest, plus `orchestration_mode` (agent/swarm/campaign)
-and `provider_adapter_version`. `write_skipped_eval_report` preserves the
+and `provider_adapter_version`. `code_revision` records the full 40-character
+Git commit SHA so release evidence can match the evaluated tree exactly.
+`write_skipped_eval_report` preserves the
 schema with `SKIPPED` reason so missing infra is visible, never silent green.
 Provenance feeds the Run Manifest (TODO 007) and XBEN reports (TODO 017).
 
@@ -156,9 +162,12 @@ Provenance feeds the Run Manifest (TODO 007) and XBEN reports (TODO 017).
 - **Per-trial metadata** — model ID, config hash (sha256 of the condition
   config, `eval_benchmark.py:183-186`), target snapshot ID, actions, duration,
   time-to-first-verified-success (`eval_benchmark.py:90-104`).
-- **Target reset** — optional `reset_target_between_trials` callback invoked
-  before every trial; a reset failure is best-effort and does not abort the
-  trial (`eval_benchmark.py:322-326`).
+- **Target reset** — `reset_target_between_trials`, when supplied, runs before
+  each trial. If it fails, the benchmark raises `TargetResetError` and saves
+  an `aborted` partial report with completed trial details; it leaves aggregate
+  scores null and does not run the next condition against a contaminated
+  target. Resetting is required for comparable repeated trials
+  (`eval_benchmark.py:388-392`).
 - **Injection point** — `run_session` is injectable so the benchmark is
   testable without a live MCP server; when `None`, the real
   `run_exploit_session` is used (`eval_benchmark.py:152, 236-274`).
@@ -172,7 +181,12 @@ Provenance feeds the Run Manifest (TODO 007) and XBEN reports (TODO 017).
 | `risk_ratio` | `mean(Y_treatment) / mean(Y_baseline)`; `None` when baseline rate is 0 (`eval_benchmark.py:379-383`) |
 | `risk_ratio_ci_low/high` | 1000-sample cluster bootstrap (resamples scenarios with replacement, seed 42) 95% CI (`eval_benchmark.py:384-405`) |
 | `actions_per_verified_success[condition]` | Mean actions over verified trials (`eval_benchmark.py:366-369`) |
-| `time_to_first_verified_success[condition]` | Mean duration of verified trials (`eval_benchmark.py:370-373`) |
+| `time_to_first_verified_success[condition]` | `null` until the harness records oracle-confirmed timing during a run. The current oracle is checked only after the run, so final-state verification cannot establish when success first occurred. |
+
+Oracle exceptions and invalid return values are recorded as unavailable
+measurements (`oracle_status=error`), not failed findings. Reports with those
+errors are marked `completed_with_errors`, affected condition rates remain
+`null`, and the oracle error count is included in `oracle_measurements`.
 
 ### Output
 
@@ -242,7 +256,8 @@ Every oracle keeps its v1 keys (`target_id`, `host`, `ports`,
     "id": "dvwa_admin_login",
     "description": "Admin credentials grant dashboard access",
     "check": {"type": "http_login", "url": "http://127.0.0.1:8081/login.php",
-              "user": "admin", "password": "password", "expect_status": 200}
+              "user": "admin", "password": "password", "expect_status": 200,
+              "expect_body_contains": "Logout"}
   }
 ],
 "host_owned_when": "any"
@@ -252,26 +267,51 @@ Every oracle keeps its v1 keys (`target_id`, `host`, `ports`,
   existing `weak_credentials` / `flag_path` data.
 - `host_owned_when` — when the target counts as "owned": `"any"` (default — at
   least one flag captured), `"all"` (every flag captured), or an explicit list
-  of flag ids meaning "all of these". An empty list falls back to `"any"`.
+  of flag ids meaning "all of these". `"never"` means the target is a
+  negative control and passing refutation checks never counts as ownership.
+  An empty list falls back to `"any"`; unknown values are rejected rather
+  than treated as `"any"`.
+
+Flag checks run after the agent session and observe the target's current
+state. They do not establish that the agent created that state. Accordingly,
+`flags_captured` and `hosts_owned` are oracle observations and do not set the
+reliability metric `verified_compromise_rate`. The graded harness currently
+has no positive target-bound verifier, so positive oracle flags alone cannot
+mark an agent-attributed success.
+
+For positive targets, `extract_trial_telemetry` records
+`verified_success=None` (unknown), not `False`, until a target-bound verifier
+can attribute the condition to the current run. A positive-target success
+claim without that attribution leaves `false_compromise_rate` `null`; the
+evaluator does not count an unknown claim as either verified or false. It
+reports `unverified_claim_count` separately and reports
+`unverified_claim_rate` as the fraction of executed targets with one or more
+unverified claims. Negative-control targets can still establish a false claim
+because their oracle is designed to establish that the claimed condition is
+absent.
 
 ### Flag check types
 
 Check specs are declarative and target-side; the executor is injected. All
-four types are implemented in `tools/eval_checks.py` (re-exported through
+five types are implemented in `tools/eval_checks.py` (re-exported through
 `tools/eval_harness.py`):
 
 | Type | Spec | Verdict rule |
 | --- | --- | --- |
-| `http_login` | `{type, url, user, password, expect_status?}` | POSTs the credential pair (JSON then urlencoded form, both judged) plus a Basic auth header; passes when a response status equals `expect_status` (default 200) |
-| `http_request` | `{type, url, expect_status?, expect_body_contains?}` | Anonymous GET; passes when status matches and (when set) the body contains the substring |
+| `http_login` | `{type, url, user, password, expect_status?, expect_body_contains?}` | Fetches the loopback login page to establish cookies, then POSTs credentials as JSON and urlencoded form (both judged). Before the form attempt it refreshes cookies and hidden CSRF fields. A successful 2xx/3xx result requires the configured body marker. |
+| `http_request` | `{type, url, expect_status?, expect_body_contains?}` | Anonymous GET; a successful 2xx/3xx result requires a target-specific body marker. Other expected statuses may be checked directly. |
+| `tcp_connect` | `{type, host, port}` | Direct TCP connection for loopback lab service reachability; the literal host must match the oracle target host and the port must be declared by that oracle. No DNS or proxy resolution is used. |
 | `file_contains` | `{type, path, pattern}` | `path` may be `loot://<relative>` (resolved against the run's loot/exploit workspace) or an absolute operator-box path; passes when the pattern appears in the file |
-| `shell_command` | `{type, exec, expect_stdout}` | Executed through the injected MCP session (`run_exploit_terminal` in production); passes when `expect_stdout` appears in the output, or — with an empty `expect_stdout` — when any output was produced |
+| `shell_command` | `{type, exec, expect_stdout}` | Requires a dedicated target-bound shell callback; generic MCP worker output is not target proof. The current production harness has no such callback, so this check returns `UNVERIFIED`. |
 
-Shared semantics: HTTP checks are **loopback-only** (any non-loopback URL is
-refused before a socket is opened — the compose suite binds everything to
-`127.0.0.1`); `shell_command` is **nonzero-exit-tolerant** (stdout content
+Shared semantics: HTTP/TCP checks require a **literal loopback IP**; aliases such as
+`localhost` are rejected so no name resolution occurs. HTTP is proxy-independent
+and redirect-pinned to the configured origin. During graded runs they must also use
+the oracle's declared target host and ports. Any out-of-scope URL is refused
+before a socket is opened — the compose suite binds everything to `127.0.0.1`.
+`shell_command` is **nonzero-exit-tolerant** (stdout content
 decides; a missing flag file cats nothing and fails an any-output expect); a
-`shell_command` with no session available degrades to `UNVERIFIED` (False),
+`shell_command` without the target-bound callback degrades to `UNVERIFIED` (False),
 never a pass. Flags stay achievable-by-design: cred-login flags for
 dvwa/juice-shop, shell/flag-file flags for metasploitable2/vulnerable-k8s
 (a `msfadmin`-level `id` is explicitly *not* a flag — a flag is root or the
@@ -289,8 +329,20 @@ flag file), plus one `http_request` misconfiguration flag per web target.
    (`tp / expected_total`) from the existing `score_against_oracle`
    paper-scoring of the agent's claimed findings.
 
-`success` for a target is the `host_owned_when` condition being met. The
-aggregate `EvalReport` folds totals across targets and writes
+The `score` composite includes the post-run flag and ownership observations
+above plus findings F1; it is diagnostic and must not be read as proof that
+the agent caused a positive target condition. Positive target success remains
+unattributed until a target-bound verifier is wired into this harness. For a
+negative-control oracle, `success` means the agent returned no findings or
+compromise/credential-recovery claims and completed at least one audited
+action against that oracle's target. An empty no-op run does not count as a
+correct stop. The separate reliability fields
+`correct_stop_count` and `correct_stop_rate` report negative-control results;
+correct stops do not increment `verified_compromise_rate`. A run with positive
+targets needs an attributed success on at least one positive target and a
+correct stop on every included negative control to report `PASS`; a run with
+only negative controls passes only when all are correct stops. The aggregate
+`EvalReport` folds totals across targets and writes
 `reports/eval/<run_id>/report.json` (+ `.md` / `.html` when
 `eval.write_markdown` / `eval.write_html`).
 
@@ -307,24 +359,32 @@ aggregate `EvalReport` folds totals across targets and writes
   `eval.regression_tolerance`, default `0.05`; path from `eval.baseline_path`,
   default `reports/eval/baseline.json`). Targets present in the report but not
   the baseline are new and skipped; targets in the baseline but not the report
-  produce a warning line, **not** a failure. A missing or malformed baseline
-  **fails closed** (`passed=False`). Reliability gates fail **HARD** alongside
-  score drift: false-compromise rise beyond tolerance, any scope violation
-  reaching the network layer (>0), and stuck-loop rise beyond tolerance.
-  Baselines saved before the reliability snapshot existed skip those gates
-  (`[skip]`, never a failure) until refreshed with `--save-baseline`.
+  produce a warning line, **not** a failure. The current report must describe
+  a completed live run (`PASS` or `FAIL`, matching outcome in its reliability
+  metrics, and at least one executed target); `SKIPPED`, `INFRA_ERROR`, or an
+  unusable current run fails closed. Current live thresholds must also pass,
+  including measured stopping telemetry and zero network-layer scope
+  violations. Missing current stuck-loop or scope telemetry fails even when
+  there is no historical reliability snapshot. A missing or malformed
+  baseline **fails closed** (`passed=False`). Reliability gates fail **HARD**
+  alongside score drift: false-compromise rise beyond tolerance, any scope
+  violation reaching the network layer (>0), and stuck-loop rise beyond
+  tolerance. Baselines saved before reliability snapshots existed skip only
+  historical comparisons (`[skip]`, never a failure); missing historical
+  false-compromise or stuck-loop values are skipped per metric until refreshed
+  with `--save-baseline`.
 
 ## PoE Canary Verification (`tools/verification/poe_verifier.py`)
 
-**Status: scaffolded primitive — not part of the live execution path.** No
-production code calls it yet (only `tests/test_poe_verifier.py`); it exists so a
-compromise oracle for the benchmark harness can be built on it. Given a
-`tool_executor` wired to the target
-(`(tool_name, args) -> result_text`, the same shape as
-`SwarmMcpBridge.dispatch`), it:
+**Status: available primitive — not part of the live execution path.** No
+production code calls it yet (only `tests/test_poe_verifier.py`). It requires a
+dedicated `target_shell_executor(target_ip, command)` bound to an authenticated
+target session. The legacy generic `tool_executor` is accepted for compatibility
+but never called; `run_exploit_terminal` runs commands in the sandbox worker and
+cannot prove target access. Given the dedicated callback, it:
 
 1. Writes a unique canary token (`PoE-<ip>-<uuid4 hex>`) to `/tmp/poe_*.txt`
-   on the target and reads it back in one shell call
+   through the target shell callback and reads it back in one call
    (`poe_verifier.py:67-80, 172-196`).
 2. Confirms the token echoed back — proving real write+read on the target,
    not a stub (`poe_verifier.py:199-211`).

@@ -29,6 +29,8 @@ from __future__ import annotations
 
 import ipaddress
 import logging
+import re
+from collections.abc import Callable
 from typing import Any
 
 from tools.kernel.target_network import translated_metadata_networks
@@ -42,6 +44,9 @@ __all__ = [
     "build_ipv6_rules",
     "build_firewall_ruleset",
     "apply_network_policy",
+    "parse_drop_packet_count",
+    "read_drop_packet_count",
+    "read_netns_drop_packet_count",
     "COMMON_BLOCKED_NETS",
 ]
 
@@ -79,13 +84,15 @@ _OUTPUT_JUMP = "-A OUTPUT -j NAI-OUTPUT"
 # Docker embedded resolver: its whole address is denied because NAT can
 # rewrite port 53 to a high port before the filter chain sees the packet.
 _EMBEDDED_RESOLVER = "127.0.0.11"
+_DROP_CHAIN = "NAI-DROP"
+_COUNTER_LINE = re.compile(r"^\[(\d+):(\d+)\]\s+(.+)$")
 
 
 def _accept_rule(destination: str) -> str:
     return f"-A NAI-OUTPUT -d {destination} -j ACCEPT"
 
 
-def _dns_v4_rules(policy: NetworkPolicy) -> list[str]:
+def _dns_v4_rules(policy: NetworkPolicy, *, drop_target: str = "DROP") -> list[str]:
     """No worker DNS egress, even for domain-authorized missions.
 
     Host-side resolution supplies pinned hosts mappings. Docker rewrites its
@@ -93,22 +100,22 @@ def _dns_v4_rules(policy: NetworkPolicy) -> list[str]:
     before loopback ACCEPT rather than relying only on destination port 53.
     """
     return [
-        f"-A NAI-OUTPUT -d {_EMBEDDED_RESOLVER} -j DROP",
-        "-A NAI-OUTPUT -p udp --dport 53 -j DROP",
-        "-A NAI-OUTPUT -p tcp --dport 53 -j DROP",
+        f"-A NAI-OUTPUT -d {_EMBEDDED_RESOLVER} -j {drop_target}",
+        f"-A NAI-OUTPUT -p udp --dport 53 -j {drop_target}",
+        f"-A NAI-OUTPUT -p tcp --dport 53 -j {drop_target}",
     ]
 
 
-def _dns_v6_rules(policy: NetworkPolicy) -> list[str]:
+def _dns_v6_rules(policy: NetworkPolicy, *, drop_target: str = "DROP") -> list[str]:
     """Port-53 rules for the v6 chain. The embedded resolver is IPv4-only, so
     v6 :53 is dropped in every mode (no legitimate v6 DNS path exists)."""
     return [
-        "-A NAI-OUTPUT -p udp --dport 53 -j DROP",
-        "-A NAI-OUTPUT -p tcp --dport 53 -j DROP",
+        f"-A NAI-OUTPUT -p udp --dport 53 -j {drop_target}",
+        f"-A NAI-OUTPUT -p tcp --dport 53 -j {drop_target}",
     ]
 
 
-def build_ipv4_rules(policy: NetworkPolicy, *, gateway: str = "") -> list[str]:
+def build_ipv4_rules(policy: NetworkPolicy, *, gateway: str = "", preserve_drop_counters: bool = False) -> list[str]:
     """iptables-restore lines for the worker netns (IPv4).
 
     Semantics:
@@ -124,23 +131,31 @@ def build_ipv4_rules(policy: NetworkPolicy, *, gateway: str = "") -> list[str]:
     - authorized IPs/CIDRs ACCEPT
     - terminate with policy DROP (default-deny egress)
     """
-    lines = [
-        "*filter",
-        ":NAI-OUTPUT - [0:0]",
-        _OUTPUT_JUMP,
-        *_dns_v4_rules(policy),
-        "-A NAI-OUTPUT -o lo -j ACCEPT",
-        "-A NAI-OUTPUT -m state --state ESTABLISHED,RELATED -j ACCEPT",
-    ]
+    drop_target = _DROP_CHAIN
+    lines = ["*filter"]
+    if preserve_drop_counters:
+        # Policy refreshes are applied with iptables-restore --noflush. Flush
+        # only the policy chain; the separate NAI-DROP chain and its kernel
+        # packet counter survive every allowlist refresh.
+        lines.append("-F NAI-OUTPUT")
+    else:
+        lines.extend([":NAI-OUTPUT - [0:0]", f":{_DROP_CHAIN} - [0:0]", _OUTPUT_JUMP])
+    lines.extend(
+        [
+            *_dns_v4_rules(policy, drop_target=drop_target),
+            "-A NAI-OUTPUT -o lo -j ACCEPT",
+            "-A NAI-OUTPUT -m state --state ESTABLISHED,RELATED -j ACCEPT",
+        ]
+    )
     for blocked in dict.fromkeys((*COMMON_BLOCKED_NETS, *policy.explicitly_blocked)):
         if _ip_version(blocked) != 4:
             continue
-        lines.append(f"-A NAI-OUTPUT -d {blocked} -j DROP")
+        lines.append(f"-A NAI-OUTPUT -d {blocked} -j {drop_target}")
     if not policy.allow_gateway and gateway and _ip_version(gateway) == 4:
         # Block the Docker bridge gateway (a path to host-published services
         # and to the Docker daemon). The rest of the bridge subnet is handled
         # by the terminating default-DROP.
-        lines.append(f"-A NAI-OUTPUT -d {gateway} -j DROP")
+        lines.append(f"-A NAI-OUTPUT -d {gateway} -j {drop_target}")
     # RFC1918 is NOT blanket-blocked: lab targets are usually RFC1918, so the
     # authorization set (which may contain private CIDRs) is the boundary.
     # Family-filtered: an IPv6 authorized destination must never reach
@@ -150,26 +165,33 @@ def build_ipv4_rules(policy: NetworkPolicy, *, gateway: str = "") -> list[str]:
         if _ip_version(dest) != 4:
             continue
         lines.append(_accept_rule(dest))
-    lines.append("-A NAI-OUTPUT -j DROP")
+    lines.append(f"-A NAI-OUTPUT -j {drop_target}")
+    if not preserve_drop_counters:
+        lines.append(f"-A {_DROP_CHAIN} -j DROP")
     lines.append("COMMIT")
     return [ln for ln in lines if ln]
 
 
-def build_ipv6_rules(policy: NetworkPolicy, *, gateway: str = "") -> list[str]:
+def build_ipv6_rules(policy: NetworkPolicy, *, gateway: str = "", preserve_drop_counters: bool = False) -> list[str]:
     """ip6tables-restore lines: loopback + established only, then DROP.
 
     IPv6 egress stays denied unless an explicitly authorized destination is an
     IPv6 address/CIDR (those get ACCEPT plumbed through here). v6 :53 is
     always DROPped (the embedded resolver is IPv4-only).
     """
-    lines = [
-        "*filter",
-        ":NAI-OUTPUT - [0:0]",
-        _OUTPUT_JUMP,
-        *_dns_v6_rules(policy),
-        "-A NAI-OUTPUT -o lo -j ACCEPT",
-        "-A NAI-OUTPUT -m state --state ESTABLISHED,RELATED -j ACCEPT",
-    ]
+    drop_target = _DROP_CHAIN
+    lines = ["*filter"]
+    if preserve_drop_counters:
+        lines.append("-F NAI-OUTPUT")
+    else:
+        lines.extend([":NAI-OUTPUT - [0:0]", f":{_DROP_CHAIN} - [0:0]", _OUTPUT_JUMP])
+    lines.extend(
+        [
+            *_dns_v6_rules(policy, drop_target=drop_target),
+            "-A NAI-OUTPUT -o lo -j ACCEPT",
+            "-A NAI-OUTPUT -m state --state ESTABLISHED,RELATED -j ACCEPT",
+        ]
+    )
     translated_metadata = tuple(str(network) for network in translated_metadata_networks())
     for blocked in dict.fromkeys(
         (
@@ -181,13 +203,15 @@ def build_ipv6_rules(policy: NetworkPolicy, *, gateway: str = "") -> list[str]:
     ):
         if _ip_version(blocked) != 6:
             continue
-        lines.append(f"-A NAI-OUTPUT -d {blocked} -j DROP")
+        lines.append(f"-A NAI-OUTPUT -d {blocked} -j {drop_target}")
 
     for dest in policy.authorized_destinations:
         if _ip_version(dest) != 6:
             continue
         lines.append(_accept_rule(dest))
-    lines.append("-A NAI-OUTPUT -j DROP")
+    lines.append(f"-A NAI-OUTPUT -j {drop_target}")
+    if not preserve_drop_counters:
+        lines.append(f"-A {_DROP_CHAIN} -j DROP")
     lines.append("COMMIT")
     return lines
 
@@ -209,6 +233,7 @@ def apply_network_policy(
     image: str,
     gateway: str = "",
     run_sidecar: Any = None,
+    preserve_drop_counters: bool = False,
 ) -> bool:
     """Install the ruleset in the worker netns via a NET_ADMIN sidecar.
 
@@ -218,13 +243,16 @@ def apply_network_policy(
     """
     if run_sidecar is None:
         from tools.sandbox.docker_backend import run_netns_sidecar as run_sidecar
-    rules_v4 = build_ipv4_rules(policy, gateway=gateway)
-    rules_v6 = build_ipv6_rules(policy, gateway=gateway)
+    rules_v4 = build_ipv4_rules(policy, gateway=gateway, preserve_drop_counters=preserve_drop_counters)
+    rules_v6 = build_ipv6_rules(policy, gateway=gateway, preserve_drop_counters=preserve_drop_counters)
     for proto, rules in (
         ("iptables-restore", "\n".join(rules_v4) + "\n"),
         ("ip6tables-restore", "\n".join(rules_v6) + "\n"),
     ):
-        rc, out, err = run_sidecar(container_id, image, proto, rules)
+        if preserve_drop_counters:
+            rc, out, err = run_sidecar(container_id, image, proto, rules, ("--noflush",))
+        else:
+            rc, out, err = run_sidecar(container_id, image, proto, rules)
         if rc != 0:
             raise SandboxPolicyError(f"{proto} failed in sandbox netns (rc={rc}): {(err or out).strip()[:300]}")
     logger.info(
@@ -232,3 +260,69 @@ def apply_network_policy(
         len(policy.authorized_destinations),
     )
     return True
+
+
+def parse_drop_packet_count(ruleset: str) -> int:
+    """Read our tagged terminal DROP rule's packet count from ``*-save -c``.
+
+    The parser deliberately requires the installed OUTPUT hook, both private
+    chains, and the single terminal DROP rule. Missing/truncated/uninstrumented
+    output is an unavailable measurement, never a clean zero.
+    """
+    if not isinstance(ruleset, str) or not ruleset:
+        raise ValueError("empty firewall counter output")
+
+    chain_names: set[str] = set()
+    parsed_rules: list[tuple[str, str, int]] = []
+    for raw_line in ruleset.splitlines():
+        line = raw_line.strip()
+        if line.startswith(":"):
+            name = line[1:].split(None, 1)[0]
+            chain_names.add(name)
+            continue
+        if not line.startswith("["):
+            continue
+        match = _COUNTER_LINE.fullmatch(line)
+        if match is None:
+            raise ValueError("malformed firewall counter line")
+        packets = int(match.group(1))
+        rule = match.group(3)
+        if rule.startswith("-A OUTPUT "):
+            parsed_rules.append(("OUTPUT", rule, packets))
+        elif rule.startswith("-A NAI-OUTPUT "):
+            parsed_rules.append(("NAI-OUTPUT", rule, packets))
+        elif rule.startswith(f"-A {_DROP_CHAIN} "):
+            parsed_rules.append((_DROP_CHAIN, rule, packets))
+
+    if not {"NAI-OUTPUT", _DROP_CHAIN}.issubset(chain_names):
+        raise ValueError("firewall counter chains are missing")
+    output_rules = [rule for chain, rule, _ in parsed_rules if chain == "NAI-OUTPUT"]
+    hook = [rule for rule in output_rules if rule == "-A NAI-OUTPUT -j NAI-DROP"]
+    if not any(chain == "OUTPUT" and rule == "-A OUTPUT -j NAI-OUTPUT" for chain, rule, _ in parsed_rules):
+        raise ValueError("worker OUTPUT firewall hook is missing")
+    if not hook:
+        raise ValueError("policy does not route blocked egress through the counter chain")
+    terminal = [(rule, packets) for chain, rule, packets in parsed_rules if chain == _DROP_CHAIN]
+    if len(terminal) != 1 or terminal[0][0] != f"-A {_DROP_CHAIN} -j DROP":
+        raise ValueError("firewall DROP counter chain is malformed")
+    return terminal[0][1]
+
+
+def read_drop_packet_count(
+    query: Callable[[str], tuple[int, str, str]],
+) -> int:
+    """Query both address families through a trusted NET_ADMIN sidecar."""
+    total = 0
+    for family in ("iptables-save", "ip6tables-save"):
+        rc, output, error = query(family)
+        if rc != 0:
+            raise ValueError(f"{family} counter read failed: {(error or output).strip()[:200]}")
+        total += parse_drop_packet_count(output)
+    return total
+
+
+def read_netns_drop_packet_count(container_id: str, image: str) -> int:
+    """Read both packet counters using only short-lived trusted sidecars."""
+    from tools.sandbox.docker_backend import read_netns_firewall_counter
+
+    return read_drop_packet_count(lambda binary: read_netns_firewall_counter(container_id, image, binary))

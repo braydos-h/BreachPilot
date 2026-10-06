@@ -19,7 +19,7 @@ subsystem: mcp
 
 | Tool | Params | Result Shape | Notes |
 |------|--------|--------------|-------|
-| `spawn_subagent` | `phase: str` (`recon|analysis|exploit|post_exploit`), `target: str`, `objective: str`, `services: list[str]|None`, `known_cves: list[str]|None` | `{"subagent_id":"subagent-phase-8hex","status":"running"}` JSON | Validates phase set else `BLOCKED: phase must be one of ...`; validates target via `validate_target_or_ip` else `BLOCKED: invalid target`; then `check_targets_allowlist([target], config)` — off-list → `BLOCKED: target '...' not in allowlist: ...` even before task creation (the crucial parallel invariant: sub-agent inherits same allowlist). Calls `await _SubagentManager(workspace, config).spawn(...)` which builds `task_dict = {task_id, phase, target, objective, services, known_cves, _result_path: workspace/subagents/<id>.json}` and `asyncio.create_task(_run())` with strong ref; pre-populates `_results[id].status=running` so `list_subagents` shows immediately. `_run` does `asyncio.to_thread(orch.route, task_dict)` — `SwarmOrchestrator.route()` Path B (in-process ReconPipeline/NVD/attack modules, no `ClientSession` needed), writes atomic `tmp→replace` JSON result with `status/output/error/findings/new_tasks/execution_time`, then ` _results[id]=dict` + `_tasks.pop`. |
+| `spawn_subagent` | `phase: str` (`recon|analysis|exploit|post_exploit`), `target: str`, `objective: str`, `services: list[str]|None`, `known_cves: list[str]|None` | `{"subagent_id":"subagent-phase-8hex","status":"running"}` JSON | Validates phase and target, then applies `check_targets_allowlist([target], config)` before spawning. Calls `_get_manager(workspace, config, ctx)` so the server's `ToolContext` is carried into the swarm. It builds the task/result path and creates a strongly referenced asyncio task. `_run` dispatches `orch.route` via `asyncio.to_thread`; recon uses `sandbox_recon_host` through that context and has no `ReconPipeline` fallback, while research and module work use their in-process adapters. A live MCP `ClientSession` is not required. The result is atomically written under `workspace/subagents/` and cached for `await_subagent`/`list_subagents`. |
 | `await_subagent` | `subagent_id: str`, `timeout_seconds: int=600` (capped 1..3600) | JSON `status: running|complete|failed|timeout|unknown` + `output/findings/error/partial` | Looks up `_tasks[subagent_id]` + cached `_results`; if `task is None` returns cached or `unknown: no sub-agent with id`. Else `asyncio.wait_for(task, timeout)` — `TimeoutError` → `status: timeout error: sub-agent did not finish within Xs + partial=cached`, other exception → `failed: sub-agent task raised: ...`. On success returns ` _results[subagent_id]` or `unknown: ... finished but no result`. |
 | `list_subagents` | — | JSON array `[{subagent_id, phase, target, objective, status, started_at, completed_at?}]` | Non-blocking: returns `list(_results.values())` snapshot without acquiring per-task lock (poll call). |
 
@@ -27,11 +27,11 @@ subsystem: mcp
 
 `tools/mcp_tools/parallel_agents.py:56-234` — process-singleton one-per-MCP-server (lazy via `_get_manager`, `parallel_agents.py:243-247`):
 
-- `__init__(workspace, config)`: `_tasks: dict[id, Task]`, `_results: dict[id, dict]`, `_lock = asyncio.Lock()`, `_orchestrator=None` lazy.
-- `_get_orchestrator()`: builds `SwarmOrchestrator(context={config, workspace_root=workspace, reports_dir=workspace}, critic_enabled=False, reflection_enabled=False, state_path=workspace/subagent_swarm_state.json)` once.
+- `__init__(workspace, config, tool_context)`: stores the MCP `ToolContext` alongside `_tasks`, `_results`, and the lock.
+- `_get_orchestrator()`: builds `SwarmOrchestrator(context={config, workspace_root=workspace, reports_dir=workspace, tool_context}, critic_enabled=False, reflection_enabled=False, state_path=workspace/subagent_swarm_state.json)` once.
 - `spawn(...)` / `await_result(...)` / `list_live()` as above.
 
-Sub-agent uses Path B (no live MCP `ClientSession`) so it never needs the main loop's session; results are per-subagent JSON under `workspace/subagents/<id>.json`.
+Sub-agents use Path B and do not need the live MCP `ClientSession`; their recon agent still receives the server `ToolContext` and routes target scans through the sandbox adapter. Results are per-subagent JSON under `workspace/subagents/<id>.json`.
 
 ## Dependencies
 

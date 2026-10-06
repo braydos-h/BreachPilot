@@ -3,6 +3,7 @@ version: 0.1.0
 description: Passive Shodan OSINT plugin - port/banner/CVE enrichment from the Shodan REST API without touching the target. Advisory-only.
 author: BreachPilot
 capabilities: [mcp_tool, config]
+provides_mcp_tools: [shodan_host_lookup, shodan_search]
 # Lab build: enabled by default. Two-gate still holds -- the MCP tool refuses
 # with BLOCKED: when recon.shodan_api_key is unset, so the surface vanishes
 # without the key. Disable via config plugins.disabled list.

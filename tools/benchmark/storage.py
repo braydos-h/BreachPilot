@@ -121,6 +121,7 @@ class BenchmarkStorage:
         environment: RunEnvironment,
         scenario_ids: list[str],
         manifest: dict[str, Any] | None = None,
+        skip_reason: str = "",
     ) -> Path:
         """Write final run.json + summary.json (and refresh the suite index)."""
         run_dir = self.run_dir(suite, run_id)
@@ -135,9 +136,15 @@ class BenchmarkStorage:
         }
         if manifest is not None:
             payload["replay_manifest"] = manifest
+        if skip_reason:
+            payload["skip_reason"] = skip_reason
         _atomic_write_json(run_dir / "run.json", payload)
         if summary is not None:
-            _atomic_write_json(run_dir / "summary.json", summary.to_dict())
+            summary_payload = summary.to_dict()
+            if skip_reason:
+                summary_payload["status"] = "SKIPPED"
+                summary_payload["skip_reason"] = skip_reason
+            _atomic_write_json(run_dir / "summary.json", summary_payload)
             self._update_index(suite, run_id, summary, status)
         return run_dir
 

@@ -1,6 +1,6 @@
-"""Regression coverage for DNS-pinned, host-side recon MCP tools.
+"""Regression coverage for DNS-pinned, worker-contained recon MCP tools.
 
-All name resolution and network sinks are replaced with local fakes; these
+All name resolution and worker execution are replaced with local fakes; these
 tests never open sockets or invoke scanner binaries.
 """
 
@@ -55,150 +55,170 @@ def _make_server(tmp_path: Path, allowed_targets: list[str]):
 
 
 @pytest.mark.asyncio
-async def test_recon_mcp_tools_use_one_pinned_address_for_host_io(tmp_path: Path, monkeypatch):
-    """Every host-side recon sink receives the same single resolved address."""
+async def test_target_active_recon_uses_pinned_worker_argv_and_osint_is_passive(tmp_path: Path, monkeypatch):
+    """Active tools pass the pinned IP to the worker and preserve hostname scope."""
     import tools.mcp_tools.recon as recon_module
-    import tools.socket_scan as socket_scan
 
     target = "recon-pin.example.com"
     pinned_ip = "93.184.216.34"
     resolve_calls: list[str] = []
-    sinks: dict[str, list[str] | str] = {}
+    worker_calls: list[tuple[list[str], dict]] = []
+    osint_calls: list[tuple[str, str]] = []
+    nmap_xml = """<?xml version="1.0"?>
+<nmaprun><host><status state="up"/><address addr="93.184.216.34" addrtype="ipv4"/>
+<ports><port protocol="tcp" portid="22"><state state="open"/><service name="ssh" product="OpenSSH" version="9.1 Linux"/></port>
+<port protocol="tcp" portid="80"><state state="open"/><service name="http" product="Apache httpd" version="2.4.57"/></port>
+<port protocol="tcp" portid="443"><state state="closed"/></port></ports></host></nmaprun>"""
 
     def fake_resolve(host: str, **_kwargs):
         resolve_calls.append(host)
         return pinned_ip, host
 
-    class FakeSocket:
-        def __init__(self, *_args, **_kwargs):
-            pass
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *_args):
-            return None
-
-        def settimeout(self, _timeout):
-            pass
-
-        def connect_ex(self, address):
-            sinks.setdefault("socket_connect_ex", []).append(address[0])
-            return 1
-
-        def connect(self, address):
-            sinks.setdefault("socket_connect", []).append(address[0])
-
-        def sendall(self, _data):
-            pass
-
-        def recv(self, _size):
-            return b""
-
-    def fake_ping(command, **_kwargs):
-        sinks["ping"] = command[-1]
-        return SimpleNamespace(stdout="", stderr="", returncode=1)
-
-    def fake_socket_scan(host, _ports):
-        sinks["quick_scan"] = host
-        return []
-
-    class FakePipeline:
-        def __init__(self, *_args, **_kwargs):
-            pass
-
-        async def recon_host(self, host):
-            sinks["full_recon"] = host
-            return recon_module.HostReconResult(target_ip=host)
-
-        async def recon_udp(self, host, *, top_ports):
-            sinks["udp_recon"] = host
-            return recon_module.HostReconResult(target_ip=host)
+    def fake_worker(_ctx, argv, **kwargs):
+        worker_calls.append((argv, kwargs))
+        return True, SimpleNamespace(
+            stdout=nmap_xml,
+            stderr="",
+            exit_code=0,
+            duration_seconds=0.25,
+            timed_out=False,
+            status="completed",
+        )
 
     def fake_osint(host, *, hostname):
-        sinks["osint"] = host
-        sinks["osint_hostname"] = hostname
+        osint_calls.append((host, hostname))
         return {"target_ip": host, "hostname": hostname}
 
     _clear_allowlist_env(monkeypatch)
     mcp = _make_server(tmp_path, [target])
     monkeypatch.setattr(recon_module, "resolve_target_bounded", fake_resolve)
-    monkeypatch.setattr(recon_module.subprocess, "run", fake_ping)
-    monkeypatch.setattr(recon_module.socket, "socket", FakeSocket)
-    monkeypatch.setattr(socket_scan, "socket_scan_sync", fake_socket_scan)
-    monkeypatch.setattr(recon_module, "ReconPipeline", FakePipeline)
+    monkeypatch.setattr(recon_module, "run_argv_in_sandbox", fake_worker)
     monkeypatch.setattr("tools.recon_osint.run_osint", fake_osint)
 
-    await mcp.call_tool("check_os", {"target_ip": target})
-    await mcp.call_tool("quick_scan", {"target_ip": target, "ports": "80"})
-    await mcp.call_tool("run_full_recon", {"target_ip": target})
-    await mcp.call_tool("get_service_fingerprint", {"target_ip": target, "port": 48191})
-    await mcp.call_tool("run_udp_recon", {"target_ip": target, "top_ports": 10})
-    await mcp.call_tool("run_osint_recon", {"target_ip": target})
+    os_text = _text(await mcp.call_tool("check_os", {"target_ip": target}))
+    quick_text = _text(await mcp.call_tool("quick_scan", {"target_ip": target, "ports": "80,443"}))
+    full_text = _text(await mcp.call_tool("run_full_recon", {"target_ip": target}))
+    fingerprint = _text(await mcp.call_tool("get_service_fingerprint", {"target_ip": target, "port": 443}))
+    udp_text = _text(await mcp.call_tool("run_udp_recon", {"target_ip": target, "top_ports": 10}))
+    osint_text = _text(await mcp.call_tool("run_osint_recon", {"target_ip": target}))
 
     assert resolve_calls == [target] * 6
-    assert sinks["ping"] == pinned_ip
-    assert sinks["quick_scan"] == pinned_ip
-    assert sinks["full_recon"] == pinned_ip
-    assert sinks["udp_recon"] == pinned_ip
-    assert sinks["osint"] == pinned_ip
-    assert sinks["osint_hostname"] == target
-    assert set(sinks["socket_connect_ex"]) == {pinned_ip}
-    assert set(sinks["socket_connect"]) == {pinned_ip}
+    assert [kwargs["tool_name"] for _argv, kwargs in worker_calls] == [
+        "check_os",
+        "quick_scan",
+        "run_full_recon",
+        "get_service_fingerprint",
+    ]
+    for argv, kwargs in worker_calls:
+        assert argv[-1] == pinned_ip
+        assert target not in argv
+        assert kwargs["target_ip"] == target
+        assert kwargs["targets"] == [target]
+    assert "OS_VERDICT: LINUX" in os_text
+    assert "TTL: N/A" in os_text
+    assert "Port 80/tcp OPEN" in quick_text
+    assert "sandbox worker" in quick_text
+    assert "SCAN_TOOL: nmap-worker" in full_text
+    assert "secondary service-specific enumeration was not run" in full_text
+    assert "STATE: not reported open" in fingerprint
+    assert "SANDBOX_UNSUPPORTED" in udp_text
+    assert "EXECUTED: nowhere" in udp_text
+    assert osint_calls == [(pinned_ip, target)]
+    assert "OSINT: completed" in osint_text
+
+
+@pytest.mark.asyncio
+async def test_shared_campaign_recon_adapter_fails_closed_without_worker(monkeypatch):
+    import tools.mcp_tools.recon as recon_module
+
+    _clear_allowlist_env(monkeypatch)
+    result, error = await recon_module.sandbox_recon_host(
+        SimpleNamespace(sandbox=None),
+        "192.0.2.10",
+        {},
+    )
+
+    assert result is None
+    assert error is not None and "sandbox" in error.lower()
 
 
 @pytest.mark.asyncio
 async def test_hostname_resolving_to_unscoped_private_address_is_blocked(tmp_path: Path, monkeypatch):
-    """An allowed FQDN cannot redirect host recon into an unlisted private IP."""
+    """An allowed FQDN cannot redirect worker recon into an unlisted private IP."""
     import tools.mcp_tools.recon as recon_module
-    import tools.socket_scan as socket_scan
 
     target = "private-answer.example.com"
-    sink_calls: list[str] = []
+    worker_calls: list[str] = []
     _clear_allowlist_env(monkeypatch)
     mcp = _make_server(tmp_path, [target])
     monkeypatch.setattr(recon_module, "resolve_target_bounded", lambda _host: ("10.0.0.9", target))
-    monkeypatch.setattr(socket_scan, "socket_scan_sync", lambda host, _ports: sink_calls.append(host) or [])
+    monkeypatch.setattr(recon_module, "run_argv_in_sandbox", lambda *_args, **_kwargs: worker_calls.append("called"))
 
     text = _text(await mcp.call_tool("quick_scan", {"target_ip": target, "ports": "80"}))
 
     assert "BLOCKED" in text
     assert "non-public address 10.0.0.9" in text
-    assert sink_calls == []
+    assert worker_calls == []
 
 
 @pytest.mark.asyncio
 async def test_recon_first_pinned_private_ip_is_blocked_without_independent_scope(tmp_path: Path, monkeypatch):
     """An IP-oriented tool cannot lose the domain provenance of its run target."""
     import tools.mcp_tools.recon as recon_module
-    import tools.socket_scan as socket_scan
 
     target = "private-answer.example.com"
     pinned_ip = "10.0.0.9"
-    sink_calls: list[str] = []
+    worker_calls: list[str] = []
     _clear_allowlist_env(monkeypatch)
     monkeypatch.setenv("EXPLOIT_TARGET", pinned_ip)
     monkeypatch.setenv("EXPLOIT_TARGET_IP", pinned_ip)
     monkeypatch.setenv("EXPLOIT_TARGET_DOMAIN", target)
     mcp = _make_server(tmp_path, [target])
     monkeypatch.setattr(recon_module, "resolve_target_bounded", lambda _host: (_ for _ in ()).throw(AssertionError()))
-    monkeypatch.setattr(socket_scan, "socket_scan_sync", lambda host, _ports: sink_calls.append(host) or [])
+    monkeypatch.setattr(recon_module, "run_argv_in_sandbox", lambda *_args, **_kwargs: worker_calls.append("called"))
 
     text = _text(await mcp.call_tool("quick_scan", {"target_ip": pinned_ip, "ports": "80"}))
 
     assert "BLOCKED" in text
     assert "non-public address 10.0.0.9" in text
-    assert sink_calls == []
+    assert worker_calls == []
+
+
+@pytest.mark.asyncio
+async def test_equivalent_ipv6_spelling_preserves_private_domain_provenance(tmp_path: Path, monkeypatch):
+    """A differently formatted pinned IP cannot shed its domain scope check."""
+    import tools.mcp_tools.recon as recon_module
+
+    target = "private-ipv6.example.com"
+    pinned_ip = "fd00::1"
+    equivalent_ip = "fd00:0000:0000:0000:0000:0000:0000:0001"
+    worker_calls: list[str] = []
+    _clear_allowlist_env(monkeypatch)
+    monkeypatch.setenv("EXPLOIT_TARGET", pinned_ip)
+    monkeypatch.setenv("EXPLOIT_TARGET_IP", pinned_ip)
+    monkeypatch.setenv("EXPLOIT_TARGET_DOMAIN", target)
+    mcp = _make_server(tmp_path, [target])
+    monkeypatch.setattr(
+        recon_module,
+        "resolve_target_bounded",
+        lambda _host: (_ for _ in ()).throw(AssertionError("pinned domain must not be resolved again")),
+    )
+    monkeypatch.setattr(recon_module, "run_argv_in_sandbox", lambda *_args, **_kwargs: worker_calls.append("called"))
+
+    text = _text(await mcp.call_tool("quick_scan", {"target_ip": equivalent_ip, "ports": "80"}))
+
+    assert "BLOCKED" in text
+    assert "non-public address fd00::1" in text
+    assert worker_calls == []
 
 
 @pytest.mark.asyncio
 async def test_dns_timeout_fails_closed_before_recon_io(tmp_path: Path, monkeypatch):
-    """A bounded resolver timeout cannot fall back to hostname-based scanning."""
+    """A bounded resolver timeout cannot fall back to hostname-based worker scanning."""
     import tools.mcp_tools.recon as recon_module
-    import tools.socket_scan as socket_scan
 
     target = "slow-dns.example.com"
-    sink_calls: list[str] = []
+    worker_calls: list[str] = []
     _clear_allowlist_env(monkeypatch)
     mcp = _make_server(tmp_path, [target])
 
@@ -206,12 +226,56 @@ async def test_dns_timeout_fails_closed_before_recon_io(tmp_path: Path, monkeypa
         raise TimeoutError("resolver timed out")
 
     monkeypatch.setattr(recon_module, "resolve_target_bounded", timed_out)
-    monkeypatch.setattr(socket_scan, "socket_scan_sync", lambda host, _ports: sink_calls.append(host) or [])
+    monkeypatch.setattr(recon_module, "run_argv_in_sandbox", lambda *_args, **_kwargs: worker_calls.append("called"))
 
     text = _text(await mcp.call_tool("quick_scan", {"target_ip": target, "ports": "80"}))
 
     assert "BLOCKED: target resolution failed: resolver timed out" in text
-    assert sink_calls == []
+    assert worker_calls == []
+
+
+@pytest.mark.asyncio
+async def test_sandbox_failure_blocks_without_host_fallback(tmp_path: Path, monkeypatch):
+    """A missing worker yields a SANDBOX block and never reports scan output."""
+    import tools.mcp_tools.recon as recon_module
+    from tools.sandbox.exceptions import SandboxUnavailableError
+
+    target = "93.184.216.34"
+    _clear_allowlist_env(monkeypatch)
+    mcp = _make_server(tmp_path, [target])
+    monkeypatch.setattr(recon_module, "resolve_target_bounded", lambda host: (host, None))
+    calls: list[tuple[list[str], dict]] = []
+
+    def missing_worker(_ctx, argv, **kwargs):
+        calls.append((argv, kwargs))
+        raise SandboxUnavailableError("fake missing worker")
+
+    monkeypatch.setattr(recon_module, "run_argv_in_sandbox", missing_worker)
+    text = _text(await mcp.call_tool("quick_scan", {"target_ip": target, "ports": "80"}))
+
+    assert "SANDBOX_UNAVAILABLE" in text
+    assert "EXECUTED: nowhere" in text
+    assert "QUICK_SCAN_RESULTS" not in text
+    assert len(calls) == 1
+    assert calls[0][0][-1] == target
+
+
+@pytest.mark.asyncio
+async def test_quick_scan_rejects_invalid_ports_before_worker(tmp_path: Path, monkeypatch):
+    """Port parsing never turns malformed input into an Nmap argument."""
+    import tools.mcp_tools.recon as recon_module
+
+    target = "93.184.216.34"
+    _clear_allowlist_env(monkeypatch)
+    mcp = _make_server(tmp_path, [target])
+    calls: list[str] = []
+    monkeypatch.setattr(recon_module, "run_argv_in_sandbox", lambda *_args, **_kwargs: calls.append("called"))
+
+    text = _text(await mcp.call_tool("quick_scan", {"target_ip": target, "ports": "80,80;evil"}))
+
+    assert "BLOCKED" in text
+    assert "decimal TCP port numbers" in text
+    assert calls == []
 
 
 @pytest.mark.parametrize("target", ["169.254.169.254", "::ffff:169.254.169.254"])

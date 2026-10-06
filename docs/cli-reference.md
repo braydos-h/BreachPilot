@@ -129,8 +129,8 @@ daemon default and direct runs load keys without prompting.
 | Flag | Description | Group |
 |------|-------------|------|
 | `--demon`, `--daemon` | Start the local WebUI API server instead of the terminal menu (`main._run_daemon`) | webui |
-| `--web` | Daemon mode plus: build `webui/dist/` if needed, serve it at `/`, open a browser (`main._ensure_webui_build`) | webui |
-| `--rebuild`, `-rebuild` | Force a clean rebuild of `webui/dist/` (`npm install` + `npm run build`) for updates; with `--web`/`--daemon` rebuilds before serving, otherwise rebuilds and exits (`main._rebuild_webui`) | webui |
+| `--web` | Daemon mode plus: use the packaged SPA or build `webui/dist/` from a checkout if missing, serve it at `/`, open a browser (`main._ensure_webui_build`) | webui |
+| `--rebuild`, `-rebuild` | Force a clean rebuild of `webui/dist/` (`npm install` + `npm run build`) for updates; requires a source checkout with Node/npm. With `--web`/`--daemon` rebuilds before serving, otherwise rebuilds and exits (`main._rebuild_webui`) | webui |
 | `--api-host <host>` | Daemon bind host — **loopback only** (`127.0.0.1`/`localhost`/`::1`); any other host exits with code 2 | webui |
 | `--api-port <n>` | Daemon port (default 8765) | webui |
 
@@ -270,7 +270,7 @@ python cli.py run-task; python cli.py status; python cli.py list-findings
 
 | Variable | Effect | Source |
 |----------|--------|--------|
-| `OLLAMA_API_KEY` | Required for the Ollama Cloud default path; auto-attached to chat/generate requests | `tools/doctor.py:154`; AGENTS.md rule 7 |
+| `OLLAMA_API_KEY` | Required when Ollama Cloud is selected for chat; auto-attached to Ollama chat/generate requests | `tools/doctor.py:154`; provider details in `docs/providers.md` |
 | `SERPAPI_API_KEY` | Research web-search provider | `tools/api_key_store.py:51` |
 | `NVD_API_KEY` | CVE lookup | `tools/api_key_store.py:52` |
 | `GITHUB_TOKEN` | Exploit search / CVE GitHub lookups | `tools/exploit_search.py:224`; `tools/api_key_store.py:53` |
@@ -285,7 +285,7 @@ Keys are loaded from the `--api-key-file` JSON into `os.environ` when not alread
 | Variable | Effect | Source |
 |----------|--------|--------|
 | `BREACHPILOT_API_TOKEN` | Bearer token override for the API daemon (else `.webui_secret_key` file) | `app.py:69-73`; `tools/api/auth.py:46` |
-| `BREACHPILOT_API_KEY_FILE` | API key file path used by the API routes | `tools/api/routes/system.py:144, 181` |
+| `BREACHPILOT_API_KEY_FILE` | API key file path used by the API routes | `tools/api/routes/system/config.py` |
 
 ### Behavior / debug
 
@@ -308,7 +308,8 @@ Keys are loaded from the `--api-key-file` JSON into `os.environ` when not alread
   tool check (nmap, ollama, tmux, searchsploit, msfconsole, hydra, impacket) + `ollama pull` +
   `python main.py --doctor` (`scripts/setup-linux.sh:21-54`). There is no Windows equivalent.
 - Makefile targets map to: `doctor` → `main.py --doctor`, `self-test` → `main.py --self-test`,
-  `eval` → `main.py --eval`, `test` → `pytest tests/ -v`, `test-one F=...` → focused pytest,
+  `eval` → `main.py --eval`, `test` → `pytest tests/ -v` (full-suite CI target; do not run locally),
+  `test-one F=...` → focused pytest,
   `run` → `main.py`, `mcp-defensive|exploit|engine` → the three MCP servers (Makefile:22-48).
 - Linux nmap `-O`/`-sS` need root: set `nmap.sudo: true` (uses `sudo -n`) or run as root; else
   `nmap.priv_fallback` (default true) auto-downgrades. Windows attacker = Python-only exploits;

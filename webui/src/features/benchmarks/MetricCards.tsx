@@ -28,7 +28,7 @@ export function MetricCard({ title, value, sub, icon: Icon, tone = "neutral" }: 
           ? "text-amber-500"
           : "text-primary";
   return (
-    <Card>
+    <Card data-tone={tone}>
       <CardHeader className="flex flex-row items-center justify-between gap-2 pb-1">
         <CardTitle className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{title}</CardTitle>
         <Icon className={cn("h-4 w-4", toneClass)} />
@@ -46,16 +46,30 @@ export interface MetricCardsProps {
 }
 
 export function MetricCards({ summary }: MetricCardsProps) {
-  const fpTone = summary.false_positive_rate > 0.02 ? "danger" : summary.false_positive_rate > 0 ? "warning" : "success";
+  const successRate = summary.verified_success_rate;
+  const falsePositiveRate = summary.false_positive_rate;
+  const hasSuccessRate = successRate != null;
+  const hasFalsePositiveRate = falsePositiveRate != null;
+  const fpTone = !hasFalsePositiveRate
+    ? "neutral"
+    : falsePositiveRate > 0.02
+      ? "danger"
+      : falsePositiveRate > 0
+        ? "warning"
+        : "success";
   const infraTone = summary.infra_error_count > 0 ? "warning" : "neutral";
   return (
     <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6" data-testid="benchmark-metric-cards">
       <MetricCard
         title="Verified success"
         value={formatPct(summary.verified_success_rate)}
-        sub={`${summary.solved}/${summary.trials_total} trials verified`}
-        icon={CheckCircle2}
-        tone="success"
+        sub={
+          hasSuccessRate
+            ? `${summary.solved}/${summary.trials_total} trials verified`
+            : "unmeasured — no completed trials"
+        }
+        icon={hasSuccessRate ? CheckCircle2 : Target}
+        tone={hasSuccessRate ? "success" : "neutral"}
       />
       <MetricCard
         title="Timeouts"
@@ -67,7 +81,7 @@ export function MetricCards({ summary }: MetricCardsProps) {
       <MetricCard
         title="False positives"
         value={formatPct(summary.false_positive_rate)}
-        sub="claimed but unverified"
+        sub={hasFalsePositiveRate ? "claimed but unverified" : "unmeasured — no completed trials"}
         icon={AlertTriangle}
         tone={fpTone}
       />

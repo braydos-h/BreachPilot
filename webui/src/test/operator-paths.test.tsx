@@ -5,12 +5,13 @@
 // Mobile-width + a11y assertions (todos 50/51) included.
 
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { RunAttentionBanner } from "@/components/run/RunAttentionBanner";
 import { NarrativeFeed } from "@/components/NarrativeFeed";
 import { EmptyState } from "@/components/EmptyState";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { RunStartupProgress } from "@/components/run-create/RunStartupProgress";
 import type { RunEvent } from "@/api/types";
 
 beforeEach(() => {
@@ -74,6 +75,20 @@ describe("operator critical paths", () => {
     );
     expect(screen.getByRole("link", { name: /Back to run/ })).toHaveAttribute("href", "/runs/abc123");
     expect(screen.getByRole("navigation", { name: /breadcrumb/i })).toBeInTheDocument();
+  });
+
+  it("run startup status errors offer a retry without implying the run failed", () => {
+    const retry = vi.fn();
+    render(
+      <RunStartupProgress
+        startup={{ phase: "preparing", backendStage: "runtime", message: "", startedAt: Date.now() }}
+        statusError
+        onRetryStatus={retry}
+      />,
+    );
+    expect(screen.getByRole("alert").textContent).toMatch(/run may still be preparing/i);
+    fireEvent.click(screen.getByRole("button", { name: "Retry status check" }));
+    expect(retry).toHaveBeenCalledOnce();
   });
 
   it("dialogs and tabs expose accessible names (a11y smoke)", async () => {

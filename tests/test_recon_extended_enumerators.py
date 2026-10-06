@@ -63,6 +63,29 @@ def test_extended_field_roundtrips() -> None:
     assert r2.extended == {"subdomains": ["a.example.com"]}
 
 
+@pytest.mark.asyncio
+async def test_http_header_probe_does_not_follow_out_of_scope_redirects(monkeypatch) -> None:
+    """Host-side curl must not follow a scoped service's redirect elsewhere."""
+    import tools.recon.enumerator as enumerator
+
+    commands: list[list[str]] = []
+
+    async def fake_run(command, **_kwargs):
+        commands.append(command)
+        return True, "HTTP/1.1 302 Found\nLocation: http://169.254.169.254/\n", "", 0.01
+
+    monkeypatch.setattr(enumerator, "run_command", fake_run)
+    monkeypatch.setattr(enumerator.ToolAvailability, "check", lambda name: name == "curl")
+    recon = SecondaryEnumerator(ReconConfig(curl_path="curl"))
+    service = ServiceInfo(port=80, protocol="tcp", service="http", version="", banner="")
+
+    await recon._enumerate_http_service(_result(), service)
+
+    assert len(commands) == 1
+    assert commands[0][0] == "curl"
+    assert "-L" not in commands[0]
+
+
 # ── subdomain_enum ────────────────────────────────────────────────────────────
 
 
@@ -164,6 +187,35 @@ async def test_asn_whois_parses_rdap() -> None:
     assert info["network_name"] == "EXAMPLE-CORP"
     assert info["org"] == "Example Org"
     assert info["cidr"] == "10.0.0.0"
+
+
+def test_stdlib_fetch_pins_host_and_does_not_follow_redirect(monkeypatch):
+    import tools.recon.enumerator as recon_enumerator
+
+    calls = []
+
+    def fake_fetch(url, **kwargs):
+        calls.append((url, kwargs))
+        return 302, {"Location": "http://169.254.169.254/latest/meta-data/"}, b"redirect page", url
+
+    monkeypatch.setattr(recon_enumerator, "fetch_response", fake_fetch)
+    enum = SecondaryEnumerator(ReconConfig())
+    status, headers, body = enum._stdlib_fetch("https://rdap.arin.net/registry/ip/192.0.2.1", timeout=7)
+
+    assert status == 302
+    assert headers["Location"].startswith("http://169.254.169.254/")
+    assert body == ""
+    assert len(calls) == 1
+    assert calls[0][1]["policy"].allowed_domains == ("rdap.arin.net",)
+    assert calls[0][1]["policy"].allow_local_fetch is False
+    assert calls[0][1]["pin_cache"] is enum._fetch_pins
+
+
+def test_stdlib_fetch_blocks_operator_metadata_address_before_connect():
+    enum = SecondaryEnumerator(ReconConfig())
+    status, headers, body = enum._stdlib_fetch("http://169.254.169.254/latest/meta-data/", timeout=1)
+
+    assert (status, headers, body) == (0, {}, "")
 
 
 @pytest.mark.asyncio

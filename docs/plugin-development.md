@@ -25,20 +25,33 @@ Plugins are **trusted Python with full operator-box privileges**. This is a
 lab build: the operator runs the engine against systems they own or are
 explicitly authorized to test, on a throwaway operator box. Plugin code runs
 with exactly the same privileges as the built-in `tools/mcp_tools/*` modules.
-**The plugin manager does not sandbox plugin code.** It enforces two things
-and only two things:
+**The plugin manager does not sandbox plugin code or enforce host filesystem
+and network permissions.** It enforces opt-in loading plus a limited set of
+manifest-consistency and MCP-wrapper checks:
 
 1. **Opt-in loading.** Plugins are disabled by default. A plugin is loaded
    only when it is explicitly enabled (see section 6).
-2. **The safety-decorator requirement (enforced fail-closed at load time).**
+2. **Manifest and MCP-wrapper checks.** The loader requires a plugin name,
+   checks that a manifest declaring `mcp_tool` lists its provided tool names
+   when `plugin.py` is present, and requires `target_touching` to accompany
+   `mcp_tool`. It also AST-checks MCP handlers for `@require_allowlist()` or
+   `@audit_tool`; a missing wrapper refuses that plugin load.
+
+These checks do not sandbox the plugin or detect undeclared host access. The
+`needs_host_fs` and `needs_net` manifest fields describe plugin behavior; they
+do not grant or restrict operating-system permissions. In particular, the
+wrapper check applies to MCP tool handlers, not arbitrary Python executed by a
+plugin.
+
+For MCP handlers, the enforced safety-decorator requirement is:
    Any MCP tool a plugin registers MUST wrap its handler with
    `ctx.require_allowlist()` (target-touching tools) or `ctx.audit_tool`
    (free-text command tools) so the **target-IP allowlist lock** and the
-   **tamper-evident JSONL audit trail** (`exploit_workspace/<ip>/exploit_audit.jsonl`)
-   still apply. The manager AST-checks every `@mcp.tool` handler in the
-   plugin's source before import (filesystem plugins) or at discovery
-   (entry-point plugins); a missing wrapper refuses the load (skip + audit
-   row, never a boot failure).
+   **tamper-evident JSONL audit trail** (the run's host-owned
+   `reports/<run_id>/exploit_audit.jsonl`, outside the worker bind)
+   still apply. The AST check validates wrapper presence before the plugin is
+   imported or accepted from discovery (skip + audit row, never a boot
+   failure).
 
 Because the decorators wrap the handler at registration time, the allowlist
 lock + audit trail apply to plugin MCP tools **automatically** -- the author
@@ -451,16 +464,20 @@ enabling it. `load_plugins(config)` runs once during boot, before the MCP
 exploit server is created, so plugin attack modules and MCP tool factories are
 registered in time to be picked up.
 
-## 9. Safety checklist for plugin authors (normative)
+## 9. Safety checklist for plugin authors
 
-Before publishing a plugin, confirm every item. The loader enforces the
-manifest + wrapper rows fail-closed (missing manifest or wrapper refuses
-load with a clear error; see `tools/plugins.py:validate_plugin_manifest` /
+Before publishing a plugin, confirm every item. These are author requirements;
+only the specific manifest-consistency and MCP-wrapper checks described above
+are enforced by the loader (`tools/plugins.py:validate_plugin_manifest` /
 `validate_plugin_mcp_wrappers`).
 
-- [ ] **Capability manifest declared.** `plugin.yaml` declares `needs_host_fs`,
-      `needs_net`, `target_touching`, and `provides_mcp_tools[]`. Loader
-      refuses undeclared capabilities (fail closed).
+- [ ] **Manifest is accurate.** Declare `needs_host_fs`, `needs_net`,
+      `target_touching`, and `provides_mcp_tools[]` for operator visibility.
+      These values do not sandbox or restrict host filesystem/network access.
+      The loader requires a name, requires `target_touching` to accompany
+      `mcp_tool`, and requires a non-empty `provides_mcp_tools[]` when
+      `mcp_tool` is declared and `plugin.py` exists; it does not detect
+      undeclared host capabilities.
 - [ ] **MCP tools use the safety decorators.** Every `@mcp.tool()` handler is
       also wrapped with `@ctx.require_allowlist()` (target-touching) or
       `@ctx.audit_tool` (free-text command tools), stacked in the

@@ -48,15 +48,26 @@ def translated_metadata_networks() -> tuple[ipaddress.IPv6Network, ...]:
             network_address = ipaddress.IPv6Address(int(base) | (prefix << shift))
             result.append(ipaddress.IPv6Network((network_address, base_prefix + v4_network.prefixlen), strict=False))
 
-        # RFC 8215 local-use NAT64 (RFC 6052 /48 layout): metadata's
-        # 169.254/16 prefix occupies bits 48..63, followed by the u octet.
-        # A /64 DROP safely covers every legal u-octet value and all remaining
-        # embedded link-local IPv4 bits without blocking other v4 ranges.
-        if (
-            v4_network.prefixlen >= 16
-            and int(v4_network.network_address) >> 16 == int(ipaddress.IPv4Address("169.254.0.0")) >> 16
-        ):
-            result.append(ipaddress.IPv6Network("64:ff9b:1:a9fe::/64"))
+        # RFC 8215 local-use NAT64 (RFC 6052 /48 layout) supports the full
+        # protected IPv4 set, including Alibaba's 100.100.100.200 metadata
+        # address. For prefixes through /16, IPv4 bits follow the /48
+        # immediately. Longer IPv4 prefixes cross the reserved u octet, so
+        # the resulting IPv6 prefix length includes that eight-bit gap.
+        v4_bytes = v4_network.network_address.packed
+        translated_bytes = (
+            ipaddress.IPv6Network("64:ff9b:1::/48").network_address.packed[:6]
+            + v4_bytes[:2]
+            + b"\x00"
+            + v4_bytes[2:]
+            + (b"\x00" * 5)
+        )
+        translated_prefix = 48 + v4_network.prefixlen + (8 if v4_network.prefixlen > 16 else 0)
+        result.append(
+            ipaddress.IPv6Network(
+                (ipaddress.IPv6Address(translated_bytes), translated_prefix),
+                strict=False,
+            )
+        )
 
     return tuple(dict.fromkeys(result))
 

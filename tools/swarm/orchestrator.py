@@ -7,11 +7,13 @@ critic pre-check with blackboard awareness, and reflection-driven strategy adapt
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import threading
 import uuid
 from pathlib import Path
 from typing import Any, Callable
 
+from tools.exceptions import _EXC_GROUP_CATCH, _is_exception_group, _log_nested_exceptions
 from tools.kernel.orchestration import safe_emit
 from tools.swarm import milestones as _milestones
 from tools.swarm import negotiation as _negotiation
@@ -259,7 +261,9 @@ class SwarmOrchestrator:
         # milestone marking + persist below still run.
         try:
             result = agent.run(task, self._context)
-        except Exception as exc:  # noqa: BLE001 -- isolation, never propagate
+        except _EXC_GROUP_CATCH as exc:  # noqa: BLE001 -- isolate agent and MCP exception-group failures
+            if _is_exception_group(exc):
+                _log_nested_exceptions(exc)
             result = AgentResult(
                 agent_type=agent.agent_type,
                 status=AgentStatus.FAILED,
@@ -411,13 +415,20 @@ class SwarmOrchestrator:
             depends_on = task.get("depends_on")
             if depends_on and isinstance(depends_on, (list, tuple)) and len(depends_on) == 2:
                 dep_target, dep_phase = depends_on
-                # Block in this worker thread (only this task waits, not the
-                # whole loop). 10-min ceiling so a stuck dependency can't
-                # wedge the campaign forever.
-                self._await_milestone(dep_target, dep_phase, timeout=600.0)
+                # Wait cooperatively so other tasks and cancellation remain
+                # responsive. A missing dependency fails closed; the agent
+                # must not run after the prerequisite timed out.
+                if not await self._await_milestone_async(dep_target, dep_phase, timeout=600.0):
+                    return AgentResult(
+                        agent_type="dependency_gate",
+                        status=AgentStatus.FAILED,
+                        task_id=task.get("task_id", task.get("id", "")),
+                        error=f"dependency milestone {dep_target!r}/{dep_phase!r} timed out; task not started",
+                    )
             async with semaphore:
                 loop = asyncio.get_running_loop()
-                return await loop.run_in_executor(None, self.route, task)
+                context = contextvars.copy_context()
+                return await loop.run_in_executor(None, context.run, self.route, task)
 
         parallel_results: list[AgentResult] = []
         if parallel_tasks:
@@ -594,6 +605,10 @@ class SwarmOrchestrator:
     def _await_milestone(self, target: str, phase: str, timeout: float | None = None) -> bool:
         """Block until ``(target, phase)`` completes (see tools/swarm/milestones.py)."""
         return _milestones._await_milestone(self, target, phase, timeout)
+
+    async def _await_milestone_async(self, target: str, phase: str, timeout: float | None = None) -> bool:
+        """Cooperatively wait for ``(target, phase)`` (see tools/swarm/milestones.py)."""
+        return await _milestones._await_milestone_async(self, target, phase, timeout)
 
     # ── State persistence (canonical code in tools/swarm/state_store.py) ──
 

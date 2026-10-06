@@ -72,6 +72,17 @@ def test_compute_metrics_verdict_cred_dump():
     assert m.verdict == "cred_dump"
 
 
+def test_compute_metrics_preserves_unverified_claim_without_promoting_success():
+    from tools.eval_harness import compute_metrics
+
+    m = compute_metrics(_fr(outcome_summary="unverified claims: 2", total_actions=4))
+    assert m.unverified_claim_count == 2
+    assert m.compromise_count == 0
+    assert m.cred_dump_count == 0
+    assert m.success_rate == 0.0
+    assert m.verdict == "unverified_claim"
+
+
 def test_compute_metrics_verdict_partial():
     from tools.eval_harness import compute_metrics
 
@@ -499,11 +510,11 @@ async def test_run_graded_eval_full_path(tmp_path, monkeypatch):
 
     findings = {
         "alpha": [
-            {"type": "service", "value": "ssh"},
-            {"type": "service", "value": "http"},
-            {"type": "service", "value": "bogus"},
+            {"type": "service", "value": "ssh", "evidence": "test fixture: ssh service observed"},
+            {"type": "service", "value": "http", "evidence": "test fixture: HTTP service observed"},
+            {"type": "service", "value": "bogus", "evidence": "test fixture: unsupported service claim"},
         ],
-        "beta": [{"type": "service", "value": "ftp"}],
+        "beta": [{"type": "service", "value": "ftp", "evidence": "test fixture: ftp service observed"}],
     }
     now_called = []
     report = await mod.run_graded_eval(
@@ -524,13 +535,14 @@ async def test_run_graded_eval_full_path(tmp_path, monkeypatch):
     assert alpha.flags_total == 2
     assert alpha.flags_captured == 1
     assert alpha.hosts_owned == 1 and alpha.hosts_total == 1
-    assert alpha.success is True  # host_owned_when=any, one flag captured
-    # findings: 2 TPs (ssh, http), 1 FP (bogus) -> precision 2/3, recall 1.0
+    assert alpha.success is False  # a post-run flag does not attribute positive success to this run
+    # The default graded path has no target-bound evidence producer. Agent
+    # labels and prose therefore remain unsupported instead of earning TPs.
     assert alpha.findings_claimed == 3
-    assert alpha.findings_verified == 2
-    assert alpha.details["findings_false_positives"] == 1
-    # score = mean(flags 1/2, host 1/1, F1(2/3, 1.0)=0.8)
-    assert alpha.score == round((0.5 + 1.0 + 0.8) / 3, 4)
+    assert alpha.findings_verified == 0
+    assert alpha.details["findings_false_positives"] == 3
+    # score = mean(flags 1/2, host 1/1, findings F1 0)
+    assert alpha.score == round((0.5 + 1.0 + 0.0) / 3, 4)
 
     beta = report.targets[1]
     assert beta.flags_total == 1
@@ -541,8 +553,8 @@ async def test_run_graded_eval_full_path(tmp_path, monkeypatch):
     # Aggregate folds across targets.
     assert report.flags_captured_total == 1
     assert report.flags_total_total == 3
-    assert report.findings_verified_total == 3
-    assert report.targets_succeeded == 1
+    assert report.findings_verified_total == 0
+    assert report.targets_succeeded == 0
 
     # Reports written under output_dir/<run_id>/.
     out_dir = tmp_path / "out" / report.run_id
@@ -556,6 +568,345 @@ async def test_run_graded_eval_full_path(tmp_path, monkeypatch):
     # report.json must round-trip (no non-serializable values).
     text = json.dumps(data, default=str)
     assert json.loads(text)["aggregate"]["targets_run"] == 2
+
+
+@pytest.mark.asyncio
+async def test_run_graded_eval_does_not_attribute_preexisting_flag_to_noop_runner(tmp_path, monkeypatch):
+    import tools.eval_harness as mod
+
+    oracle_dir = _write_oracle_dir(tmp_path)
+    monkeypatch.setattr(mod, "open_exploit_mcp_session", lambda **kwargs: _FakeAsyncCtx(None))
+    monkeypatch.setattr(mod, "default_check_executor", _fake_executor_factory({"loot://flag.txt"}))
+
+    async def no_op_runner(target_id, oracle, config):
+        return {"findings": [], "outcome_summary": "", "total_actions": 0, "records": []}
+
+    report = await mod.run_graded_eval(
+        ["alpha"],
+        {"eval": {"output_dir": str(tmp_path / "out")}},
+        runner=no_op_runner,
+        oracle_dir=oracle_dir,
+        compose_up=False,
+        compose_down=False,
+    )
+
+    target = report.targets[0]
+    assert target.flags_captured == 1
+    assert target.hosts_owned == 1  # observed target state remains visible
+    assert target.details["oracle_target_conditions_met"] is True
+    assert target.success is False
+    assert report.live_outcome == "FAIL"
+    assert report.trials[0].verified_success is None
+    assert report.reliability.verified_compromise_rate is None
+
+
+@pytest.mark.asyncio
+async def test_run_graded_eval_counts_negative_control_correct_stop_separately(tmp_path, monkeypatch):
+    import tools.eval_harness as mod
+
+    oracle_dir = tmp_path / "targets"
+    oracle_dir.mkdir()
+    oracle = {
+        "target_id": "secure_web",
+        "host": "127.0.0.1",
+        "expected_findings": {},
+        "scoring": {"success_criteria": "No verified findings"},
+        "negative_control": True,
+        "flags": [],
+        "host_owned_when": "never",
+    }
+    (oracle_dir / "secure_web.oracle.json").write_text(json.dumps(oracle), encoding="utf-8")
+    monkeypatch.setattr(mod, "open_exploit_mcp_session", lambda **kwargs: _FakeAsyncCtx(None))
+
+    async def correct_stop_runner(target_id, oracle, config):
+        return {
+            "findings": [],
+            "outcome_summary": "compromises: 0; cred dumps: 0",
+            "total_actions": 1,
+            "records": [
+                {
+                    "action": "run_web_scan",
+                    "target_ip": "127.0.0.1",
+                    "status": "completed",
+                    "approved": True,
+                    "detail": json.dumps({"target_ip": "127.0.0.1"}),
+                },
+            ],
+        }
+
+    report = await mod.run_graded_eval(
+        ["secure_web"],
+        {"eval": {"output_dir": str(tmp_path / "out")}},
+        runner=correct_stop_runner,
+        oracle_dir=oracle_dir,
+        compose_up=False,
+        compose_down=False,
+    )
+
+    target = report.targets[0]
+    trial = report.trials[0]
+    assert target.success is True
+    assert target.hosts_owned == 0
+    assert target.details["correct_stop"] is True
+    assert report.live_outcome == "PASS"
+    assert trial.negative_control is True
+    assert trial.correct_stop is True
+    assert trial.verified_success is False
+    assert report.reliability.correct_stop_count == 1
+    assert report.reliability.correct_stop_rate == 1.0
+    assert report.reliability.verified_compromise_rate == 0.0
+    assert "Correct-stop rate (negative controls)**: 1/1 (100.0%)" in report.render_markdown()
+
+
+@pytest.mark.asyncio
+async def test_run_graded_eval_does_not_count_failed_action_as_negative_control_stop(tmp_path, monkeypatch):
+    import tools.eval_harness as mod
+
+    oracle_dir = tmp_path / "targets"
+    oracle_dir.mkdir()
+    oracle = {
+        "target_id": "secure_web",
+        "host": "127.0.0.1",
+        "expected_findings": {},
+        "scoring": {"success_criteria": "No verified findings"},
+        "negative_control": True,
+        "flags": [],
+        "host_owned_when": "never",
+    }
+    (oracle_dir / "secure_web.oracle.json").write_text(json.dumps(oracle), encoding="utf-8")
+    monkeypatch.setattr(mod, "open_exploit_mcp_session", lambda **kwargs: _FakeAsyncCtx(None))
+
+    async def failed_action_runner(target_id, oracle, config):
+        return {
+            "findings": [],
+            "outcome_summary": "compromises: 0; cred dumps: 0",
+            "total_actions": 1,
+            "records": [
+                {
+                    "action": "run_web_scan",
+                    "target_ip": "127.0.0.1",
+                    "status": "executed",
+                    "approved": True,
+                    "exit_code": 1,
+                    "detail": json.dumps({"target_ip": "127.0.0.1"}),
+                }
+            ],
+        }
+
+    report = await mod.run_graded_eval(
+        ["secure_web"],
+        {"eval": {"output_dir": str(tmp_path / "out")}},
+        runner=failed_action_runner,
+        oracle_dir=oracle_dir,
+        compose_up=False,
+        compose_down=False,
+    )
+
+    assert report.targets[0].success is False
+    assert report.targets[0].details["correct_stop"] is False
+    assert report.live_outcome == "FAIL"
+
+
+@pytest.mark.asyncio
+async def test_run_graded_eval_does_not_count_local_action_as_target_assessment(tmp_path, monkeypatch):
+    import tools.eval_harness as mod
+
+    oracle_dir = tmp_path / "targets"
+    oracle_dir.mkdir()
+    oracle = {
+        "target_id": "secure_web",
+        "host": "127.0.0.1",
+        "expected_findings": {},
+        "negative_control": True,
+        "flags": [],
+        "host_owned_when": "never",
+    }
+    (oracle_dir / "secure_web.oracle.json").write_text(json.dumps(oracle), encoding="utf-8")
+    monkeypatch.setattr(mod, "open_exploit_mcp_session", lambda **kwargs: _FakeAsyncCtx(None))
+
+    async def local_action_runner(target_id, oracle, config):
+        return {
+            "findings": [],
+            "outcome_summary": "",
+            "total_actions": 1,
+            "records": [
+                {
+                    "action": "workspace_list",
+                    "target_ip": "127.0.0.1",
+                    "status": "completed",
+                    "approved": True,
+                    "detail": json.dumps({"path": "."}),
+                }
+            ],
+        }
+
+    report = await mod.run_graded_eval(
+        ["secure_web"],
+        {"eval": {"output_dir": str(tmp_path / "out")}},
+        runner=local_action_runner,
+        oracle_dir=oracle_dir,
+        compose_up=False,
+        compose_down=False,
+    )
+
+    assert report.targets[0].details["correct_stop"] is False
+    assert report.reliability.correct_stop_count == 0
+
+
+@pytest.mark.asyncio
+async def test_run_graded_eval_does_not_count_negative_control_noop_as_correct_stop(tmp_path, monkeypatch):
+    import tools.eval_harness as mod
+
+    oracle_dir = tmp_path / "targets"
+    oracle_dir.mkdir()
+    oracle = {
+        "target_id": "secure_web",
+        "host": "127.0.0.1",
+        "expected_findings": {},
+        "scoring": {"success_criteria": "No verified findings"},
+        "negative_control": True,
+        "flags": [],
+        "host_owned_when": "never",
+    }
+    (oracle_dir / "secure_web.oracle.json").write_text(json.dumps(oracle), encoding="utf-8")
+    monkeypatch.setattr(mod, "open_exploit_mcp_session", lambda **kwargs: _FakeAsyncCtx(None))
+
+    async def no_op_runner(target_id, oracle, config):
+        return {"findings": [], "outcome_summary": "", "total_actions": 0, "records": []}
+
+    report = await mod.run_graded_eval(
+        ["secure_web"],
+        {"eval": {"output_dir": str(tmp_path / "out")}},
+        runner=no_op_runner,
+        oracle_dir=oracle_dir,
+        compose_up=False,
+        compose_down=False,
+    )
+
+    assert report.targets[0].success is False
+    assert report.targets[0].details["correct_stop"] is False
+    assert report.live_outcome == "FAIL"
+    assert report.reliability.negative_control_count == 1
+    assert report.reliability.correct_stop_count == 0
+    assert report.reliability.correct_stop_rate == 0.0
+
+
+@pytest.mark.asyncio
+async def test_run_graded_eval_negative_control_cannot_mask_positive_failure(tmp_path, monkeypatch):
+    import tools.eval_harness as mod
+
+    oracle_dir = _write_oracle_dir(tmp_path)
+    (oracle_dir / "secure_web.oracle.json").write_text(
+        json.dumps(
+            {
+                "target_id": "secure_web",
+                "host": "127.0.0.1",
+                "expected_findings": {},
+                "scoring": {"success_criteria": "No verified findings"},
+                "negative_control": True,
+                "flags": [],
+                "host_owned_when": "never",
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(mod, "open_exploit_mcp_session", lambda **kwargs: _FakeAsyncCtx(None))
+    monkeypatch.setattr(mod, "default_check_executor", _fake_executor_factory({"loot://flag.txt"}))
+
+    async def runner(target_id, oracle, config):
+        if target_id == "secure_web":
+            return {
+                "findings": [],
+                "outcome_summary": "",
+                "total_actions": 1,
+                "records": [
+                    {
+                        "action": "run_web_scan",
+                        "target_ip": "127.0.0.1",
+                        "status": "completed",
+                        "approved": True,
+                        "detail": json.dumps({"target_ip": "127.0.0.1"}),
+                    },
+                ],
+            }
+        return {"findings": [], "outcome_summary": "", "total_actions": 0, "records": []}
+
+    report = await mod.run_graded_eval(
+        ["alpha", "secure_web"],
+        {"eval": {"output_dir": str(tmp_path / "out")}},
+        runner=runner,
+        oracle_dir=oracle_dir,
+        compose_up=False,
+        compose_down=False,
+    )
+
+    assert report.targets[0].details["oracle_target_conditions_met"] is True
+    assert report.targets[0].success is False
+    assert report.targets[1].success is True
+    assert report.reliability.correct_stop_rate == 1.0
+    assert report.live_outcome == "FAIL"
+
+
+@pytest.mark.asyncio
+async def test_run_graded_eval_binds_http_checks_to_oracle_scope(tmp_path, monkeypatch):
+    import tools.eval_checks as checks
+    import tools.eval_harness as mod
+
+    oracle_dir = tmp_path / "targets"
+    oracle_dir.mkdir()
+    oracle = {
+        "target_id": "alpha",
+        "host": "127.0.0.1",
+        "ports": {"http": 8081},
+        "expected_findings": {},
+        "scoring": {},
+        "flags": [
+            {
+                "id": "in_scope",
+                "check": {
+                    "type": "http_request",
+                    "url": "http://127.0.0.1:8081/status",
+                    "expect_body_contains": "alpha-target",
+                },
+            },
+            {
+                "id": "other_local_service",
+                "check": {
+                    "type": "http_request",
+                    "url": "http://127.0.0.1:2375/",
+                    "expect_body_contains": "alpha-target",
+                },
+            },
+        ],
+        "host_owned_when": "any",
+    }
+    (oracle_dir / "alpha.oracle.json").write_text(json.dumps(oracle), encoding="utf-8")
+    fetched = []
+
+    def fake_fetch(url, **kwargs):
+        fetched.append(url)
+        return 200, "alpha-target response"
+
+    monkeypatch.setattr(checks, "_http_fetch", fake_fetch)
+    monkeypatch.setattr(mod, "docker_suite_up", lambda *a, **k: 0)
+    monkeypatch.setattr(mod, "docker_suite_down", lambda *a, **k: 0)
+    monkeypatch.setattr(mod, "open_exploit_mcp_session", lambda **kwargs: _FakeAsyncCtx(None))
+    monkeypatch.setattr(mod, "default_check_executor", checks.default_check_executor)
+
+    report = await mod.run_graded_eval(
+        ["alpha"],
+        {"eval": {"output_dir": str(tmp_path / "out")}},
+        runner=_fake_runner_factory({}),
+        oracle_dir=oracle_dir,
+        now_fn=lambda: "t0",
+        compose_up=False,
+        compose_down=False,
+    )
+
+    target = report.targets[0]
+    assert target.flags_captured == 1
+    assert target.flags_total == 2
+    assert fetched == ["http://127.0.0.1:8081/status"]
 
 
 @pytest.mark.asyncio
@@ -685,7 +1036,13 @@ def test_http_request_check(monkeypatch):
     monkeypatch.setattr(ec, "_http_fetch", fake_fetch)
     executor = ec.default_check_executor()
 
-    passed, detail = executor({"type": "http_request", "url": "http://127.0.0.1:3000/"})
+    passed, detail = executor(
+        {
+            "type": "http_request",
+            "url": "http://127.0.0.1:3000/",
+            "expect_body_contains": "juice-shop",
+        }
+    )
     assert passed, detail
 
     # Status mismatch fails.
@@ -697,32 +1054,61 @@ def test_http_request_check(monkeypatch):
     assert not passed
     assert calls == ["http://127.0.0.1:3000/"] * 3
 
+    # A 2xx status with no target-specific response predicate is ambiguous.
+    passed, detail = executor({"type": "http_request", "url": "http://127.0.0.1:3000/"})
+    assert not passed
+    assert "requires expect_body_contains" in detail
+    assert calls == ["http://127.0.0.1:3000/"] * 3
+
+
+def test_http_request_can_check_expected_rejection_status_without_success_marker(monkeypatch):
+    import tools.eval_checks as ec
+
+    monkeypatch.setattr(ec, "_http_fetch", lambda url, **kwargs: (401, "Unauthorized"))
+    passed, detail = ec.default_check_executor()(
+        {"type": "http_request", "url": "http://127.0.0.1:3000/private", "expect_status": 401}
+    )
+    assert passed, detail
+
 
 def test_http_login_check_json_then_form(monkeypatch):
     import tools.eval_checks as ec
 
     seen = []
+    login_page_count = 0
 
-    def fake_fetch(url, *, data=None, headers=None, timeout=10.0):
+    def fake_fetch(url, *, data=None, headers=None, timeout=10.0, opener=None):
+        nonlocal login_page_count
         seen.append((url, data, headers))
+        if data is None:
+            login_page_count += 1
+            return 200, f'<input type="hidden" name="user_token" value="csrf-{login_page_count}">'
         # JSON attempt -> 401, form attempt -> 200.
         if seen[-1][1].startswith(b"{"):
             return 401, ""
-        return 200, ""
+        return 200, "welcome token=verified-session"
 
     monkeypatch.setattr(ec, "_http_fetch", fake_fetch)
     executor = ec.default_check_executor()
     passed, detail = executor(
-        {"type": "http_login", "url": "http://127.0.0.1:3000/rest/user/login", "user": "a@b.c", "password": "pw"}
+        {
+            "type": "http_login",
+            "url": "http://127.0.0.1:3000/rest/user/login",
+            "user": "a@b.c",
+            "password": "pw",
+            "expect_body_contains": "token=",
+        }
     )
     assert passed, detail
-    assert len(seen) == 2
-    assert seen[0][2]["Content-Type"] == "application/json"
-    assert seen[1][2]["Content-Type"] == "application/x-www-form-urlencoded"
-    # Credentials travel in every attempt (Basic header + body).
-    assert seen[0][2]["Authorization"].startswith("Basic ")
-    assert b"a%40b.c" in seen[1][1]  # urlencoded form body carries the user
-    assert b"password=pw" in seen[1][1]
+    assert len(seen) == 4
+    assert seen[1][2]["Content-Type"] == "application/json"
+    assert seen[3][2]["Content-Type"] == "application/x-www-form-urlencoded"
+    # Credentials travel in each POST body without changing the auth scheme.
+    assert "Authorization" not in seen[1][2]
+    assert seen[0][1] is None and seen[2][1] is None  # login page before each shape
+    assert b"a%40b.c" in seen[3][1]  # urlencoded form body carries the user
+    assert b"password=pw" in seen[3][1]
+    assert b"user_token=csrf-2" in seen[3][1]
 
 
 def test_http_login_check_both_attempts_fail(monkeypatch):
@@ -731,10 +1117,140 @@ def test_http_login_check_both_attempts_fail(monkeypatch):
     monkeypatch.setattr(ec, "_http_fetch", lambda url, **k: (401, ""))
     executor = ec.default_check_executor()
     passed, detail = executor(
-        {"type": "http_login", "url": "http://127.0.0.1:8081/login.php", "user": "u", "password": "p"}
+        {
+            "type": "http_login",
+            "url": "http://127.0.0.1:8081/login.php",
+            "user": "u",
+            "password": "p",
+            "expect_body_contains": "token",
+        }
     )
     assert not passed
     assert "401" in detail
+
+
+def test_http_login_does_not_accept_ambiguous_200_or_invalid_body(monkeypatch):
+    import tools.eval_checks as ec
+
+    calls = []
+
+    def fake_fetch(url, **kwargs):
+        calls.append(url)
+        return 200, "Invalid credentials"
+
+    monkeypatch.setattr(ec, "_http_fetch", fake_fetch)
+    executor = ec.default_check_executor()
+    base = {"type": "http_login", "url": "http://127.0.0.1:3000/login", "user": "u", "password": "p"}
+
+    passed, detail = executor(base)
+    assert not passed
+    assert "requires expect_body_contains" in detail
+    assert calls == []
+
+    passed, detail = executor({**base, "expect_body_contains": "Welcome"})
+    assert not passed
+    assert "body marker not found" in detail
+    assert calls == [base["url"], base["url"], base["url"], base["url"]]
+
+
+def test_http_login_can_verify_expected_auth_rejection_by_status(monkeypatch):
+    import tools.eval_checks as ec
+
+    monkeypatch.setattr(ec, "_http_fetch", lambda url, **kwargs: (401, "Invalid credentials"))
+    passed, detail = ec.default_check_executor()(
+        {
+            "type": "http_login",
+            "url": "http://127.0.0.1:3000/login",
+            "user": "u",
+            "password": "p",
+            "expect_status": 401,
+        }
+    )
+    assert passed, detail
+
+
+def test_http_login_ignores_environment_proxy_for_loopback_credentials(monkeypatch):
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+    from threading import Thread
+
+    import tools.eval_checks as ec
+
+    proxy_requests: list[str] = []
+    target_requests: list[str] = []
+
+    class ProxyHandler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            proxy_requests.append(self.command)
+            body = b'{"token":"proxy-fabricated"}'
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def do_POST(self):
+            proxy_requests.append(self.command)
+            self.rfile.read(int(self.headers.get("Content-Length", "0")))
+            body = b'{"token":"proxy-fabricated"}'
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, format, *args):
+            pass
+
+    class TargetHandler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            target_requests.append(self.command)
+            body = b"Invalid credentials"
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def do_POST(self):
+            target_requests.append(self.command)
+            self.rfile.read(int(self.headers.get("Content-Length", "0")))
+            body = b"Invalid credentials"
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, format, *args):
+            pass
+
+    proxy = ThreadingHTTPServer(("127.0.0.1", 0), ProxyHandler)
+    target = ThreadingHTTPServer(("127.0.0.1", 0), TargetHandler)
+    threads = [Thread(target=server.serve_forever, daemon=True) for server in (proxy, target)]
+    for thread in threads:
+        thread.start()
+    try:
+        proxy_url = f"http://127.0.0.1:{proxy.server_port}"
+        for variable in ("http_proxy", "HTTP_PROXY", "https_proxy", "HTTPS_PROXY", "all_proxy", "ALL_PROXY"):
+            monkeypatch.setenv(variable, proxy_url)
+        monkeypatch.setenv("no_proxy", "")
+        monkeypatch.setenv("NO_PROXY", "")
+
+        passed, _detail = ec.default_check_executor()(
+            {
+                "type": "http_login",
+                "url": f"http://127.0.0.1:{target.server_port}/login",
+                "user": "u",
+                "password": "p",
+                "expect_status": 200,
+                "expect_body_contains": '"token"',
+            }
+        )
+        assert not passed
+        assert proxy_requests == []
+        assert target_requests
+    finally:
+        for server in (proxy, target):
+            server.shutdown()
+            server.server_close()
+        for thread in threads:
+            thread.join(timeout=2)
 
 
 def test_http_checks_refuse_non_loopback(monkeypatch):
@@ -749,21 +1265,387 @@ def test_http_checks_refuse_non_loopback(monkeypatch):
         {"type": "http_request", "url": "http://10.0.0.5/"},
         {"type": "http_login", "url": "http://example.com/login", "user": "u", "password": "p"},
         {"type": "http_request", "url": "http://192.168.1.10:8081/"},
+        {"type": "http_request", "url": "http://local/metadata"},
+        {"type": "http_request", "url": "http://localhost:8081/"},
     ):
         passed, detail = executor(check)
         assert not passed
         assert "refused" in detail
 
 
-def test_shell_command_check_with_sync_callable_session():
+def test_http_checks_are_bound_to_the_declared_oracle_host_and_ports(monkeypatch):
     import tools.eval_checks as ec
 
-    def session(tool_name, arguments):
-        assert tool_name == "run_exploit_terminal"
-        command = arguments["command"]
+    fetched = []
+
+    def fake_fetch(url, **kwargs):
+        fetched.append(url)
+        return 200, "target-specific response"
+
+    monkeypatch.setattr(ec, "_http_fetch", fake_fetch)
+    execute = ec.default_check_executor(target_host="127.0.0.1", target_ports={8081})
+
+    passed, detail = execute(
+        {
+            "type": "http_request",
+            "url": "http://127.0.0.1:8081/status",
+            "expect_body_contains": "target-specific response",
+        }
+    )
+    assert passed, detail
+    for url in (
+        "http://127.0.0.1:2375/",
+        "http://127.0.0.2:8081/",
+        "http://localhost:8081/",
+    ):
+        passed, detail = execute({"type": "http_request", "url": url, "expect_body_contains": "x"})
+        assert not passed
+        assert "oracle target host/port scope" in detail
+    assert fetched == ["http://127.0.0.1:8081/status"]
+
+    no_ports = ec.default_check_executor(target_host="127.0.0.1", target_ports=[])
+    passed, detail = no_ports(
+        {
+            "type": "http_request",
+            "url": "http://127.0.0.1:8081/status",
+            "expect_body_contains": "target-specific response",
+        }
+    )
+    assert not passed
+    assert "oracle target ports are missing" in detail
+
+
+def test_tcp_connect_is_literal_loopback_and_oracle_port_bound(monkeypatch):
+    import socket
+
+    import tools.eval_checks as ec
+
+    listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    listener.bind(("127.0.0.1", 0))
+    listener.listen(1)
+    port = listener.getsockname()[1]
+    try:
+        execute = ec.default_check_executor(
+            target_host="127.0.0.1",
+            target_ports={port},
+            http_timeout=0.2,
+        )
+        passed, detail = execute({"type": "tcp_connect", "host": "127.0.0.1", "port": port})
+        assert passed, detail
+
+        monkeypatch.setattr(ec.socket, "create_connection", lambda *_a, **_kw: pytest.fail("out-of-scope connect"))
+        for check in (
+            {"type": "tcp_connect", "host": "127.0.0.2", "port": port},
+            {"type": "tcp_connect", "host": "127.0.0.1", "port": 22},
+            {"type": "tcp_connect", "host": "192.0.2.1", "port": port},
+            {"type": "tcp_connect", "host": "localhost", "port": port},
+        ):
+            passed, detail = execute(check)
+            assert not passed
+            assert "refused" in detail
+    finally:
+        listener.close()
+
+    unbound = ec.default_check_executor()
+    passed, detail = unbound({"type": "tcp_connect", "host": "127.0.0.1", "port": port})
+    assert not passed
+    assert "target host is missing" in detail
+
+
+def test_http_fetch_rejects_redirects_outside_loopback():
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+    from threading import Thread
+
+    import tools.eval_checks as ec
+
+    class RedirectHandler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(302)
+            self.send_header("Location", "http://example.invalid/metadata")
+            self.end_headers()
+
+        def log_message(self, format, *args):
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), RedirectHandler)
+    thread = Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        with pytest.raises(OSError, match="outside configured loopback origin"):
+            ec._http_fetch(f"http://127.0.0.1:{server.server_port}/redirect")
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+
+
+def test_http_fetch_rejects_redirect_to_another_loopback_authority():
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+    from threading import Thread
+
+    import tools.eval_checks as ec
+
+    class RedirectHandler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(302)
+            self.send_header("Location", f"http://127.0.0.2:{self.server.server_port}/metadata")
+            self.end_headers()
+
+        def log_message(self, format, *args):
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), RedirectHandler)
+    thread = Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        with pytest.raises(OSError, match="outside configured loopback origin"):
+            ec._http_fetch(f"http://127.0.0.1:{server.server_port}/redirect")
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+
+
+def test_http_fetch_itself_refuses_non_loopback_urls(monkeypatch):
+    import tools.eval_checks as ec
+
+    def _must_not_build_opener(*args, **kwargs):
+        raise AssertionError("non-loopback URLs must be rejected before transport setup")
+
+    monkeypatch.setattr(ec._urlrequest, "build_opener", _must_not_build_opener)
+    with pytest.raises(OSError, match="refused non-loopback URL"):
+        ec._http_fetch("http://example.com/metadata")
+
+
+def test_http_fetch_refuses_localhost_alias_without_resolution(monkeypatch):
+    import tools.eval_checks as ec
+
+    def _must_not_build_opener(*args, **kwargs):
+        raise AssertionError("host aliases must be rejected before name resolution")
+
+    monkeypatch.setattr(ec._urlrequest, "build_opener", _must_not_build_opener)
+    with pytest.raises(OSError, match="refused non-loopback URL"):
+        ec._http_fetch("http://localhost:8081/")
+
+
+@pytest.mark.parametrize("path", ["/slow-headers", "/slow-body"])
+def test_http_fetch_enforces_total_deadline_during_headers_and_body(path):
+    import time
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+    from threading import Thread
+
+    import tools.eval_checks as ec
+
+    class SlowServer(ThreadingHTTPServer):
+        daemon_threads = True
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            if self.path == "/slow-headers":
+                # Each line arrives before the socket's inactivity timeout,
+                # but the complete header block exceeds the total deadline.
+                for part in (b"HTTP/1.1 200 OK\r\n", b"Content-Length: 0\r\n", b"\r\n"):
+                    try:
+                        self.wfile.write(part)
+                        self.wfile.flush()
+                    except OSError:
+                        break
+                    time.sleep(0.08)
+                return
+
+            self.send_response(200)
+            self.send_header("Content-Length", "100")
+            self.end_headers()
+            try:
+                for _ in range(100):
+                    self.wfile.write(b"x")
+                    self.wfile.flush()
+                    time.sleep(0.04)
+            except OSError:
+                pass
+
+        def log_message(self, *_args):
+            pass
+
+    server = SlowServer(("127.0.0.1", 0), Handler)
+    thread = Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    started = time.monotonic()
+    try:
+        with pytest.raises(OSError, match="deadline"):
+            ec._http_fetch(f"http://127.0.0.1:{server.server_port}{path}", timeout=0.12)
+        elapsed = time.monotonic() - started
+        assert elapsed < 0.5
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=1)
+
+
+def test_http_fetch_does_not_wait_for_redirect_response_body():
+    import time
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+    from threading import Thread
+
+    import tools.eval_checks as ec
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            if self.path == "/redirect":
+                self.send_response(302)
+                self.send_header("Location", "/final")
+                self.send_header("Content-Length", "100")
+                self.end_headers()
+                try:
+                    self.wfile.write(b"x")
+                    self.wfile.flush()
+                    time.sleep(0.8)
+                    self.wfile.write(b"x" * 99)
+                except OSError:
+                    pass
+                return
+
+            body = b"ok"
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *_args):
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    server.daemon_threads = True
+    thread = Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    started = time.monotonic()
+    try:
+        assert ec._http_fetch(f"http://127.0.0.1:{server.server_port}/redirect", timeout=0.5) == (200, "ok")
+        assert time.monotonic() - started < 0.4
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=1)
+
+
+def test_http_fetch_rejects_streamed_oversize_body():
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+    from threading import Thread
+
+    import tools.eval_checks as ec
+
+    # Exercise the streaming overflow path with a compact local fixture while
+    # keeping the production cap unchanged outside this test.
+    body_limit = 1024
+    body = b"x" * (body_limit + 1)
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200)
+            # No Content-Length: the client must enforce the cap while reading.
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *_args):
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    server.daemon_threads = True
+    thread = Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    old_limit = ec._MAX_HTTP_RESPONSE_BYTES
+    ec._MAX_HTTP_RESPONSE_BYTES = body_limit
+    try:
+        with pytest.raises(OSError, match="response exceeds size limit"):
+            ec._http_fetch(f"http://127.0.0.1:{server.server_port}/oversize", timeout=2)
+    finally:
+        ec._MAX_HTTP_RESPONSE_BYTES = old_limit
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=1)
+
+
+def test_https_connection_deadline_interrupts_tls_handshake(monkeypatch):
+    import socket
+    import time
+
+    import tools.eval_checks as ec
+
+    peer, client_sock = socket.socketpair()
+
+    class SlowTLSSocket:
+        def __init__(self, sock):
+            self._sock = sock
+
+        def shutdown(self, how):
+            self._sock.shutdown(how)
+
+        def close(self):
+            self._sock.close()
+
+        def do_handshake(self):
+            self._sock.recv(1)
+            raise TimeoutError("TLS handshake interrupted by request deadline")
+
+    class SlowTLSContext:
+        def wrap_socket(self, sock, **kwargs):
+            assert kwargs["do_handshake_on_connect"] is False
+            return SlowTLSSocket(sock)
+
+    def fake_tcp_connect(connection):
+        connection.sock = client_sock
+
+    monkeypatch.setattr(ec._httpclient.HTTPConnection, "connect", fake_tcp_connect)
+    deadline = ec._HTTPDeadline()
+    connection = ec._DeadlineHTTPSConnection(
+        "127.0.0.1",
+        timeout=0.12,
+        context=SlowTLSContext(),
+        deadline=deadline,
+    )
+    deadline.start(0.12)
+    started = time.monotonic()
+    try:
+        with pytest.raises(TimeoutError, match="TLS handshake interrupted"):
+            connection.connect()
+        assert time.monotonic() - started < 0.5
+    finally:
+        peer.close()
+        connection.close()
+        with pytest.raises(TimeoutError, match="total deadline"):
+            deadline.finish()
+
+
+@pytest.mark.parametrize(
+    "check",
+    [
+        {"type": "http_request", "url": "http://127.0.0.1:3000/", "expect_body_contains": "{service_marker}"},
+        {
+            "type": "http_login",
+            "url": "http://127.0.0.1:3000/login",
+            "user": "u",
+            "password": "p",
+            "expect_body_contains": "{login_success_marker}",
+        },
+    ],
+)
+def test_http_checks_reject_unresolved_success_markers_before_network(check, monkeypatch):
+    import tools.eval_checks as ec
+
+    monkeypatch.setattr(ec, "_http_fetch", lambda *_a, **_kw: pytest.fail("unresolved marker reached HTTP"))
+    execute = ec.default_check_executor(target_host="127.0.0.1", target_ports={3000})
+    passed, detail = execute(check)
+    assert not passed
+    assert "expect_body_contains must be resolved" in detail
+
+
+def test_shell_command_check_with_explicit_target_executor():
+    import tools.eval_checks as ec
+
+    def target_shell_executor(command):
         return {"output": "0\n" if command == "id -u" else ""}
 
-    executor = ec.default_check_executor(session=session)
+    executor = ec.default_check_executor(target_shell_executor=target_shell_executor)
     passed, detail = executor({"type": "shell_command", "exec": "id -u", "expect_stdout": "0"})
     assert passed, detail
 
@@ -788,18 +1670,18 @@ def test_shell_command_check_without_session_is_unverified():
 
 
 @pytest.mark.asyncio
-async def test_shell_command_check_bridges_async_session_via_bound_loop():
-    """An async MCP session is bridged onto its bound loop from the worker thread."""
+async def test_shell_command_check_bridges_async_target_executor_via_bound_loop():
+    """An explicit target-bound async executor is bridged from a worker thread."""
     import asyncio
 
     import tools.eval_checks as ec
 
-    class FakeAsyncSession:
-        async def call_tool(self, tool_name, arguments):
-            return SimpleNamespace(content=[SimpleNamespace(text="uid=0(root)")])
-
     loop = asyncio.get_running_loop()
-    executor = ec.default_check_executor(session=FakeAsyncSession(), loop=loop)
+
+    async def target_shell_executor(command):
+        return SimpleNamespace(content=[SimpleNamespace(text="uid=0(root)")])
+
+    executor = ec.default_check_executor(target_shell_executor=target_shell_executor, loop=loop)
     result = await asyncio.to_thread(
         lambda: executor({"type": "shell_command", "exec": "id", "expect_stdout": "uid=0"})
     )
@@ -835,9 +1717,10 @@ def test_host_owned_when_any():
     assert _host_owned_when_met(results, "any") is True
     assert _host_owned_when_met(results, "any") is True
     assert _host_owned_when_met(_flag_results(set(), ["a"]), "any") is False
-    # Unrecognized / missing values fall back to "any".
-    assert _host_owned_when_met(results, "bogus") is True
+    # Missing condition preserves the documented "any" default; typos fail closed.
     assert _host_owned_when_met(results, None) is True
+    with pytest.raises(ValueError, match="host_owned_when"):
+        _host_owned_when_met(results, "bogus")
 
 
 def test_host_owned_when_all():
@@ -847,6 +1730,13 @@ def test_host_owned_when_all():
     assert _host_owned_when_met(_flag_results({"a", "b"}, all_ids), "all") is True
     assert _host_owned_when_met(_flag_results({"a"}, all_ids), "all") is False
     assert _host_owned_when_met(_flag_results(set(), all_ids), "all") is False
+
+
+def test_host_owned_when_never_never_counts_flags_as_ownership():
+    from tools.eval_harness import _host_owned_when_met
+
+    assert _host_owned_when_met(_flag_results({"a"}, ["a"]), "never") is False
+    assert _host_owned_when_met(_flag_results(set(), ["a"]), "never") is False
 
 
 def test_host_owned_when_list_of_ids():
@@ -866,13 +1756,21 @@ def test_host_owned_when_list_of_ids():
 
 
 def _report_with_scores(**scores_by_target):
-    from tools.eval_harness import EvalReport, TargetScore
+    from tools.eval_harness import EvalReport, ReliabilityMetrics, TargetScore
 
     targets = [
         TargetScore(target_id=tid, flags_captured=1, flags_total=2, hosts_owned=1, hosts_total=1, score=score)
         for tid, score in scores_by_target.items()
     ]
-    return EvalReport(run_id="r", timestamp="t", targets=targets)
+    reliability = ReliabilityMetrics(
+        live_outcome="PASS",
+        targets_run=len(targets),
+        verified_compromise_rate=0.0,
+        false_compromise_rate=0.0,
+        stuck_loop_rate=0.0,
+        scope_violation_count=0,
+    )
+    return EvalReport(run_id="r", timestamp="t", targets=targets, live_outcome="PASS", reliability=reliability)
 
 
 def test_save_baseline_and_check_regression_pass(tmp_path):

@@ -5,7 +5,6 @@ from __future__ import annotations
 import os
 import platform
 import shutil
-import subprocess
 import sys
 from pathlib import Path
 from typing import Any
@@ -139,10 +138,18 @@ def _register_privilege_tools(mcp: Any, *, ctx: ToolContext) -> None:
         """Check which security testing tools are installed and available on the system.
         Provide a space-separated list of tool names (e.g., 'nmap metasploit-framework hydra gobuster'),
         or leave empty to check a default set of common pentesting tools.
-        Returns version info and install status for each tool, plus OS details.
+        Returns executable locations and install status for each tool, plus OS details.
+        This diagnostic never executes discovered host binaries.
         """
         default_tools = _check_env_default_tools()
         check_list = [t.strip() for t in tools.split() if t.strip()] if tools else default_tools
+
+        # These names are supplied by the model. `which` is a lookup, but
+        # launching the resolved binary with `--version` would turn a crafted
+        # name or a shadowed PATH entry into arbitrary host code execution.
+        # Keep the probe informational: discovering a path never executes it.
+        if any(not tool or tool in {".", ".."} or "/" in tool or "\\" in tool for tool in check_list):
+            return "BLOCKED: provide executable names only; filesystem paths are not accepted."
 
         result_lines = ["ENVIRONMENT_CHECK:", ""]
         result_lines.append(f"OS: {_platform_system()} {platform.release()} ({platform.machine()})")
@@ -155,28 +162,7 @@ def _register_privilege_tools(mcp: Any, *, ctx: ToolContext) -> None:
             path = shutil.which(tool)
             if path:
                 installed.append(tool)
-                version = "unknown"
-                try:
-                    proc = subprocess.run(
-                        [tool, "--version"],
-                        capture_output=True,
-                        text=True,
-                        timeout=10,
-                    )
-                    if proc.returncode == 0 and proc.stdout:
-                        version = proc.stdout.strip().split("\n")[0][:100]
-                    else:
-                        proc2 = subprocess.run(
-                            [tool, "-version"],
-                            capture_output=True,
-                            text=True,
-                            timeout=10,
-                        )
-                        if proc2.returncode == 0 and proc2.stdout:
-                            version = proc2.stdout.strip().split("\n")[0][:100]
-                except _EXC_GROUP_CATCH:
-                    pass
-                result_lines.append(f"  [+] {tool}: {path}  ({version})")
+                result_lines.append(f"  [+] {tool}: {path}  (version not probed)")
             else:
                 missing.append(tool)
                 result_lines.append(f"  [-] {tool}: NOT FOUND")

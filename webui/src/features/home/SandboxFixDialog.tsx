@@ -77,7 +77,7 @@ export function SandboxFixDialog({
             Fix Docker sandbox
           </DialogTitle>
           <DialogDescription className="text-sm text-left">
-            BreachPilot is currently executing commands directly on this machine because the Docker sandbox could not start.
+            Attack execution is blocked because the Docker sandbox is unavailable. Fixing Docker restores contained execution.
           </DialogDescription>
         </DialogHeader>
 

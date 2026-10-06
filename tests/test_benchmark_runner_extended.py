@@ -33,7 +33,7 @@ def _config(tmp_path: Path, **bm) -> dict[str, Any]:
         "benchmark": {"output_dir": str(tmp_path / "bench"), "sandbox_required": False, **bm},
         "models": {"default_alias": "glm"},
         "mcp": {"http_port": 8001},
-        "sandbox": {"enabled": False},
+        "sandbox": {"enabled": True, "network": {"map_host_loopback": True}},
     }
 
 
@@ -252,6 +252,17 @@ async def test_oracle_success_drives_verified(tmp_path):
                 telemetry=TrialTelemetry(tool_calls=5, total_tokens=100),
                 agent_claimed_success=False,
                 claimed_summary="",
+                final_result={
+                    "records": [
+                        {
+                            "action": "run_exploit_terminal",
+                            "target_ip": "127.0.0.1",
+                            "status": "completed",
+                            "exploit_outcome": "compromise",
+                            "outcome_evidence": ["shell:uid-zero"],
+                        }
+                    ]
+                },
             )
         ]
     )

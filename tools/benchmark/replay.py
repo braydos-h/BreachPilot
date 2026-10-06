@@ -11,15 +11,19 @@ the recorded metadata pins it, and unknown metadata is reported as such.
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from tools.benchmark.models import RunConfig, RunEnvironment
 
 __all__ = ["REPLAY_PIN_FIELDS", "build_replay_manifest", "check_reproducibility"]
 
+_IMMUTABLE_IMAGE_PIN = re.compile(r"(?:[^@]+@)?sha256:[0-9a-f]{64}$")
+
 #: Fields a stored run must pin (or record unknown) to be reproducible.
 REPLAY_PIN_FIELDS = (
     "git_sha",
+    "git_dirty",
     "model_provider",
     "model_alias",
     "model_id",
@@ -28,6 +32,7 @@ REPLAY_PIN_FIELDS = (
     "benchmark_config_hash",
     "sandbox_image",
     "sandbox_image_digest",
+    "target_images",
 )
 
 
@@ -59,7 +64,7 @@ def build_replay_manifest(
         "sandbox_image": env.get("sandbox_image"),
         "sandbox_image_digest": env.get("sandbox_image_digest"),
         "sandbox_enabled": env.get("sandbox_enabled"),
-        "target_images": dict(target_images or {}),
+        "target_images": dict(env.get("target_images", {}) if target_images is None else target_images),
         "trials": config.trials,
         "replay_command": _replay_command(suite, config),
     }
@@ -92,8 +97,17 @@ def check_reproducibility(manifest: dict[str, Any], current: dict[str, Any]) -> 
     for field_name in REPLAY_PIN_FIELDS:
         recorded = manifest.get(field_name)
         now = current.get(field_name)
+        if field_name == "target_images":
+            status = _compare_target_image_pins(recorded, now)
+            report["pinned"][field_name] = {"recorded": recorded, "current": now, "status": status}
+            if status != "match":
+                all_match = False
+            else:
+                any_known = True
+            continue
         if recorded in (None, "unknown") or now in (None, "unknown"):
             report["pinned"][field_name] = {"recorded": recorded, "current": now, "status": "unknown"}
+            all_match = False
             continue
         any_known = True
         status = "match" if recorded == now else "mismatch"
@@ -102,3 +116,21 @@ def check_reproducibility(manifest: dict[str, Any], current: dict[str, Any]) -> 
         report["pinned"][field_name] = {"recorded": recorded, "current": now, "status": status}
     report["reproducible"] = all_match and any_known
     return report
+
+
+def _compare_target_image_pins(recorded: Any, current: Any) -> str:
+    """Compare complete per-scenario maps of immutable image digests."""
+    for pins in (recorded, current):
+        if not isinstance(pins, dict) or not pins:
+            return "unknown"
+        if any(
+            not isinstance(scenario_id, str)
+            or not scenario_id.strip()
+            or not isinstance(pin, str)
+            or _IMMUTABLE_IMAGE_PIN.fullmatch(pin.strip()) is None
+            for scenario_id, pin in pins.items()
+        ):
+            return "unknown"
+    if set(recorded) != set(current):
+        return "mismatch"
+    return "match" if recorded == current else "mismatch"

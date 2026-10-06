@@ -3,7 +3,7 @@ title: Config Reference (Generated)
 description: Machine-readable table for every config.yaml leaf key — type, defaults, allowed values, source location, consumers, effect, env override, restart, subsystem and tests. Verified against config.yaml + CONFIG_SCHEMA.
 source: [config.yaml, tools/config_manager.py]
 generated_from: [config.yaml, tools/config_manager.py]
-verify: every key listed exists in config.yaml at time of generation (2026-09-22); schema defaults shown where present.
+verify: every key listed exists in config.yaml at time of generation (2026-10-04); schema defaults shown where present.
 ---
 
 # Config Reference (Generated)
@@ -13,7 +13,7 @@ verify: every key listed exists in config.yaml at time of generation (2026-09-22
 Source locations use `config.yaml:<top-level-line>` + `tools/config_manager.py:CONFIG_SCHEMA` path. Consumers are primary `file:line` citations; full call graph is in `docs/module-guide.md`.
 
 
-_Generated 2026-09-22 from `config.yaml` (447 leaf keys, 46 top-level blocks). Lab-only keys (not in `CONFIG_SCHEMA`) are marked._
+_Generated 2026-10-04 from `config.yaml` (447 leaf keys, 46 top-level blocks). Lab-only keys (not in `CONFIG_SCHEMA`) are marked._
 
 | Key | Type | Default (schema → lab) | Allowed | Source | Consumer(s) | Effect | Env override | Restart | Subsystem | Tests |
 |-----|------|----------------------|---------|--------|-------------|--------|--------------|---------|-----------|-------|
@@ -93,7 +93,7 @@ _Generated 2026-09-22 from `config.yaml` (447 leaf keys, 46 top-level blocks). L
 | `caldera.api_key_env` | `str` | `'CALDERA_API_KEY'` | — | `config.yaml:507` + `CONFIG_SCHEMA['caldera'].api_key_env` | plugins/caldera/plugin.py | Caldera emulation | `CALDERA_API_KEY` | no | ad |  |
 | `caldera.enabled` | `bool` | `False (schema) → True (lab)` | — | `config.yaml:507` + `CONFIG_SCHEMA['caldera'].enabled` | plugins/caldera/plugin.py | Caldera emulation | — | no | ad |  |
 | `caldera.url` | `str` | `''` | — | `config.yaml:507` + `CONFIG_SCHEMA['caldera'].url` | plugins/caldera/plugin.py | Caldera emulation | — | no | ad |  |
-| `chatgpt.enabled` | `bool` | `False (schema) → True (lab)` | — | `config.yaml:570` + `CONFIG_SCHEMA['chatgpt'].enabled` | providers/chatgpt_provider.py, model_router.py, doctor.py | ChatGPT proxy | — | yes | providers | tests/test_chatgpt*.py |
+| `chatgpt.enabled` | `bool` | `False (schema) → True (lab)` | — | `config.yaml:567` + `CONFIG_SCHEMA['chatgpt'].enabled` | providers/chatgpt_provider.py, model_router.py, doctor.py | ChatGPT proxy | — | yes | providers | tests/test_chatgpt*.py |
 | `cve_lookup.api_key_env` | `str` | `'NVD_API_KEY'` | — | `config.yaml:115` + `CONFIG_SCHEMA['cve_lookup'].api_key_env` | mcp_shared, cve_lookup.py | NVD + KEV/EPSS | `NVD_API_KEY` | no | research/cve | tests/test_cve_lookup.py |
 | `cve_lookup.cache_max_entries` | `int` | `100` | — | `config.yaml:115` + `CONFIG_SCHEMA['cve_lookup'].cache_max_entries` | mcp_shared, cve_lookup.py | NVD + KEV/EPSS | — | no | research/cve | tests/test_cve_lookup.py |
 | `cve_lookup.cache_ttl_seconds` | `int` | `3600` | — | `config.yaml:115` + `CONFIG_SCHEMA['cve_lookup'].cache_ttl_seconds` | mcp_shared, cve_lookup.py | NVD + KEV/EPSS | — | no | research/cve | tests/test_cve_lookup.py |
@@ -235,7 +235,7 @@ _Generated 2026-09-22 from `config.yaml` (447 leaf keys, 46 top-level blocks). L
 | `ollama.embed_host` | `str` | `'http://localhost:11434'` | — | `config.yaml:1` + `CONFIG_SCHEMA['ollama'].embed_host` | config_manager.py, tools/exploit_agent/runner/_impl.py | Embedding host fallback | — | yes | memory/embeddings | tests/test_config_manager.py |
 | `ollama.host` | `str` | `'https://api.ollama.com'` | — | `config.yaml:1` + `CONFIG_SCHEMA['ollama'].host` | model_router.py, doctor.py | Ollama endpoint for chat/generate | — | yes | models/provider | tests/test_config_manager.py |
 | `ollama.model` | `str` | `'glm-5.2:cloud'` | — | `config.yaml:1` + `CONFIG_SCHEMA['ollama'].model` | config_manager.py, interactive_menu.py | Default concrete model id | — | yes | models | tests/test_config_manager.py |
-| `opencode_go.enabled` | `bool` | `False (schema) → True (lab)` | — | `config.yaml:572` + `CONFIG_SCHEMA['opencode_go'].enabled` |  | — | — | yes | providers | — |
+| `opencode_go.enabled` | `bool` | `False (schema) → True (lab)` | — | `config.yaml:569` + `CONFIG_SCHEMA['opencode_go'].enabled` |  | — | — | yes | providers | — |
 | `operator_connection.auto_start_listener` | `bool` | `True` | — | `config.yaml:528` + `CONFIG_SCHEMA['operator_connection'].auto_start_listener` |  | — | — | no | operator | — |
 | `operator_connection.beacon_interval_seconds` | `int` | `300` | — | `config.yaml:528` + `CONFIG_SCHEMA['operator_connection'].beacon_interval_seconds` |  | — | — | no | operator | — |
 | `operator_connection.default_callback_port` | `int` | `4444` | — | `config.yaml:528` + `CONFIG_SCHEMA['operator_connection'].default_callback_port` |  | — | — | no | operator | — |
@@ -365,7 +365,7 @@ _Generated 2026-09-22 from `config.yaml` (447 leaf keys, 46 top-level blocks). L
 | `sandbox.env_passthrough` | `list` | `[]` | — | `config.yaml:536` + `CONFIG_SCHEMA['sandbox'].env_passthrough` |  | — | — | no | sandbox | — |
 | `sandbox.fallback_native` | `bool` | `False` | — | `config.yaml:536` + `CONFIG_SCHEMA['sandbox'].fallback_native` |  | — | — | no | sandbox | — |
 | `sandbox.image` | `str` | `'breachpilot-sandbox:latest'` | — | `config.yaml:536` + `CONFIG_SCHEMA['sandbox'].image` |  | — | — | no | sandbox | — |
-| `sandbox.multi_net_raw` | `bool` | `True` | — | `config.yaml:536` + `CONFIG_SCHEMA['sandbox'].multi_net_raw` |  | — | — | no | sandbox | — |
+| `sandbox.multi_net_raw` | `bool` | `False` | — | `config.yaml:536` + `CONFIG_SCHEMA['sandbox'].multi_net_raw` |  | — | — | no | sandbox | — |
 | `sandbox.network.allow_dns` | `str` | `'controlled'` | — | `config.yaml:536` + `CONFIG_SCHEMA['sandbox'].network.allow_dns` |  | — | — | no | sandbox | — |
 | `sandbox.network.allow_gateway` | `bool` | `False` | — | `config.yaml:536` + `CONFIG_SCHEMA['sandbox'].network.allow_gateway` |  | — | — | no | sandbox | — |
 | `sandbox.network.allow_research_hosts` | `bool` | `False` | — | `config.yaml:536` + `CONFIG_SCHEMA['sandbox'].network.allow_research_hosts` |  | — | — | no | sandbox | — |

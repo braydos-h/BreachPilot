@@ -138,7 +138,7 @@ function ProviderStatusRow() {
           ) : provider === "opencode_go" ? (
             <OpenCodeGoControls />
           ) : (
-            <p className="text-xs text-muted-foreground">Local Ollama models. Embeddings also use Ollama.</p>
+            <p className="text-xs text-muted-foreground">Use Ollama for local chat models; configure embeddings separately.</p>
           )}
         </div>
       )}

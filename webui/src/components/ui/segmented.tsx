@@ -1,3 +1,4 @@
+import { useRef } from "react";
 import { cn } from "@/lib/utils";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
@@ -7,11 +8,14 @@ interface SegmentedControlProps {
   onChange: (value: string) => void;
   options: Array<{ value: string; label: string }>;
   /** Accessible name for the radiogroup when no visible label is associated. */
-  label?: string;
+  label: string;
   disabled?: boolean;
 }
 
 export function SegmentedControl({ value, onChange, options, label, disabled }: SegmentedControlProps) {
+  const buttons = useRef<Array<HTMLButtonElement | null>>([]);
+  const selectedIndex = options.findIndex((option) => option.value === value);
+  const tabStop = selectedIndex < 0 ? 0 : selectedIndex;
   return (
     <div
       className={cn("inline-flex h-9 items-center rounded-md border bg-muted/40 p-0.5", disabled && "opacity-60")}
@@ -19,10 +23,26 @@ export function SegmentedControl({ value, onChange, options, label, disabled }: 
       aria-label={label}
       aria-disabled={disabled || undefined}
     >
-      {options.map((opt) => (
+      {options.map((opt, index) => (
         <button
           key={opt.value}
           type="button"
+          ref={(element) => { buttons.current[index] = element; }}
+          tabIndex={index === tabStop ? 0 : -1}
+          onKeyDown={(event) => {
+            let next: number;
+            if (event.key === "ArrowRight" || event.key === "ArrowDown") next = (index + 1) % options.length;
+            else if (event.key === "ArrowLeft" || event.key === "ArrowUp") next = (index - 1 + options.length) % options.length;
+            else if (event.key === "Home") next = 0;
+            else if (event.key === "End") next = options.length - 1;
+            else return;
+            event.preventDefault();
+            const option = options[next];
+            if (!disabled && option) {
+              onChange(option.value);
+              buttons.current[next]?.focus();
+            }
+          }}
           role="radio"
           aria-checked={value === opt.value}
           disabled={disabled}
@@ -42,14 +62,16 @@ export function SegmentedControl({ value, onChange, options, label, disabled }: 
 }
 
 interface TriStateToggleProps {
+  label: string;
   value: boolean | null;
   onChange: (value: boolean | null) => void;
   labels: { true: string; false: string; null: string };
 }
 
-export function TriStateToggle({ value, onChange, labels }: TriStateToggleProps) {
+export function TriStateToggle({ value, onChange, labels, label }: TriStateToggleProps) {
   return (
     <SegmentedControl
+      label={label}
       value={String(value)}
       onChange={(v) => onChange(v === "true" ? true : v === "false" ? false : null)}
       options={[

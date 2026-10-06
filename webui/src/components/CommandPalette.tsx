@@ -25,16 +25,39 @@ export function CommandPalette({
   const base: PaletteEntry[] = useMemo(
     () => [
       { label: "New run", hint: "Command", to: "/runs/new", keywords: "create start recon attack" },
-      { label: "Runs", hint: "Go to", to: "/runs", keywords: "sessions list" },
-      { label: "Connections", hint: "Go to", to: "/connections" },
-      ...PRODUCT_ROUTES.map((r) => ({ label: r.label, hint: "Go to", to: r.path, keywords: r.helpDescription })),
+      ...PRODUCT_ROUTES.map((r) => ({
+        label: r.label,
+        hint: "Go to",
+        to: r.path,
+        keywords: `${r.helpDescription} ${r.path === "/runs" ? "sessions list" : ""}`,
+      })),
       { label: "Provider settings", hint: "Settings", to: "/system", keywords: "model ollama keys" },
-      { label: "Run local self-test", hint: "Command", to: "/system", keywords: "diagnostics smoke localhost" },
+      { label: "Open diagnostics", hint: "Go to", to: "/system", keywords: "self-test smoke localhost" },
       { label: "Help & reference", hint: "Go to", to: "/help" },
     ],
     [],
   );
-  const all = [...base, ...extraEntries];
+  const all: PaletteEntry[] = [];
+  const visibleEntries = new Map<string, number[]>();
+  for (const entry of [...base, ...extraEntries]) {
+    const identity = JSON.stringify([entry.label, entry.to ?? "", entry.hint ?? ""]);
+    const matching = visibleEntries.get(identity) ?? [];
+    const sameActionIndex = matching.find((index) => all[index]?.action === entry.action);
+    const existing = sameActionIndex === undefined ? undefined : all[sameActionIndex];
+    if (sameActionIndex !== undefined && existing) {
+      const keywords = new Set(
+        [existing.keywords, entry.keywords]
+          .filter((value): value is string => Boolean(value))
+          .flatMap((value) => value.split(/\s+/)),
+      );
+      all[sameActionIndex] = { ...existing, keywords: [...keywords].join(" ") };
+      continue;
+    }
+    matching.push(all.length);
+    visibleEntries.set(identity, matching);
+    all.push(entry);
+  }
+  const entryKeys = new Map(all.map((entry, index) => [entry, index]));
   const q = query.trim().toLowerCase();
   const results = !q
     ? all.slice(0, 9)
@@ -53,11 +76,11 @@ export function CommandPalette({
             className="w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground"
           />
         </DialogHeader>
-        <div className="max-h-80 overflow-y-auto p-1.5" role="listbox" aria-label="Search results">
+        <nav className="max-h-80 overflow-y-auto p-1.5" aria-label="Search results">
           {results.length === 0 && <p className="px-3 py-6 text-sm text-muted-foreground">No matches. Try “run”, “provider”, or “evidence”.</p>}
           {results.map((r) => (
             <Link
-              key={`${r.label}-${r.to ?? r.hint}`}
+              key={entryKeys.get(r)}
               to={r.to ?? "/"}
               onClick={() => {
                 r.action?.();
@@ -70,7 +93,7 @@ export function CommandPalette({
               {r.hint && <span className="text-xs text-muted-foreground">{r.hint}</span>}
             </Link>
           ))}
-        </div>
+        </nav>
       </DialogContent>
     </Dialog>
   );

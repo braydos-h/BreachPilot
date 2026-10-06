@@ -17,13 +17,11 @@ exploit agent (the LLM driving ``run_exploit_agent``):
 Design constraint: the swarm agents (``tools/swarm/agents/*``) live in the
 SAME process as the MCP server (the server imports them at boot), so a
 sub-agent can call ``SwarmOrchestrator.route()`` directly — no MCP
-client/server round-trip. The sub-agent uses the swarm's Path-B model
-(attack modules, ReconPipeline, NVDClient, ExploitSearch — all in-process
-Python calls) so it does NOT need a live MCP ``ClientSession``. This is the
-crucial difference from ``ExploitAgent`` Path A (which needs the main loop's
-session): the sub-agent does its recon/vuln-research work in-process and
-writes results to a per-subagent JSON file the main AI reads back via
-``await_subagent``.
+client/server round-trip. Recon uses the MCP server's pinned sandbox worker
+context; research and exploit modules run in-process without a live MCP
+``ClientSession``. This is the crucial difference from ``ExploitAgent`` Path A
+(which needs the main loop's session). Results are written to a per-subagent
+JSON file the main AI reads back via ``await_subagent``.
 
 Safety: the sub-agent inherits the same target-IP allowlist lock as the
 main AI. ``spawn_subagent`` validates the target against
@@ -43,6 +41,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+from tools.exceptions import _EXC_GROUP_CATCH, _is_exception_group, _log_nested_exceptions
 from tools.mcp_shared import check_targets_allowlist
 from tools.mcp_tools.registry import ToolContext
 from tools.validation_utils import validate_target_or_ip
@@ -59,15 +58,18 @@ class _SubagentManager:
 
     A process-singleton (one instance per MCP server process). The swarm
     agents run in-process via ``SwarmOrchestrator.route()`` (Path B — no live
-    MCP ClientSession needed; the agents use ReconPipeline / NVDClient /
-    attack modules directly). Results are written to per-subagent JSON files
-    under the workspace so ``await_subagent`` can read them back even if the
-    task already completed.
+    MCP ClientSession needed). Target-active recon requires the supplied
+    ``tool_context`` and routes through the sandbox recon adapter; it has no
+    host-side ``ReconPipeline`` fallback. Other specialist work uses its
+    configured research and attack-module adapters. Results are written to
+    per-subagent JSON files under the workspace so ``await_subagent`` can read
+    them back even if the task already completed.
     """
 
-    def __init__(self, workspace: Path, config: dict[str, Any] | None) -> None:
+    def __init__(self, workspace: Path, config: dict[str, Any] | None, tool_context: ToolContext | None = None) -> None:
         self._workspace = workspace
         self._config = config or {}
+        self._tool_context = tool_context
         self._tasks: dict[str, asyncio.Task[Any]] = {}
         self._results: dict[str, dict[str, Any]] = {}
         self._lock = asyncio.Lock()
@@ -90,6 +92,7 @@ class _SubagentManager:
             "config": self._config,
             "workspace_root": self._workspace,
             "reports_dir": self._workspace,
+            "tool_context": self._tool_context,
         }
         self._orchestrator = SwarmOrchestrator(
             context,
@@ -151,10 +154,12 @@ class _SubagentManager:
                 result_dict["findings"] = agent_result.findings
                 result_dict["new_tasks"] = agent_result.new_tasks
                 result_dict["execution_time"] = time.monotonic() - start
-            except Exception as exc:  # noqa: BLE001 — never silently drop a sub-agent  # ponytail: bare except intentional
+            except _EXC_GROUP_CATCH as exc:  # noqa: BLE001 — persist failures, including MCP exception groups
                 result_dict["status"] = "failed"
                 result_dict["error"] = f"subagent crashed: {exc}"
                 result_dict["execution_time"] = time.monotonic() - start
+                if _is_exception_group(exc):
+                    _log_nested_exceptions(exc)
             finally:
                 result_dict["completed_at"] = time.time()
                 # Write the result file so await_subagent can read it back
@@ -201,11 +206,13 @@ class _SubagentManager:
             }
 
         # Wait for the task, with a ceiling so a stuck sub-agent can't wedge
-        # the main AI forever. ``asyncio.wait_for`` raises TimeoutError; we
-        # catch it and return a partial/timeout result instead of raising
-        # (the main AI's tool call shouldn't crash on a slow sub-agent).
+        # the main AI forever. Shield the worker task: cancelling this waiter
+        # cannot stop the synchronous route running in ``asyncio.to_thread``.
+        # Keep the handle tracked after timeout so callers can poll again and
+        # retrieve the eventual result instead of losing ownership of active
+        # target work.
         try:
-            await asyncio.wait_for(task, timeout=timeout_seconds)
+            await asyncio.wait_for(asyncio.shield(task), timeout=timeout_seconds)
         except asyncio.TimeoutError:
             return {
                 "subagent_id": subagent_id,
@@ -245,10 +252,14 @@ class _SubagentManager:
 _MANAGER: _SubagentManager | None = None
 
 
-def _get_manager(workspace: Path, config: dict[str, Any] | None) -> _SubagentManager:
+def _get_manager(
+    workspace: Path,
+    config: dict[str, Any] | None,
+    tool_context: ToolContext | None = None,
+) -> _SubagentManager:
     global _MANAGER
-    if _MANAGER is None:
-        _MANAGER = _SubagentManager(workspace, config)
+    if _MANAGER is None or _MANAGER._workspace != workspace or _MANAGER._tool_context is not tool_context:
+        _MANAGER = _SubagentManager(workspace, config, tool_context)
     return _MANAGER
 
 
@@ -327,7 +338,7 @@ def register_parallel_agent_tools(mcp: Any, *, ctx: ToolContext) -> None:
         if not allowed:
             return f"BLOCKED: target {target!r} not in allowlist: {reason}"
 
-        manager = _get_manager(workspace, config)
+        manager = _get_manager(workspace, config, ctx)
         result = await manager.spawn(
             phase=phase,
             target=target,
@@ -359,7 +370,7 @@ def register_parallel_agent_tools(mcp: Any, *, ctx: ToolContext) -> None:
         if not subagent_id or not subagent_id.strip():
             return "BLOCKED: subagent_id is required."
         timeout = max(1, min(int(timeout_seconds), 3600))  # cap at 1 hour
-        manager = _get_manager(workspace, config)
+        manager = _get_manager(workspace, config, ctx)
         result = await manager.await_result(subagent_id, timeout_seconds=timeout)
         return json.dumps(result, default=str)
 
@@ -375,6 +386,6 @@ def register_parallel_agent_tools(mcp: Any, *, ctx: ToolContext) -> None:
         Returns:
             JSON array of {subagent_id, phase, target, status, started_at}.
         """
-        manager = _get_manager(workspace, config)
+        manager = _get_manager(workspace, config, ctx)
         live = manager.list_live()
         return json.dumps(live, default=str)

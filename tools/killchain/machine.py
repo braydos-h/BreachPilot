@@ -133,12 +133,17 @@ class KillChainMachine:
 
     # -- verification --------------------------------------------------------
 
-    def _executor(self) -> Callable[[dict[str, Any]], tuple[bool, str]]:
+    def _executor(self, *, target_host: str, target_ports: list[int]) -> Callable[[dict[str, Any]], tuple[bool, str]]:
         if self.check_executor is not None:
             return self.check_executor
         from tools.eval_checks import default_check_executor
 
-        return default_check_executor(session=self.session, workspace=str(self.workspace) if self.workspace else None)
+        return default_check_executor(
+            session=self.session,
+            workspace=str(self.workspace) if self.workspace else None,
+            target_host=target_host,
+            target_ports=target_ports,
+        )
 
     # -- transitions ---------------------------------------------------------
 
@@ -195,6 +200,12 @@ class KillChainMachine:
             return {"success": False, "error": error, "blocked": True, "from_state": from_state, "to_state": to_state}
 
         ctx: dict[str, Any] = {**(context or {}), "target_ip": target}
+        target_port = _context_port(ctx.get("port"))
+        if target_port is not None:
+            # The placeholder resolver formats strings only. Normalize this
+            # validated numeric field for URL construction; the TCP check
+            # converts it back to an integer below.
+            ctx["port"] = str(target_port)
         steps: list[dict[str, Any]] = []
         for step in edge["playbook"]:
             tool_name = str(step.get("tool", ""))
@@ -220,7 +231,7 @@ class KillChainMachine:
         checks: list[dict[str, Any]] = []
         from tools.eval_harness import verify_flag_check
 
-        executor = self._executor()
+        executor = self._executor(target_host=target, target_ports=[target_port] if target_port is not None else [])
         all_passed = True
         for spec in edge["verify"]:
             resolved_spec = _resolve_check_spec(spec, ctx)
@@ -418,7 +429,24 @@ def _resolve_check_spec(spec: dict[str, Any], ctx: dict[str, Any]) -> dict[str, 
     inner = resolved.get("check")
     if isinstance(inner, dict):
         resolved["check"] = {k: resolve_placeholders(v, ctx) for k, v in inner.items()}
+    if resolved.get("type") == "tcp_connect":
+        port = resolved.get("port")
+        if isinstance(port, str) and port.isascii() and port.isdecimal():
+            resolved["port"] = int(port)
     return resolved
+
+
+def _context_port(value: Any) -> int | None:
+    """Parse one TCP port from the operator context without accepting bools."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        port = value
+    elif isinstance(value, str) and value.strip().isascii() and value.strip().isdecimal():
+        port = int(value.strip())
+    else:
+        return None
+    return port if 1 <= port <= 65535 else None
 
 
 def edges_from_safe(state: str) -> list[dict[str, Any]]:

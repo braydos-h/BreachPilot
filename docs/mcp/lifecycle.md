@@ -100,7 +100,7 @@ except _EXC_GROUP_CATCH as exc:
 | `EXPLOIT_TARGET_DOMAIN` | `original_target` (domain string) | same union | Lets HTTP tools use Host/SNI |
 | `AI_NMAP_MULTI_MODEL_ENABLED` | `1/0` when `multi_model_enabled` not None | `tools/mcp_tools/registry._multi_model_enabled` | Per-run peer-consult override |
 | `AI_NMAP_ACTIVE_MODEL_ALIAS` | `active_model_alias` when non-empty | `tools/mcp_tools/registry._resolve_consult_aliases` | Excludes active model from self-consult |
-| `MCP_HTTP_TOKEN` | operator env (passed through) | `tools/mcp_shared.run_mcp_http_server` server + `_streamable_http_transport` client | Optional bearer secret |
+| `MCP_HTTP_TOKEN` | operator env (passed through) | `tools/mcp_shared.run_mcp_http_server` server + `_streamable_http_transport` client | Required for non-loopback binds; optional on loopback |
 
 `_allowed_target_list` unions `config["exploit"]["allowed_targets"]` with those env vars plus `EXPLOIT_DISCOVERED_TARGETS` (comma-separated, via `add_discovered_target` in `tools/mcp_tools/domain.py:475`).
 
@@ -111,7 +111,7 @@ except _EXC_GROUP_CATCH as exc:
 `tools/mcp_shared.run_mcp_http_server` (`tools/mcp_shared.py:384-405`) + `assert_loopback_bind` (`tools/mcp_shared.py:334-350`) + `_wrap_http_auth` (`tools/mcp_shared.py:353-381`):
 
 1. **Loopback gate** — `_LOOPBACK_HOSTS = {127.0.0.1, localhost, ::1}`. Non-loopback `host` raises `ValueError` unless **both** `allow_public_bind=True` (the `--allow-public-bind` flag) and `MCP_ALLOW_PUBLIC_BIND` env var truthy (`1/true/yes/on`). Two-person rule.
-2. **Bearer auth** — when `MCP_HTTP_TOKEN` set, ASGI app wrapped by `_wrap_http_auth`: pure-ASGI middleware requiring `Authorization: Bearer <token>` compared with `hmac.compare_digest`; otherwise `401 Unauthorized` with `WWW-Authenticate: Bearer`.
+2. **Bearer auth** — a non-loopback bind is refused unless `MCP_HTTP_TOKEN` is set. When set, the ASGI app is wrapped by `_wrap_http_auth`: pure-ASGI middleware requiring `Authorization: Bearer <token>` compared with `hmac.compare_digest`; otherwise `401 Unauthorized` with `WWW-Authenticate: Bearer`.
 3. Client sends the token via `Authorization` header in `_streamable_http_transport` (`mcp_session.py:736`).
 
 ## Related Docs

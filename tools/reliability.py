@@ -291,13 +291,20 @@ class ToolFallback:
 
         killpg = getattr(os, "killpg", None)
         getpgid = getattr(os, "getpgid", None)
+        pid = getattr(proc, "pid", None)
 
         # Best-effort: on POSIX, kill the entire process group first so
         # descendants die with the parent. Guard everything — these calls must
         # never raise and mask the timeout we are already handling.
-        if killpg is not None and getpgid is not None:
+        if (
+            killpg is not None
+            and getpgid is not None
+            and isinstance(pid, int)
+            and not isinstance(pid, bool)
+            and pid > 1
+        ):
             try:
-                pgid = getpgid(proc.pid)
+                pgid = getpgid(pid)
                 killpg(pgid, _KILL_SIGNAL)
             except (ProcessLookupError, PermissionError, OSError):
                 # Group already gone, or we don't have permission — fall back
@@ -407,6 +414,14 @@ class ToolFallback:
                 else:
                     last_error = f"{tool} exited {proc.returncode}: {stderr[:500]}"
                     logger.warning(f"Tool {tool} failed: {last_error}")
+
+            except asyncio.CancelledError:
+                if proc and proc.returncode is None:
+                    try:
+                        await asyncio.shield(self._kill_process(proc))
+                    except _EXC_GROUP_CATCH as cleanup_exc:
+                        logger.error("Failed to reap cancelled %s process: %r", tool, cleanup_exc)
+                raise
 
             except asyncio.TimeoutError:
                 last_error = f"{tool} timed out after {self._timeout}s"

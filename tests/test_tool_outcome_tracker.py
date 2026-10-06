@@ -209,6 +209,25 @@ def test_record_exploit_failure_sets_last_outcome():
     assert t.last_outcome == "failure"
 
 
+def test_unverified_exploit_observation_preserves_failure_streak():
+    t = _ToolOutcomeTracker()
+    t.record_exploit_failure()
+
+    observed = t.record_exploit_observation(verified_success=False, operational_failure=False)
+
+    assert observed == "unknown"
+    assert t.consecutive_exploit_failures == 1
+
+
+def test_exploit_observation_counts_operational_failure_and_verified_success():
+    t = _ToolOutcomeTracker()
+
+    assert t.record_exploit_observation(verified_success=False, operational_failure=True) == "operational_failure"
+    assert t.consecutive_exploit_failures == 1
+    assert t.record_exploit_observation(verified_success=True, operational_failure=False) == "verified_success"
+    assert t.consecutive_exploit_failures == 0
+
+
 def test_should_consult_peers_threshold_gate():
     t = _ToolOutcomeTracker()
     t.record_exploit_failure()

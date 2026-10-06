@@ -149,7 +149,8 @@ async def test_two_contexts_do_not_leak_ui_or_deps(tmp_path: Path):
     ctx_a = _ctx("A", tmp_path)
     ctx_b = _ctx("B", tmp_path)
     res_a, res_b = await asyncio.gather(_run(ctx_a, tmp_path, "10.0.0.1"), _run(ctx_b, tmp_path, "10.0.0.2"))
-    assert res_a == {"ok": True} and res_b == {"ok": True}
+    assert res_a == {"ok": True, "scope_violations_network": None}
+    assert res_b == {"ok": True, "scope_violations_network": None}
     lines_a = ctx_a.ui.lines
     lines_b = ctx_b.ui.lines
     assert any("10.0.0.1" in line for line in lines_a)
@@ -173,6 +174,125 @@ async def test_ctx_selects_loader_and_factory(tmp_path: Path):
     assert len(_fake_open_session.seen) == 1
     assert _fake_open_session.seen[0]["target_ip"] == "10.0.0.1"
     assert len(_fake_agent.seen) == 1
+
+
+@pytest.mark.asyncio
+async def test_swarm_completion_hook_runs_before_mcp_session_closes(tmp_path: Path):
+    """The sibling swarm must join while its shared MCP session is usable."""
+    from tools.exploit_session import run_exploit_session
+
+    order: list[str] = []
+    session_closed = False
+
+    @contextlib.asynccontextmanager
+    async def _tracked_session(**_kwargs: Any):
+        nonlocal session_closed
+        try:
+            yield _FakeSession()
+        finally:
+            session_closed = True
+            order.append("session_closed")
+
+    async def _join_swarm(result: dict[str, Any] | None) -> dict[str, Any] | None:
+        assert not session_closed
+        order.append("swarm_joined")
+        assert result == {"ok": True}
+        return {**result, "swarm_result": {"tasks_completed": 1}}
+
+    ctx = _ctx("S", tmp_path, open_mcp_session=_tracked_session)
+    result = await run_exploit_session(
+        client=object(),
+        model="m",
+        target_ip="10.0.0.51",
+        mode="recon",
+        goal=_goal(),
+        exploit_settings=_settings(tmp_path),
+        config_path=tmp_path / "config.yaml",
+        mcp_transport="stdio",
+        exploit_port=8001,
+        reports_dir=tmp_path,
+        ctx=ctx,
+        swarm_session_complete=_join_swarm,
+    )
+
+    assert order == ["swarm_joined", "session_closed"]
+    assert result["swarm_result"] == {"tasks_completed": 1}
+
+
+@pytest.mark.asyncio
+async def test_swarm_completion_hook_stops_before_session_close_on_cancellation(tmp_path: Path):
+    """Cancellation must stop the sibling before the MCP context is closed."""
+    from tools.exploit_session import run_exploit_session
+
+    order: list[str] = []
+    session_closed = False
+    agent_started = asyncio.Event()
+
+    @contextlib.asynccontextmanager
+    async def _tracked_session(**_kwargs: Any):
+        nonlocal session_closed
+        try:
+            yield _FakeSession()
+        finally:
+            session_closed = True
+            order.append("session_closed")
+
+    async def _blocked_agent(**_kwargs: Any) -> dict[str, Any]:
+        agent_started.set()
+        await asyncio.Event().wait()
+        return {"unreachable": True}
+
+    async def _stop_swarm(result: dict[str, Any] | None) -> None:
+        assert result is None
+        assert not session_closed
+        order.append("swarm_stopped")
+        return None
+
+    ctx = _ctx("C", tmp_path, open_mcp_session=_tracked_session, run_exploit_agent_fn=_blocked_agent)
+    session_task = asyncio.create_task(
+        run_exploit_session(
+            client=object(),
+            model="m",
+            target_ip="10.0.0.52",
+            mode="recon",
+            goal=_goal(),
+            exploit_settings=_settings(tmp_path),
+            config_path=tmp_path / "config.yaml",
+            mcp_transport="stdio",
+            exploit_port=8001,
+            reports_dir=tmp_path,
+            ctx=ctx,
+            swarm_session_complete=_stop_swarm,
+        )
+    )
+    await agent_started.wait()
+    session_task.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await session_task
+    assert order == ["swarm_stopped", "session_closed"]
+
+
+@pytest.mark.asyncio
+async def test_run_result_reads_network_counter_after_mcp_session_teardown(tmp_path: Path):
+    from tools.sandbox.telemetry import write_network_scope_measurement
+
+    captured: dict[str, Any] = {}
+
+    @contextlib.asynccontextmanager
+    async def _session_with_measurement(**kwargs: Any):
+        captured.update(kwargs)
+        yield _FakeSession()
+        path = kwargs["network_telemetry_path"]
+        assert write_network_scope_measurement(path, 4)
+
+    ctx = _ctx("M", tmp_path, open_mcp_session=_session_with_measurement)
+    result = await _run(ctx, tmp_path, "10.0.0.8")
+
+    telemetry_path = captured["network_telemetry_path"]
+    assert result["scope_violations_network"] == 4
+    assert telemetry_path.is_absolute()
+    assert not telemetry_path.is_relative_to(_settings(tmp_path).workspace_root)
 
 
 # ── No module-global mutation ────────────────────────────────────────────
@@ -219,6 +339,7 @@ async def test_ctx_timeout_reaches_session_factory(tmp_path: Path, monkeypatch):
     import tools.mcp_session as _ms
 
     captured: dict[str, Any] = {}
+    telemetry_path = tmp_path / "network-scope.json"
 
     @contextlib.asynccontextmanager
     async def _capture_once(**kwargs: Any):
@@ -233,11 +354,13 @@ async def test_ctx_timeout_reaches_session_factory(tmp_path: Path, monkeypatch):
         target_ip="10.0.0.9",
         exploit_port=8001,
         workspace=tmp_path,
+        network_telemetry_path=telemetry_path,
         fallback_to_stdio=False,
         ctx=ctx,
     ):
         pass
     assert captured.get("ctx") is ctx
+    assert captured.get("network_telemetry_path") == telemetry_path
     assert _ms.MCP_BOOT_TIMEOUT_SECONDS == 30.0
 
 
@@ -245,16 +368,35 @@ async def test_ctx_timeout_reaches_session_factory(tmp_path: Path, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_omitted_ctx_keeps_legacy_behavior(tmp_path: Path):
+async def test_omitted_ctx_keeps_legacy_behavior(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     """No ctx → module globals, exactly as before (existing tests rely on it)."""
     from tools import exploit_session as _es
 
-    await _run(RuntimeContext(ui=_FakeUI("Z"), config_loader=lambda p: {"exploit": {}}), tmp_path, "10.0.0.4")
+    legacy_ui = _FakeUI("Z")
+    monkeypatch.setattr(_es, "ui", legacy_ui)
+    monkeypatch.setattr(_es, "load_config", lambda _path: {"exploit": {}})
+    monkeypatch.setattr(_es, "open_exploit_mcp_session", _fake_open_session)
+    monkeypatch.setattr(_es, "run_exploit_agent", _fake_agent)
+
+    result = await _es.run_exploit_session(
+        client=object(),
+        model="m",
+        target_ip="10.0.0.4",
+        mode="recon",
+        goal=_goal(),
+        exploit_settings=_settings(tmp_path),
+        config_path=tmp_path / "config.yaml",
+        mcp_transport="stdio",
+        exploit_port=8001,
+        reports_dir=tmp_path,
+    )
     # The tools module still exposes its patchable globals for legacy tests.
     assert hasattr(_es, "ui")
     assert hasattr(_es, "load_config")
     assert hasattr(_es, "open_exploit_mcp_session")
     assert hasattr(_es, "run_exploit_agent")
+    assert result["ok"] is True
+    assert _fake_open_session.seen[0]["config_override"] == {"exploit": {}}
 
 
 def test_run_manager_constructor_injection():

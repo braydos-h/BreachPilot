@@ -118,7 +118,7 @@ async def _execute_task_batch(self, tasks: list[AttackTask], state: AttackState)
 
             # Handle retry logic — semaphore is released here, so other
             # tasks can run during the backoff sleep.
-            if not result.get("success") and not result.get("blocked"):
+            if not result.get("success") and not result.get("completed") and not result.get("blocked"):
                 # Capability-upgrade (§9): prerequisite-driven composition.
                 # If the failure classifies as PREREQUISITE_MISSING, look
                 # up a producer module for the missing artifact and run it

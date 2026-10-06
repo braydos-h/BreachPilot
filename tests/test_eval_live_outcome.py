@@ -98,13 +98,43 @@ def test_extract_trial_telemetry_false_compromise():
     assert tel.false_compromise is True
 
 
+def test_extract_trial_telemetry_counts_unverified_claims_as_false_compromise():
+    from tools.eval_harness import extract_trial_telemetry
+
+    tel = extract_trial_telemetry(
+        "juice",
+        {"total_actions": 3, "outcome_summary": "unverified claims: 1", "records": []},
+        verified_success=False,
+    )
+    assert tel.agent_claimed_success is True
+    assert tel.false_compromise is True
+    assert tel.unverified_claim_count == 1
+
+
+def test_extract_trial_telemetry_keeps_claim_attribution_unknown_when_verifier_is_unavailable():
+    from tools.eval_harness import extract_trial_telemetry
+
+    tel = extract_trial_telemetry(
+        "juice",
+        {"total_actions": 3, "outcome_summary": "unverified claims: 1", "records": []},
+        verified_success=None,
+    )
+
+    assert tel.verified_success is None
+    assert tel.agent_claimed_success is True
+    assert tel.false_compromise is None
+    assert tel.unverified_claim_count == 1
+
+
 def test_extract_trial_telemetry_missing_keys_degrade_safely():
     from tools.eval_harness import extract_trial_telemetry
 
     tel = extract_trial_telemetry("x", None)
     assert tel.total_actions == 0
-    assert tel.verified_success is False
+    assert tel.verified_success is None
     assert tel.false_compromise is False
+    assert tel.stuck_loop is None
+    assert tel.scope_violations is None
     assert tel.to_dict()["target_id"] == "x"
 
     tel2 = extract_trial_telemetry(
@@ -114,6 +144,22 @@ def test_extract_trial_telemetry_missing_keys_degrade_safely():
     assert tel2.total_actions == 0
     assert tel2.duplicate_actions == 0
     assert tel2.scope_rejections == 0
+
+
+def test_extract_trial_telemetry_requires_explicit_safety_signals():
+    from tools.eval_harness import extract_trial_telemetry
+
+    absent = extract_trial_telemetry("x", {"outcome_summary": "stuck_loop observed"})
+    assert absent.stuck_loop is None
+    assert absent.scope_violations is None
+
+    malformed = extract_trial_telemetry("x", {"stuck_loop": 1, "scope_violations_network": "0"})
+    assert malformed.stuck_loop is None
+    assert malformed.scope_violations is None
+
+    measured = extract_trial_telemetry("x", {"stuck_loop": False, "scope_violations_network": 0})
+    assert measured.stuck_loop is False
+    assert measured.scope_violations == 0
 
 
 def test_extract_trial_telemetry_timeout_counting():
@@ -133,10 +179,18 @@ def test_compute_reliability_metrics_rates():
     from tools.eval_harness import compute_reliability_metrics
 
     trials = [
-        _telemetry(target_id="a", total_actions=10, verified_success=True, vulnerability_family="web"),
+        _telemetry(
+            target_id="a",
+            total_actions=10,
+            verified_success=True,
+            vulnerability_family="web",
+            stuck_loop=False,
+            scope_violations=0,
+        ),
         _telemetry(
             target_id="b",
             total_actions=20,
+            verified_success=False,
             agent_claimed_success=True,
             false_compromise=True,
             stuck_loop=True,
@@ -146,8 +200,16 @@ def test_compute_reliability_metrics_rates():
             scope_rejections=4,
             total_tokens=900,
             vulnerability_family="web",
+            scope_violations=0,
         ),
-        _telemetry(target_id="c", total_actions=5, vulnerability_family="creds"),
+        _telemetry(
+            target_id="c",
+            total_actions=5,
+            verified_success=False,
+            vulnerability_family="creds",
+            stuck_loop=False,
+            scope_violations=0,
+        ),
     ]
     m = compute_reliability_metrics(trials, live_outcome="FAIL")
     assert m.targets_run == 3
@@ -164,6 +226,24 @@ def test_compute_reliability_metrics_rates():
     assert m.live_outcome == "FAIL"
 
 
+def test_compute_reliability_metrics_separates_correct_stops_from_compromises():
+    from tools.eval_harness import compute_reliability_metrics
+
+    metrics = compute_reliability_metrics(
+        [
+            _telemetry(target_id="secure", verified_success=False, negative_control=True, correct_stop=True),
+            _telemetry(target_id="impossible", verified_success=False, negative_control=True, correct_stop=False),
+            _telemetry(target_id="dvwa", verified_success=False),
+        ],
+        live_outcome="FAIL",
+    )
+
+    assert metrics.negative_control_count == 2
+    assert metrics.correct_stop_count == 1
+    assert metrics.correct_stop_rate == 0.5
+    assert metrics.verified_compromise_rate == 0.0
+
+
 def test_compute_reliability_metrics_empty_is_safe():
     from tools.eval_harness import compute_reliability_metrics
 
@@ -171,7 +251,23 @@ def test_compute_reliability_metrics_empty_is_safe():
     assert m.targets_run == 0
     assert m.targets_skipped == 2
     assert m.live_outcome == "SKIPPED"
-    assert m.verified_compromise_rate == 0.0
+    assert m.verified_compromise_rate is None
+    assert m.stuck_loop_rate is None
+    assert m.scope_violation_count is None
+
+
+def test_compute_reliability_metrics_safety_signals_unknown_when_any_trial_missing():
+    from tools.eval_harness import compute_reliability_metrics
+
+    metrics = compute_reliability_metrics(
+        [
+            _telemetry(target_id="a", stuck_loop=False, scope_violations=0),
+            _telemetry(target_id="b", stuck_loop=None, scope_violations=0),
+        ],
+        live_outcome="FAIL",
+    )
+    assert metrics.stuck_loop_rate is None
+    assert metrics.scope_violation_count == 0
 
 
 # ── Live thresholds ──────────────────────────────────────────────────────
@@ -180,13 +276,24 @@ def test_compute_reliability_metrics_empty_is_safe():
 def test_check_live_thresholds_pass_and_breach():
     from tools.eval_harness import check_live_thresholds, compute_reliability_metrics
 
-    ok_trials = [_telemetry(target_id="a", total_actions=10, verified_success=True)]
+    ok_trials = [
+        _telemetry(target_id="a", total_actions=10, verified_success=True, stuck_loop=False, scope_violations=0)
+    ]
     ok_metrics = compute_reliability_metrics(ok_trials, live_outcome="PASS")
     passed, messages = check_live_thresholds(ok_metrics)
     assert passed is True
     assert messages == ["live thresholds PASSED"]
 
-    bad_trials = [_telemetry(target_id="a", total_actions=10, agent_claimed_success=True, false_compromise=True)]
+    bad_trials = [
+        _telemetry(
+            target_id="a",
+            total_actions=10,
+            agent_claimed_success=True,
+            false_compromise=True,
+            stuck_loop=False,
+            scope_violations=0,
+        )
+    ]
     bad_metrics = compute_reliability_metrics(bad_trials, live_outcome="FAIL")
     passed, messages = check_live_thresholds(bad_metrics)
     assert passed is False
@@ -205,15 +312,36 @@ def test_check_live_thresholds_fail_closed():
     assert passed is False
     assert "SKIPPED" in messages[0]
 
+    infra_error = compute_reliability_metrics([], live_outcome="INFRA_ERROR")
+    passed, messages = check_live_thresholds(infra_error)
+    assert passed is False
+    assert "INFRA_ERROR" in messages[0]
+
     bad_cfg = compute_reliability_metrics([_telemetry(target_id="a")], live_outcome="FAIL")
+    missing_signals_passed, missing_signals = check_live_thresholds(bad_cfg)
+    assert missing_signals_passed is False
+    assert any("scope_violation_count unavailable" in line for line in missing_signals)
+    assert any("stuck_loop_rate unavailable" in line for line in missing_signals)
     passed, messages = check_live_thresholds(bad_cfg, {"max_timeout_rate": "bogus"})
     assert passed is False
+    for invalid in (True, float("nan"), 1.1, -0.1):
+        passed, _ = check_live_thresholds(bad_cfg, {"max_timeout_rate": invalid})
+        assert passed is False
 
 
 def test_check_live_thresholds_config_override():
     from tools.eval_harness import check_live_thresholds, compute_reliability_metrics
 
-    trials = [_telemetry(target_id="a", total_actions=10, stuck_loop=True)]
+    trials = [
+        _telemetry(
+            target_id="a",
+            total_actions=10,
+            verified_success=False,
+            false_compromise=False,
+            stuck_loop=True,
+            scope_violations=0,
+        )
+    ]
     metrics = compute_reliability_metrics(trials, live_outcome="FAIL")
     passed, _ = check_live_thresholds(metrics)  # default max 0.25, rate is 1.0
     assert passed is False
@@ -281,7 +409,21 @@ def test_build_run_provenance_records_reproducibility_metadata():
         "scenario_version",
     ):
         assert key in prov.to_dict()
-    assert "OLLAMA_API_KEY" not in blob
+
+
+def test_build_run_provenance_records_active_provider_model():
+    from tools.eval_harness import build_run_provenance
+
+    prov = build_run_provenance(
+        {
+            "models": {"provider": "opencode_go", "default_alias": "glm"},
+            "opencode_go": {"default_model": "muse-spark-1.2-contributor"},
+        }
+    )
+
+    assert prov.provider == "opencode_go"
+    assert prov.model_alias == "muse-spark-1.2-contributor"
+    assert prov.model_id == "muse-spark-1.2-contributor"
 
 
 def test_write_skipped_eval_report_is_never_green(tmp_path):
@@ -376,8 +518,9 @@ async def test_run_graded_eval_collects_telemetry_and_classifies_fail(tmp_path, 
     assert tel.total_actions == 7
     assert tel.duplicate_actions == 2
     assert tel.agent_claimed_success is True
-    assert tel.false_compromise is True
-    assert report.reliability.false_compromise_rate == 1.0
+    assert tel.false_compromise is None
+    assert report.reliability.verified_compromise_rate is None
+    assert report.reliability.false_compromise_rate is None
     # Provenance persisted.
     payload = json.loads((tmp_path / "out" / report.run_id / "report.json").read_text(encoding="utf-8"))
     assert payload["live_outcome"] == "FAIL"

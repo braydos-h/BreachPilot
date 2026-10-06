@@ -204,6 +204,23 @@ async def test_dns_recon_rejects_invalid(tmp_path: Path):
     assert "ERROR" in text
 
 
+def test_axfr_nameserver_requires_its_resolved_ip_in_allowlist(monkeypatch):
+    from tools.mcp_tools.domain import _axfr_scope_error
+
+    for name in ("EXPLOIT_TARGET", "EXPLOIT_TARGET_IP", "EXPLOIT_TARGET_DOMAIN", "EXPLOIT_DISCOVERED_TARGETS"):
+        monkeypatch.delenv(name, raising=False)
+    config = {
+        "exploit": {
+            "require_explicit_allowlist": True,
+            "allowed_targets": ["example.com"],
+        }
+    }
+    assert _axfr_scope_error("93.184.216.34", config)
+
+    config["exploit"]["allowed_targets"] = ["93.184.216.34"]
+    assert _axfr_scope_error("93.184.216.34", config) is None
+
+
 # ── vhost_enum ───────────────────────────────────────────────────────────────
 
 
@@ -220,7 +237,7 @@ async def test_vhost_enum_finds_vhost(tmp_path: Path):
     mcp = _make_server(tmp_path)
 
     # Mock _stdlib_fetch: baseline returns body A, www returns body B (different length).
-    def fake_fetch(url, *, timeout=15, headers=None, data=None):
+    def fake_fetch(url, *, timeout=15, headers=None, data=None, **_kwargs):
         host = (headers or {}).get("Host", "")
         if "admin" in host:
             return 200, {}, "admin page content here"
@@ -231,7 +248,7 @@ async def test_vhost_enum_finds_vhost(tmp_path: Path):
             await mcp.call_tool(
                 "vhost_enum",
                 {
-                    "target_ip": "10.0.0.5",
+                    "target_ip": "93.184.216.34",
                     "port": 80,
                     "domain": "example.com",
                 },
@@ -410,7 +427,7 @@ async def test_takeover_confirmed_when_body_matches_marker(tmp_path: Path):
 
     # sub.example.com is unresolvable (no IP) but has a CNAME to herokuapp.com.
     # The HTTP probe of https://sub.example.com/ returns Heroku's "No such app".
-    def fake_fetch(url, *, timeout=15, headers=None, data=None, max_bytes=4000):
+    def fake_fetch(url, *, timeout=15, headers=None, data=None, max_bytes=4000, **_kwargs):
         if "crt.sh" in url:
             return 200, {}, json.dumps([{"name_value": "sub.example.com"}])
         if url.startswith("https://sub.example.com") or url.startswith("http://sub.example.com"):
@@ -457,7 +474,7 @@ async def test_takeover_likely_when_body_does_not_match(tmp_path: Path):
     """CNAME suffix matches but HTTP body doesn't contain the marker → 'likely'."""
     mcp = _make_server(tmp_path)
 
-    def fake_fetch(url, *, timeout=15, headers=None, data=None, max_bytes=4000):
+    def fake_fetch(url, *, timeout=15, headers=None, data=None, max_bytes=4000, **_kwargs):
         if "crt.sh" in url:
             return 200, {}, json.dumps([{"name_value": "sub.example.com"}])
         # HTTP probe returns a generic page (no Heroku marker).
@@ -563,7 +580,7 @@ async def test_vhost_content_hash_detects_same_length_different_content(tmp_path
 
     # Baseline returns 100 chars of 'A'; admin returns 100 chars of 'B'.
     # Same length (100), same status (200) → length check misses it, hash catches it.
-    def fake_fetch(url, *, timeout=15, headers=None, data=None, max_bytes=4000):
+    def fake_fetch(url, *, timeout=15, headers=None, data=None, max_bytes=4000, **_kwargs):
         host = (headers or {}).get("Host", "")
         if "admin" in host:
             return 200, {}, "B" * 100
@@ -574,7 +591,7 @@ async def test_vhost_content_hash_detects_same_length_different_content(tmp_path
             await mcp.call_tool(
                 "vhost_enum",
                 {
-                    "target_ip": "10.0.0.5",
+                    "target_ip": "93.184.216.34",
                     "port": 80,
                     "domain": "example.com",
                 },
@@ -594,7 +611,7 @@ async def test_vhost_https_shows_sni_note(tmp_path: Path):
             await mcp.call_tool(
                 "vhost_enum",
                 {
-                    "target_ip": "10.0.0.5",
+                    "target_ip": "93.184.216.34",
                     "port": 443,
                     "domain": "example.com",
                 },

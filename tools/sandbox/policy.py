@@ -201,6 +201,8 @@ def build_network_policy(
             elif not ips:
                 unresolved.append(f"{host} (unresolved at policy build)")
 
+    _reject_full_address_space_coverage(authorized)
+
     # The worker never sends DNS packets. In controlled mode, the host resolves
     # allowlisted names and installs pinned /etc/hosts mappings; in none mode,
     # hostnames are not usable as a resolver shortcut. network.py blocks the
@@ -222,6 +224,26 @@ def build_network_policy(
 def _append_unique(lst: list[str], value: str) -> None:
     if value not in lst:
         lst.append(value)
+
+
+def _reject_full_address_space_coverage(destinations: list[str]) -> None:
+    """Reject a union of individually narrow entries that covers all IPs."""
+    ipv4_networks: list[ipaddress.IPv4Network] = []
+    ipv6_networks: list[ipaddress.IPv6Network] = []
+    for destination in destinations:
+        try:
+            network = ipaddress.ip_network(destination, strict=False)
+        except ValueError:
+            continue
+        if isinstance(network, ipaddress.IPv4Network):
+            ipv4_networks.append(network)
+        else:
+            ipv6_networks.append(network)
+
+    if any(network.prefixlen == 0 for network in ipaddress.collapse_addresses(ipv4_networks)):
+        raise ValueError("combined sandbox allowlist authorizes all IPv4 destinations; policy refuses it")
+    if any(network.prefixlen == 0 for network in ipaddress.collapse_addresses(ipv6_networks)):
+        raise ValueError("combined sandbox allowlist authorizes all IPv6 destinations; policy refuses it")
 
 
 def _resolve_authorized(

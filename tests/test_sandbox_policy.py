@@ -82,6 +82,20 @@ class TestBuildNetworkPolicy:
             with pytest.raises(ValueError, match="refuses"):
                 build_network_policy(_cfg([token]))
 
+    @pytest.mark.parametrize(
+        ("cidrs", "extra"),
+        [
+            (["0.0.0.0/1", "128.0.0.0/1"], False),
+            (["::/1", "8000::/1"], False),
+            (["0.0.0.0/1", "128.0.0.0/1"], True),
+            (["::/1", "8000::/1"], True),
+        ],
+    )
+    def test_complementary_cidrs_cannot_authorize_entire_address_family(self, cidrs, extra):
+        config = _cfg(["10.0.0.5"] if extra else cidrs, extra_allow_cidrs=cidrs if extra else [])
+        with pytest.raises(ValueError, match="combined sandbox allowlist authorizes all"):
+            build_network_policy(config)
+
     def test_bare_ip_authorized(self):
         pol = build_network_policy(_cfg(["192.0.2.10"]))
         # Bare IPs are normalized to /32 CIDRs (iptables-equivalent).

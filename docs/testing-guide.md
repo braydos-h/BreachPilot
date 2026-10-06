@@ -2,22 +2,21 @@
 
 ## Run Tests
 
-Run the full suite:
-
-```bash
-python -m pytest
-```
+Local verification uses focused slices only. Follow [AGENTS.md](../AGENTS.md):
+run one file at a time (at most about 30 files per command), use `-n 0` or
+`-n 2`, retain the default marker selection, and never run slices in parallel
+across sessions. Full-suite verification belongs to CI.
 
 Run a focused file:
 
 ```bash
-python -m pytest tests/test_scope_gate.py
+python -m pytest tests/test_scope_gate.py -v -p no:cacheprovider -n 0
 ```
 
 Run a specific test:
 
 ```bash
-python -m pytest tests/test_attack_modules.py::TestModuleRegistry::test_list_modules_returns_all
+python -m pytest tests/test_attack_modules.py::TestModuleRegistry::test_list_modules_returns_all -n 0
 ```
 
 Run smoke checks:
@@ -27,7 +26,7 @@ python main.py --doctor
 python main.py --self-test
 ```
 
-Coverage (matches CI; `pytest-cov` is not a dependency, so `pytest --cov` fails):
+Full-suite coverage is **CI-only**. The following is the CI job command for maintainers inspecting workflow configuration; do not run it as local verification (`pytest-cov` is not a dependency, so `pytest --cov` fails):
 
 ```bash
 python -m coverage run -m pytest tests/
@@ -36,7 +35,7 @@ python -m coverage report
 
 ## What To Test By Change Type
 
-The suite has **342** files (all mock subprocess/network — no live Nmap); this table covers the most common change types grouped by feature. When in doubt, grep `tests/` for the module name. Run `python -m pytest tests/ -v` for the full list; focused: `python -m pytest tests/test_scope_gate.py -v`.
+The table below groups focused tests by feature. Mocked tests avoid live subprocess/network activity; Docker and live-LLM tests are separately marked and deselected by default. Use `rg --files tests` to discover files, then run relevant files in approved slices.
 
 | Change | Tests to consider |
 | --- | --- |
@@ -83,7 +82,7 @@ The suite has **342** files (all mock subprocess/network — no live Nmap); this
 | Capability upgrade / wiring / witness | `tests/test_witness_agent.py`, `tests/test_witness_wiring.py`, `tests/test_attack_modules_api.py`, `tests/test_bel_adversarial.py`, `tests/test_ctf_mode.py`, `tests/test_local_target.py` |
 | Credential store / audit redaction / PoC verifier / oracle | `tests/test_credential_store.py`, `tests/test_audit_redaction.py`, `tests/test_audit_chain.py`, `tests/test_poc_verifier.py`, `tests/test_poe_verifier.py`, `tests/test_replay_simulator.py`, `tests/test_session_titler.py`, `tests/test_attack_oracles.py`, `tests/test_verify_oracle.py` |
 | Benchmark suite / eval harness / live evals | `tests/test_benchmark_api.py`, `tests/test_benchmark_cli.py`, `tests/test_benchmark_metrics.py`, `tests/test_benchmark_requires_capabilities.py`, `tests/test_benchmark_runner.py`, `tests/test_benchmark_runner_extended.py`, `tests/test_benchmark_scoring.py`, `tests/test_benchmark_storage.py`, `tests/test_benchmark_xben.py`, `tests/test_eval_benchmark.py`, `tests/test_eval_cli.py`, `tests/test_eval_config.py`, `tests/test_eval_harness.py`, `tests/test_eval_suite.py`, `tests/test_live_evals.py` |
-| Sandbox worker (Docker/native) | `tests/test_sandbox_backend.py`, `tests/test_sandbox_docker_lifecycle.py`, `tests/test_sandbox_family_audit.py`, `tests/test_sandbox_hardening.py`, `tests/test_sandbox_integration.py`, `tests/test_sandbox_manager.py`, `tests/test_sandbox_mcp_exec.py`, `tests/test_sandbox_models.py`, `tests/test_sandbox_native_fallback.py`, `tests/test_sandbox_network.py`, `tests/test_sandbox_policy.py`, `tests/test_sandbox_remediation.py` |
+| Sandbox worker and fail-closed policy | `tests/test_sandbox_backend.py`, `tests/test_sandbox_docker_lifecycle.py`, `tests/test_sandbox_family_audit.py`, `tests/test_sandbox_hardening.py`, `tests/test_sandbox_integration.py`, `tests/test_sandbox_manager.py`, `tests/test_sandbox_mcp_exec.py`, `tests/test_sandbox_models.py`, `tests/test_sandbox_native_fallback.py` (legacy opt-out rejection), `tests/test_sandbox_network.py`, `tests/test_sandbox_policy.py`, `tests/test_sandbox_remediation.py` |
 | Snapshots / kill-chain | `tests/test_snapshots.py`, `tests/test_killchain.py` |
 | Security regressions | `tests/test_security_regressions.py` |
 
@@ -109,26 +108,23 @@ Some runtime features require tools that may not be present on every developer m
 
 Unit tests should mock these where possible. `--doctor` and `--self-test` are the right place to validate local machine readiness.
 
-## Browser Playwright-SDK Contract
+## Browser worker contract
 
-Canonical rule: **missing Playwright SDK = SKIP with install hint, not FAIL**.
+Browser execution always requires the contained worker image with Playwright
+and Chromium. The host Playwright SDK or host Chromium installation never
+enables execution. `bp --doctor` reports the optional browser feature as
+skipped when the worker is unavailable; execution remains blocked with
+`SANDBOX_*` until the worker is usable. Build the worker with:
 
-- `bp --doctor` reports the `browser` check as `ok: true, skipped: true,
-  status: "skip"` with hint `Install the optional extra: python -m pip
-  install -e ".[browser]"` (same for a missing Chromium runtime:
-  `python -m playwright install chromium`). Stock installs stay green.
-- Live-Chromium tests (`tests/test_browser_integration.py -m integration`)
-  skip with the identical hint strings (shared constants in
-  `tools/browser/doctor_check.py`), so the doctor message and the job
-  assertion match exactly.
-- SKIP never grants execution (fail closed): without the SDK the backend
-  raises `BrowserBackendUnavailable`, capabilities report unavailable, and
-  contained runs block with `SANDBOX_*` unless the browser worker image is
-  built. Misconfiguration (`browser.enabled` with `backend: none`, unknown
-  backends) still FAILs.
-- Contract pins: `tests/test_doctor_browser.py` (SKIP + ready + contained
-  states), CI `browser` job "Doctor browser SKIP contract" step (green with
-  and without the SDK).
+```bash
+docker build -t breachpilot-sandbox:browser -f docker/sandbox/Dockerfile.browser docker/sandbox
+```
+
+Live browser integration tests (`tests/test_browser_integration.py -m
+integration`) are opt-in and use a local HTTP fixture; they do not test an
+external target. Contract tests include `tests/test_doctor_browser.py`,
+`tests/test_browser_capabilities.py`, `tests/test_browser_sandbox_family.py`,
+and `tests/test_browser_mcp_tools.py`.
 
 ## Outcome-Judgment Regressions
 
@@ -144,10 +140,9 @@ those gates.
 
 For small changes, run the focused tests that match the touched module.
 
-For cross-cutting changes, run:
+For cross-cutting changes, run relevant test files in sequential slices, then:
 
 ```bash
-python -m pytest
 python main.py --doctor
 python main.py --self-test
 ```

@@ -8,6 +8,8 @@ from pathlib import Path
 
 import yaml
 
+REPO_ROOT = Path(__file__).resolve().parent.parent
+
 
 def _clear_skill_cache():
     from tools.skill_registry_cache import clear_cache
@@ -38,6 +40,42 @@ class TestPackagedResources:
 
         result = get_webui_dist_dir()
         assert result is None or isinstance(result, Path)
+        if result is not None:
+            assert (result / "index.html").is_file(), f"WebUI helper must return the built dist directory: {result}"
+
+    def test_webui_dist_helper_finds_setuptools_data_prefix(self, tmp_path, monkeypatch):
+        import sys
+
+        import tools.paths as paths
+
+        dist = tmp_path / "webui" / "dist"
+        dist.mkdir(parents=True)
+        (dist / "index.html").write_text("<html></html>", encoding="utf-8")
+        monkeypatch.setattr(paths, "_resources", None)
+        monkeypatch.setattr(paths, "_repo_root_from_this_file", lambda: tmp_path / "site-packages")
+        monkeypatch.setattr(sys, "prefix", str(tmp_path))
+
+        assert paths.get_webui_dist_dir() == dist
+
+    def test_webui_boot_accepts_installed_dist_without_node(self, tmp_path, monkeypatch):
+        from tools import webui_boot
+
+        dist = tmp_path / "webui" / "dist"
+        dist.mkdir(parents=True)
+        (dist / "index.html").write_text("<html></html>", encoding="utf-8")
+
+        class _UI:
+            errors: list[str] = []
+
+            def error(self, message):
+                self.errors.append(message)
+
+        ui = _UI()
+        monkeypatch.setattr(webui_boot, "get_webui_dist_dir", lambda: dist)
+        monkeypatch.setattr(webui_boot.shutil, "which", lambda _command: None)
+
+        assert webui_boot._ensure_webui_build(ui) == 0
+        assert ui.errors == []
 
 
 class TestConfigHierarchy:
@@ -60,10 +98,15 @@ class TestConfigHierarchy:
 
         custom = tmp_path / "custom.yaml"
         yaml.safe_dump(
-            {"sandbox": {"enabled": False}, "skills": {"roots": ["my_skills"]}}, custom.open("w", encoding="utf-8")
+            {
+                "sandbox": {"enabled": True, "image": "custom-worker:latest"},
+                "skills": {"roots": ["my_skills"]},
+            },
+            custom.open("w", encoding="utf-8"),
         )
         cfg = load_effective_config(custom)
-        assert cfg["sandbox"]["enabled"] is False
+        assert cfg["sandbox"]["enabled"] is True
+        assert cfg["sandbox"]["image"] == "custom-worker:latest"
         assert cfg["skills"]["roots"] == ["my_skills"]
 
     def test_effective_config_local_cwd_file_wins_over_defaults(self, tmp_path, monkeypatch):
@@ -71,12 +114,12 @@ class TestConfigHierarchy:
 
         monkeypatch.chdir(tmp_path)
         local = tmp_path / "config.yaml"
-        yaml.safe_dump({"sandbox": {"enabled": False}}, local.open("w", encoding="utf-8"))
+        yaml.safe_dump({"sandbox": {"enabled": True}}, local.open("w", encoding="utf-8"))
         monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "no_xdg"))
         monkeypatch.setenv("HOME", str(tmp_path))
 
         cfg = load_effective_config()
-        assert cfg["sandbox"]["enabled"] is False
+        assert cfg["sandbox"]["enabled"] is True
 
     def test_kernel_load_config_default_sentinel_returns_defaults_when_missing(self, tmp_path, monkeypatch):
         from tools.kernel.config import load_config
@@ -219,14 +262,17 @@ class TestWheelArtifact:
 
         with tempfile.TemporaryDirectory() as td:
             td_path = Path(td)
+            wheel_dir = td_path / "wheels"
+            wheel_dir.mkdir()
             result = subprocess.run(
-                [sys.executable, "-m", "build", "--wheel", "--outdir", str(td_path)],
+                [sys.executable, "-m", "build", str(REPO_ROOT), "--wheel", "--outdir", str(wheel_dir)],
+                cwd=td_path,
                 capture_output=True,
                 text=True,
                 timeout=120,
             )
             assert result.returncode == 0, f"build failed: {result.stderr[:1000]}"
-            wheels = list(td_path.glob("*.whl"))
+            wheels = list(wheel_dir.glob("*.whl"))
             assert wheels
             wheel = wheels[0]
             import zipfile
@@ -236,3 +282,9 @@ class TestWheelArtifact:
                 assert any(n.startswith("skills/") for n in names), f"wheel missing skills/: {names[:20]}"
                 assert any(n.endswith("SKILL.md") for n in names), "wheel missing SKILL.md"
                 assert any("tools/paths.py" in n for n in names), "wheel missing tools/paths.py"
+                source_index = REPO_ROOT / "webui" / "dist" / "index.html"
+                if source_index.is_file():
+                    assert any(n.endswith(".data/data/webui/dist/index.html") for n in names), (
+                        "wheel missing the built WebUI index"
+                    )
+                    assert any(".data/data/webui/dist/assets/" in n for n in names), "wheel missing WebUI assets"

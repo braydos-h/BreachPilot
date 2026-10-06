@@ -81,7 +81,7 @@ Update `tests/test_swarm.py`, `tests/test_swarm_integration.py`, and `tests/test
 
 ## Tests
 
-Tests are organized by module or feature; the suite has grown to **~250** files (all mock subprocess/network — `python -m pytest tests/ -v` for the full set, or `python -m pytest tests/test_scope_gate.py -v` for one file). The list below highlights major areas, not every file.
+Tests are organized by module or feature. Discover files with `rg --files tests`; run a focused file with `python -m pytest tests/test_scope_gate.py -v -p no:cacheprovider -n 0`. Follow the sliced-run limits in [AGENTS.md](../AGENTS.md); full-suite verification is CI-only. Integration/live-LLM tests are separately marked and deselected by default. The list below highlights major areas, not every file.
 
 - Core workflow: `test_mission.py`, `test_scope_gate.py`, `test_risk_controller.py`, `test_task_queue.py`, `test_outcome_judge.py`, `test_agent_loop.py`
 - Persistence/reporting: `test_evidence.py`, `test_finding_verifier.py`, `test_report_generator.py`

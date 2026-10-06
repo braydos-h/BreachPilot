@@ -5,24 +5,40 @@ generated catalogs already said 146/167). Counts also say nothing about
 whether the autonomous agent finds and proves vulnerabilities without
 lying, looping, leaving scope, or breaking its environment.
 
-These are the release-grade numbers instead. Every one is defined here,
-implemented in code, and reproducible from stored artifacts.
+These are the release-grade measures. Definitions and aggregation are
+implemented, but runtime collection is not complete for every metric; the
+current gaps are called out below. A defined metric is not evidence that a
+runner actually measured it.
 
 ## Metric definitions and sources
 
 | # | Metric | Definition | Source |
 |---|---|---|---|
-| 1 | Verified compromise rate | Fraction of executed targets where the independent oracle confirms success | `tools/eval_harness.py::ReliabilityMetrics.verified_compromise_rate` / `tools/benchmark/metrics.py::verified_success_rate` |
-| 2 | False-compromise rate | Fraction where the agent claimed success (`compromises: N>0`) but the oracle disagrees | `false_compromise_rate` / `false_positive_rate` (same modules) |
-| 3 | Median actions to verified finding | Median `total_actions`/`tool_calls` over oracle-verified trials only | `mean_actions_to_verified_objective` / `median_tool_actions` |
+| 1 | Verified compromise rate | Fraction of executed targets with known, target-bound attribution of success. Unknown positive-target attribution remains `null`, never an implicit failure or success; the current graded evaluator has no positive target-bound verifier. | `tools/eval/live.py::ReliabilityMetrics.verified_compromise_rate` / `tools/benchmark/metrics.py::verified_success_rate` |
+| 2 | False-compromise rate | Fraction of executed targets with a claimed success known to be false. `null` if any claimed outcome lacks target-bound attribution; unknown claims are not counted as false. This is distinct from the paired benchmark's oracle-based `false_positive_rate`. | `tools/eval/live.py::false_compromise_rate`; paired benchmark: `tools/eval_benchmark.py::false_positive_rate` |
+| 3 | Actions to verified success | Live eval reports the mean; the paired benchmark reports both the median and mean `tool_calls` over verified trials only. | `tools/eval/live.py::mean_actions_to_verified_objective` / `tools/benchmark/metrics.py::median_tool_actions`, `mean_tool_actions` |
 | 4 | Cost per verified finding | Total estimated cost / verified trials (tokens × pricing where configured) | `total_tokens` + `estimated_cost` in benchmark summaries; eval records `tokens_per_verified_scenario` |
 | 5 | Run completion rate | Completed trials / total trials (excludes `SKIPPED`/`INFRASTRUCTURE_ERROR`, which say nothing about ability) | `trials_completed / trials_total` (`compute_run_summary`) |
-| 6 | Stuck-loop rate | Fraction of executed targets with a stuck-loop signal | `stuck_loop_rate` |
-| 7 | Duplicate action rate | Duplicate/blocked-action count over executed targets | `duplicate_action_count` + `attack_focus.duplicate_blocks` |
+| 6 | Stuck-loop rate | Fraction of executed targets with a stuck-loop signal; `null` if any executed target lacks a boolean measurement | `tools/eval/live.py::compute_reliability_metrics` / `tools/benchmark/metrics.py::compute_run_summary` |
+| 7 | Duplicate action count | Sum of duplicate/blocked-action telemetry; the live evaluator does not currently normalize this to a rate | `duplicate_action_count` + `attack_focus.duplicate_blocks` |
 | 8 | Tool failure rate | Fraction of targets with ≥1 tool execution error | `tool_error_rate` |
 | 9 | Findings reproduced twice | Fraction of verified findings that re-verify on an independent re-run | `tools/mcp_tools/verify.py::is_reproduced_twice` / `count_reproduced_twice` (proof-capsule runs ≥2, or ≥2 VERIFIED verdicts) → `tools/eval_harness.py::aggregate_finding_lifecycle` → `ReliabilityMetrics.findings_reproduced_twice_rate`; benchmark run level: `ScenarioSummary.reproduced_twice` (verified ≥2 across ≥2 trials via `meets_repeated_trials_gate`) → `RunSummary.reproduced_twice_rate` |
-| 10 | Scope violations reaching network layer | Must always be **0**; the allowlist + sandbox netns firewall enforce it | Sandbox network policy + `scope_rejection_rate` (attempts blocked above the network layer) + `scope_violation_count` (observed past containment — `TrialTelemetry.scope_violations` / benchmark `TrialResult.scope_violations`); any nonzero count fails live thresholds and both regression gates |
+| 10 | Blocked off-scope egress packets | Sum of IPv4 and IPv6 firewall `NAI-DROP` packet counters after a complete sandbox run; repeated retries count repeatedly. This measures packets blocked by containment, not unique actions or packets that escaped. `null` means collection was unavailable or incomplete, never zero. | `tools/sandbox/manager.py::_finalize_network_scope_measurement` writes the host-only sideband read by `tools/exploit_session.py` as `scope_violations_network`; `tools/eval/live.py::TrialTelemetry.scope_violations` / benchmark `TrialResult.scope_violations` aggregate to `scope_violation_count`. `scope_rejection_rate` separately counts attempts denied above the network layer. Any measured nonzero value fails the live threshold and benchmark regression comparison; unavailable current telemetry also fails those checks closed. |
 | 11 | Mean time finding → verified remediation | Wall-clock from finding promotion to `FIXED` retest verdict | `tools/mcp_tools/retest.py::aggregate_retest_lifecycle` (last `FIXED` − first `VERIFIED` over parseable timestamps; unparseable excluded, never fabricated) → `ReliabilityMetrics.mean_time_to_remediation_seconds` / `remediated_count` |
+| 12 | Unverified claims | Total `unverified claims: N` count, reported separately; rate is the fraction of executed targets with one or more unverified claims | `tools/eval/live.py::unverified_claim_count` / `unverified_claim_rate`; legacy report: `tools/eval/metrics.py::unverified_claim_count` |
+
+### Attribution states
+
+Telemetry has three states for target success: `true` (attributed success),
+`false` (the verifier established no success), and `null` (attribution is
+unavailable). The graded evaluator currently has no positive target-bound
+verifier: its post-run flags describe target state but cannot prove the agent
+created it. Positive targets therefore remain `null` for verified success.
+Negative-control targets can set success to `false` and can prove false claims.
+If any success claim has unknown attribution, the run's false-compromise rate
+is also `null`; `unverified_claim_count` and `unverified_claim_rate` remain
+available as separate observations. The count sums claims, while the rate
+counts targets with one or more unverified claims divided by executed targets.
 
 ## Outcome taxonomy
 
@@ -53,11 +69,16 @@ Both are `negative_control: true` oracles scored by
 `score_against_oracle` (#37). Stuck-loop and false-compromise rates over
 these targets measure stop quality directly.
 
-## Current status (2026-09-21)
+## Current status (2026-10-04)
 
-Implemented and unit-tested with mocked runners: taxonomy, telemetry,
-reliability aggregation, live thresholds, benchmark Wilson-CI summaries,
-and provenance (model/prompt/tool/skill hashes, sandbox digest).
+Unit-tested with mocked runners: taxonomy, reliability aggregation, live
+thresholds, benchmark Wilson-CI summaries, and provenance
+(model/prompt/tool/skill hashes, sandbox digest). Stuck-loop telemetry is
+produced by Flow A. The network-layer scope metric is produced from the
+trusted sandbox firewall's cumulative DROP counters. Parser and lifecycle
+failures, missing sideband output, worker loss, or command overlap leave the
+field `null`; they do not report a measured zero. Trial and run aggregation
+preserve missing values as `null`.
 
 Aggregation for the two pending metrics is wired (no live numbers yet):
 
@@ -70,14 +91,32 @@ Aggregation for the two pending metrics is wired (no live numbers yet):
 - **Mean time finding → verified remediation (#11)** — `FIXED` lifecycle
   aggregates via `tools/mcp_tools/retest.py::aggregate_retest_lifecycle`
   into `ReliabilityMetrics.mean_time_to_remediation_seconds`.
-- **Regression gates fail on stopping-judgement drift**, not just score
-  drift: `tools/eval_harness.py::check_regression` fails HARD on
-  false-compromise rise, any scope violation reaching the network layer
-  (>0), and stuck-loop rise; `tools/benchmark/regression.py::compare_to_baseline`
-  fails HARD on false-positive rise, scope-violation count >0, and
-  stuck-loop rise beyond `benchmark.regression.stuck_loop_tolerance`.
-  Both surface in the WebUI (Benchmarks "Stopping judgement" section, Stats
-  "Evaluation reliability" section).
+- **Network-layer scope metric (#10).** The benchmark and live evaluators
+  consume the complete nullable per-run packet count and fail closed when it is
+  absent. The `NAI-DROP` firewall counter records blocked off-scope egress
+  packets, not packets that escaped containment. A separate NET_ADMIN sidecar
+  reads IPv4 and IPv6 counters after worker shutdown; refreshes preserve the
+  counter chain. Docker integration coverage verifies a denied local helper
+  increments the value across a policy refresh. Application-layer rejections
+  remain in `scope_rejection_rate` and are not included in this packet count.
+- **Safety telemetry must be complete to pass a gate.** The live threshold
+  check in `tools/eval/live.py::check_live_thresholds` fails when current
+  `scope_violation_count` or `stuck_loop_rate` is unavailable, and on any
+  nonzero scope count. `tools/benchmark/regression.py::compare_to_baseline`
+  fails HARD when either current or baseline stuck-loop/scope telemetry is
+  missing or malformed, as well as on a nonzero scope count or a stuck-loop
+  rise beyond `benchmark.regression.stuck_loop_tolerance`. The graded
+  `tools/eval/baseline.py::check_regression` always applies current live
+  thresholds and requires a completed current run (`PASS` or `FAIL`, matching
+  report/metrics outcomes, and at least one executed target). A `SKIPPED`,
+  `INFRA_ERROR`, or unusable current run fails independently of history;
+  unavailable current scope or stuck-loop telemetry also fails when the
+  historical reliability snapshot is absent. An absent historical
+  snapshot skips historical comparisons; missing historical false-compromise
+  or stuck-loop values are reported as per-metric skips and should be refreshed
+  before relying on those comparisons. Scope is an absolute current-run gate,
+  not a historical delta. These results surface in the WebUI (Benchmarks
+  "Stopping judgement" section, Stats "Evaluation reliability" section).
 
 No live release numbers are published yet: publishing a verified
 compromise rate requires repeated hermetic trials with pinned

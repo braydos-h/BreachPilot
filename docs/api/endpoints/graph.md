@@ -29,7 +29,7 @@ Logic:
 
 - Gate `if not _GRAPH_ROUTE_ENABLED` → `404 "Graph route disabled (api.graph_route=false)"` (no auth leak before gate).
 - `if persistence.get_run(run_id) is None` → `404 Run not found`.
-- `_read_audit(run_dir)` tries `reports/<run_id>/exploit_audit.jsonl` then `reports/<run_id>/exploit_workspace/exploit_audit.jsonl` tolerant JSONL scan (`tools/api/routes/graph.py:60`).
+- `_read_audit(run_dir)` reads `reports/<run_id>/exploit_audit.jsonl`; the workspace path is a compatibility fallback for older runs (`tools/api/routes/graph.py`).
 - `_read_enhanced_chains(run_dir)` reads `reports/<run_id>/enhanced/enhanced_report.json` `exploitation_chains` list (`tools/api/routes/graph.py:84`).
 - `build_graph(records, chains)` (`tools/api/routes/graph.py:97`): deduped `tool:<name>` + `target:<ip>` nodes, `tool→target:targets`, temporal `prev_tool→tool:enables`; plus `step:<chain>:<i>:<module>` nodes and `enables` chain order edges. `{nodes:[{id,type,label,status?}], edges:[{source,target,relation}]}`.
 

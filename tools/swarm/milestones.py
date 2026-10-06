@@ -8,6 +8,7 @@ sites and tests keep working unchanged.
 
 from __future__ import annotations
 
+import asyncio
 import threading
 
 
@@ -52,3 +53,29 @@ def _await_milestone(self, target: str, phase: str, timeout: float | None = None
             event = threading.Event()
             self._milestone_events[(target, phase)] = event
     return event.wait(timeout=timeout)
+
+
+async def _await_milestone_async(self, target: str, phase: str, timeout: float | None = None) -> bool:
+    """Cooperatively wait for a milestone from an async orchestrator task.
+
+    Milestones are set by worker threads, so this polls the thread-safe event
+    at a short interval instead of blocking the event loop or leaving a
+    cancelled ``to_thread(event.wait)`` worker behind.
+    """
+    with self._lock:
+        event = self._milestone_events.get((target, phase))
+        if event is None:
+            event = threading.Event()
+            self._milestone_events[(target, phase)] = event
+
+    loop = asyncio.get_running_loop()
+    deadline = None if timeout is None else loop.time() + max(0.0, timeout)
+    while not event.is_set():
+        if deadline is None:
+            await asyncio.sleep(0.05)
+            continue
+        remaining = deadline - loop.time()
+        if remaining <= 0:
+            return False
+        await asyncio.sleep(min(0.05, remaining))
+    return True

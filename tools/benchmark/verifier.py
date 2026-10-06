@@ -17,6 +17,7 @@ import asyncio
 from dataclasses import dataclass, field
 from typing import Any
 
+from tools.eval.oracle import host_owned_when_met
 from tools.eval_checks import CheckExecutor, default_check_executor
 from tools.eval_harness import FlagCheckResult, verify_flag_check
 
@@ -36,20 +37,6 @@ class VerificationOutcome:
 
     def to_dict_list(self) -> list[dict[str, Any]]:
         return [f.to_dict() for f in self.flags]
-
-
-def _host_owned_when_met(flags: list[FlagCheckResult], host_owned_when: Any) -> bool:
-    """Mirror of eval_harness._host_owned_when_met over flag results."""
-    captured = {f.flag_id for f in flags if f.passed}
-    if isinstance(host_owned_when, (list, tuple)):
-        required = [str(fid) for fid in host_owned_when]
-        if not required:
-            return bool(captured)
-        return all(fid in captured for fid in required)
-    if str(host_owned_when or "").strip().lower() == "all":
-        return bool(flags) and len(captured) == len(flags)
-    # "any" (and unrecognized values) fall back to the default.
-    return bool(captured)
 
 
 class IndependentVerifier:
@@ -84,6 +71,10 @@ class IndependentVerifier:
             session=self._session,
             workspace=self._workspace,
             loop=self._loop,
+            # Missing scenario scope must activate the evaluator's fail-closed
+            # checks, rather than leave the optional scope parameters unset.
+            target_host=getattr(self.scenario, "target_host", ""),
+            target_ports=getattr(self.scenario, "target_ports", ()),
         )
 
     def verify_sync(self) -> VerificationOutcome:
@@ -102,7 +93,7 @@ class IndependentVerifier:
                     FlagCheckResult(flag_id=flag_id, passed=False, detail=f"verifier error: {exc}", check={})
                 )
         captured = sum(1 for f in results if f.passed)
-        owned = _host_owned_when_met(results, oracle.get("host_owned_when", "any"))
+        owned = host_owned_when_met(results, oracle.get("host_owned_when", "any"))
         detail = "; ".join(f"{f.flag_id}={'PASS' if f.passed else 'FAIL'}: {f.detail}" for f in results)
         return VerificationOutcome(
             verified=owned,

@@ -98,7 +98,11 @@ Used by: `run_exploit_terminal` (`terminal.py:222`), `run_as_root` (`terminal.py
 
 ## Audit Trail
 
-Every handler via `make_require_allowlist` / `make_audit_tool` appends to `exploit_workspace/exploit_audit.jsonl` via `_audit_log` (`tools/kernel/audit.py:169-198`):
+Every handler via `make_require_allowlist` / `make_audit_tool` appends to the
+host-owned audit file selected by the run. RunService uses
+`reports/<run_id>/exploit_audit.jsonl`, outside the worker's writable bind;
+legacy direct callers without an explicit path keep their compatibility path.
+Rows are written through `_audit_log` (`tools/kernel/audit.py`):
 
 ```json
 {"timestamp": "iso", "target_ip": "...", "tool_name": "...", "approved": true, "status": "started|completed|blocked", "command": "masked", "args": {"redacted": "..."}, "attempt_id": "...", "code_sha256": "...", "duration_seconds": 0.0}

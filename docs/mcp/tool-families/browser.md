@@ -23,8 +23,8 @@ subsystem: mcp
 Sandboxed Chromium web agent (Playwright backend) for authorized testing of web targets the operator owns or has explicit written authorization to assess. Phase 1 surface is read-only (start/navigate/observe/page-state/network/storage/screenshot/discover/close); the Phase 2 mutating surface (`browser_submit`, `browser_replay`, `browser_execute_js`) sits behind the explicit lab opt-in `browser.allow_mutating_actions`.
 
 - **Registration source:** `register_browser_tools(mcp, *, ctx)` in `tools/mcp_tools/browser.py:185` — discovered via `collect_tools()` / `register_*_tools` naming; no edit to `mcp_exploit_server.py` needed.
-- **Enablement gate (all three must hold, `browser.py:190-198`):** `browser.enabled` is true, `browser.backend` is `"playwright"`, and `browser_runtime_available(config)` is true (host SDK or a configured sandbox worker). Otherwise nothing registers — the killchain/snapshots conditional-registration precedent.
-- **Containment:** every target-touching tool carries `@require_allowlist("target")`; Chromium execution funnels through `BrowserManager` plus a per-call launcher — `SandboxPlaywrightLauncher` (one Chromium op per docker exec inside the worker netns) when the sandbox is enabled, the in-process launcher only for the documented `sandbox.enabled: false` opt-out. When the sandbox is enabled but unusable the tools return `SANDBOX_*` blocks and never fall back to host execution.
+- **Enablement gate (all three must hold, `browser.py:190-198`):** `browser.enabled` is true, `browser.backend` is `"playwright"`, and `browser_runtime_available(config)` confirms the required sandbox worker is configured and usable. A host Playwright SDK does not enable execution. Otherwise nothing registers — the killchain/snapshots conditional-registration precedent.
+- **Containment:** every target-touching tool carries `@require_allowlist("target")`; Chromium execution funnels through `BrowserManager` plus `SandboxPlaywrightLauncher` (one Chromium op per docker exec inside the worker netns). `sandbox.enabled: false` is rejected; when the sandbox is unavailable, the tools return `SANDBOX_*` blocks and never fall back to host execution.
 
 ```yaml
 # config.yaml (browser block, lines 299-317)
@@ -44,7 +44,7 @@ browser:
 
 ## Tools Exported (13)
 
-Gate column notes the decorator plus any extra in-body gate. Implementation note: `ctx.audit_tool` is fetched at `browser.py:187` but `@audit_tool` is not applied to any tool in this module — the per-tool gate is `@require_allowlist("target")` alone.
+Gate column notes the decorator plus any extra in-body gate. `ctx.audit_tool` is fetched at `browser.py:187` but is not applied separately; `@require_allowlist("target")` audits by default (`audit=True`) while enforcing the target lock.
 
 | Tool | Purpose | Key inputs | Gate | Common failures |
 |------|---------|------------|------|-----------------|
@@ -107,7 +107,7 @@ Authorized testing only — every tool is target-locked twice (decorator allowli
 - `tools/browser/manager.py` — `BrowserManager` session lifecycle (imported by `_get_stack`)
 - `tools/browser/capabilities.py` — `register_playwright_backend`, `browser_runtime_available`, `get_backend`
 - `tools/browser/playwright_backend.py` — `PlaywrightBackend` engine
-- `tools/browser/sandbox_launcher.py` — `resolve_browser_launcher` (sandbox worker vs in-process)
+- `tools/browser/sandbox_launcher.py` — `resolve_browser_launcher` (sandbox worker only; unavailable worker fails closed)
 - `tools/browser/errors.py` — `BrowserSessionNotFound`, `BrowserBackendError`, `browser_error_from_exception`
 - `tools/browser/models.py` — `BrowserAction`, `BrowserActionKind`, `_mask_body`
 - `tools/mcp_shared.py` — `check_targets_allowlist`

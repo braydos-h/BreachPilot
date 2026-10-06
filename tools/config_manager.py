@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from tools.config.loader import (
     get_ai_provider,
     get_chatgpt_config,
@@ -45,6 +47,27 @@ def resolve_known_provider_ids() -> list[str]:
         return ["chatgpt", "ollama", "opencode_go"]
 
 
+def resolve_default_model_alias(config: dict[str, Any]) -> str:
+    """Return the model alias selected by the active provider configuration.
+
+    OpenCode Go uses its provider-specific ``default_model`` as the router
+    alias. ``models.default_alias`` remains the selection source for Ollama
+    and ChatGPT. Keeping this resolution shared prevents benchmark execution
+    and provenance from silently falling back to a stale Ollama alias.
+    """
+    if get_ai_provider(config) == "opencode_go":
+        provider_config = get_opencode_go_config(config)
+        model = str(provider_config.get("default_model", "") or "").strip()
+        if model:
+            return model
+    models = config.get("models", {}) if isinstance(config, dict) else {}
+    if isinstance(models, dict):
+        alias = str(models.get("default_alias", "") or "").strip()
+        if alias:
+            return alias
+    return "glm"
+
+
 __all__ = [
     "CONFIG_SCHEMA",
     "DEFAULT_CONFIG",
@@ -67,5 +90,6 @@ __all__ = [
     "list_profiles",
     "load_validated_config",
     "resolve_known_provider_ids",
+    "resolve_default_model_alias",
     "validate_config_file",
 ]

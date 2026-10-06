@@ -193,24 +193,14 @@ async def test_generate_payload_blocks_out_of_scope_lhost(tmp_path: Path):
 
 
 @pytest.mark.asyncio
-async def test_msfconsole_command_passes_scope_when_no_rhosts(tmp_path: Path, monkeypatch):
-    """A command that names no host (e.g. ``sessions -l``) touches no target and
-    must pass the scope gate (then proceed to the bridge, which we mock)."""
+async def test_msfconsole_command_without_target_still_fails_closed_without_sandbox(tmp_path: Path):
+    """A scope-clean command must not reach the host bridge without a sandbox."""
     mcp = _make_server(tmp_path, allowed_targets=["10.0.0.50"])
-
-    class _FakeBridge:
-        def console_command(self, command, wait_seconds, read_lines):
-            return {"success": True, "output": "mocked"}
-
-    import tools.mcp_tools.metasploit as msf_mod
-
-    monkeypatch.setattr(msf_mod, "get_metasploit_bridge", lambda ws: _FakeBridge())
-
     text = _text(
         await mcp.call_tool(
             "msfconsole_command",
             {"command": "sessions -l"},
         )
     )
-    assert text.startswith("MSFCONSOLE_COMMAND:")
-    assert "BLOCKED:" not in text
+    assert "SANDBOX_UNSUPPORTED" in text
+    assert "metasploit rpc is unavailable to agent tools" in text.lower()

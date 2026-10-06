@@ -581,7 +581,12 @@ def is_tool_installed(tool_name: str) -> bool:
     return shutil.which(tool_name) is not None
 
 
-def preflight_command_check(command: str, *, reject_shell_metachars: bool = False) -> PreflightResult:
+def preflight_command_check(
+    command: str,
+    *,
+    reject_shell_metachars: bool = False,
+    check_tool_availability: bool = True,
+) -> PreflightResult:
     """Run pre-flight checks on a terminal command before execution.
 
     Args:
@@ -592,6 +597,9 @@ def preflight_command_check(command: str, *, reject_shell_metachars: bool = Fals
             (``run_exploit_terminal``) legitimately chain/pipe/redirect
             commands -- their one safety is the target-IP allowlist lock, not
             command-content inspection.
+        check_tool_availability: inspect the current process PATH for common
+            binaries. Set False when execution occurs in another environment
+            (such as the sandbox worker), whose PATH may differ.
 
     Returns a dict with:
         - valid: bool
@@ -631,12 +639,13 @@ def preflight_command_check(command: str, *, reject_shell_metachars: bool = Fals
     # Detect tools used in the command for preflight warnings.
     common_tools = ["nmap", "rustscan", "masscan", "curl", "nc", "ncat", "python", "python3"]
     missing_tools = []
-    cmd_lower = sanitized.lower()
-    for tool in common_tools:
-        # Heuristic: tool appears at start of command or after pipe/semicolon/&&
-        if re.search(rf"(?:^|[;|&]|\s){re.escape(tool)}(?:\s|$)", cmd_lower):
-            if not is_tool_installed(tool):
-                missing_tools.append(tool)
+    if check_tool_availability:
+        cmd_lower = sanitized.lower()
+        for tool in common_tools:
+            # Heuristic: tool appears at start of command or after pipe/semicolon/&&
+            if re.search(rf"(?:^|[;|&]|\s){re.escape(tool)}(?:\s|$)", cmd_lower):
+                if not is_tool_installed(tool):
+                    missing_tools.append(tool)
 
     return {
         "valid": True,

@@ -94,6 +94,19 @@ def test_preflight_default_allows_pipes_for_attack_mode():
     assert preflight_command_check("nmap -sV 10.0.0.5")["valid"] is True
 
 
+def test_preflight_can_skip_host_path_for_worker_commands(monkeypatch):
+    from tools import validation_utils
+
+    def _unexpected_host_probe(_tool: str) -> bool:
+        raise AssertionError("worker command preflight must not inspect the host PATH")
+
+    monkeypatch.setattr(validation_utils, "is_tool_installed", _unexpected_host_probe)
+    result = validation_utils.preflight_command_check("nmap -sV 10.0.0.5", check_tool_availability=False)
+
+    assert result["valid"] is True
+    assert result["missing_tools"] == []
+
+
 def test_preflight_strict_rejects_shell_metachars():
     """Opt-in strict mode (used by the defensive server) rejects chaining."""
     from tools.validation_utils import preflight_command_check

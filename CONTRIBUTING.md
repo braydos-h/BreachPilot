@@ -3,7 +3,7 @@
 Thanks for helping improve BreachPilot. This guide covers setup, workflow, and the non-obvious rules you will break otherwise.
 
 > [!WARNING]
-> **Authorized use only.** BreachPilot is a lab-only offensive security tool. Contribute and test only against networks/systems you own or have explicit written authorization to assess, on a throwaway operator box. Attack mode ships as `full_access` (`config.yaml:61`) — the single remaining attack-path safety is the target-IP allowlist lock at the MCP tool layer (`tools/mcp_shared.py:494` + `tools/mcp_tools/terminal.py:_target_lock_block`). See `docs/safety-model.md` and `README.md#safety-model`.
+> **Authorized use only.** BreachPilot can perform active security testing. Contribute and test only against systems you own or have explicit written authorization to assess. Safety is layered: mission-scope checks, the target allowlist lock, sandbox containment, and fail-closed behavior all apply. Preserve each boundary when changing execution paths. See `docs/safety-model.md` and `README.md#safety-model`.
 
 ## 1. What to read first
 
@@ -23,27 +23,12 @@ Thanks for helping improve BreachPilot. This guide covers setup, workflow, and t
 
 - **Python 3.11+** (`pyproject.toml:11` `requires-python = ">=3.11"`; CI matrix 3.11–3.13). `--doctor` rejects 3.10.
 - `nmap` on `PATH` (or set `nmap.path` in `config.yaml`).
-- An Ollama endpoint — **cloud is the default** (`config.yaml:3` `https://api.ollama.com` + `OLLAMA_API_KEY`) or a local daemon (`http://localhost:11434`). Embeddings stay local via `ollama.embed_host` → `nomic-embed-text`.
+- A chat provider credential. The checked-in `config.yaml` selects OpenCode Go (`models.provider: opencode_go`; `OPENCODE_GO_API_KEY`). Ollama is optional; if selected, `ollama.host` defaults to `https://api.ollama.com` and cloud use needs `OLLAMA_API_KEY`. Embeddings default to `none`; configure a provider explicitly if you need embeddings.
 - Optional: Metasploit, searchsploit, impacket, tmux (Linux full arsenal); Node.js + npm (first `--web` build); `bun` ≥ 1.3.11 only if using `models.provider: chatgpt`.
 
 ## 3. Setup
 
-### Windows (primary dev platform)
-
-```powershell
-python -m venv .venv; .\.venv\Scripts\Activate.ps1
-python -m pip install -r requirements.txt          # synced from pyproject.toml
-# or dev toolchain (ruff + mypy + build + twine + pytest + coverage):
-python -m pip install -e ".[dev]"
-
-python main.py --doctor          # env check: Python/nmap/Ollama/models/config
-python main.py --self-test       # safe localhost smoke test
-python main.py                   # WebUI daemon (default, opens http://127.0.0.1:8765)
-```
-
-One-click alternative: `.\install.bat` (checks tools, creates venv, builds WebUI, pulls models, runs `--doctor`); `.\START.bat` launches afterwards.
-
-### Linux / macOS
+### Linux (primary dev platform)
 
 ```bash
 python3 -m venv .venv; source .venv/bin/activate
@@ -53,6 +38,33 @@ python -m pip install -r requirements.txt   # or: python -m pip install -e ".[de
 ```
 
 Linux `nmap -O`/`-sS` need root: set `nmap.sudo: true` (uses `sudo -n`) or run as root; otherwise `nmap.priv_fallback` (default `true`) auto-downgrades.
+
+### Windows
+
+```powershell
+python -m venv .venv; .\.venv\Scripts\Activate.ps1
+python -m pip install -r requirements.txt          # synced from pyproject.toml
+# or dev toolchain (ruff + mypy + build + twine + pytest + coverage):
+python -m pip install -e ".[dev]"
+
+python main.py --doctor          # env check: Python/nmap/active provider/config
+python main.py --self-test       # safe localhost smoke test
+python main.py                   # WebUI daemon (default, opens http://127.0.0.1:8765)
+```
+
+One-click alternative: `.\install.bat` (checks tools, creates venv, builds WebUI, pulls models, runs `--doctor`); `.\START.bat` launches afterwards.
+
+### macOS
+
+Install Python 3.11+, Node.js/npm, and `nmap`, then create the environment and
+install the project:
+
+```bash
+python3 -m venv .venv; source .venv/bin/activate
+python3 -m pip install -r requirements.txt   # or: python3 -m pip install -e ".[dev]"
+python main.py --doctor
+python main.py --self-test
+```
 
 ### API keys (before `--doctor`)
 
@@ -64,7 +76,8 @@ python main.py --setup-api-keys   # prompts and writes secr.json
 
 | Var | Purpose |
 |-----|---------|
-| `OLLAMA_API_KEY` | **Required** for default Ollama Cloud path |
+| `OPENCODE_GO_API_KEY` | Required by the checked-in default chat-provider selection (`models.provider: opencode_go`) |
+| `OLLAMA_API_KEY` | Required only when the Ollama Cloud chat provider is selected |
 | `NVD_API_KEY` | Raises NVD CVE lookup rate limit |
 | `GITHUB_TOKEN` | Raises `cve_to_poc` GitHub Search limit 60→5000/hr |
 | `SERPAPI_API_KEY` | Optional fallback research provider |
@@ -85,8 +98,8 @@ ChatGPT provider (`models.provider: chatgpt`) uses browser OAuth tokens at `~/.c
 
 | Job | Command | Notes |
 |-----|---------|-------|
-| **Tests** (3.11/3.12/3.13) | `python -m pytest tests/ -v` | ~250 files, all mock subprocess/network — no live Nmap |
-| **Coverage** (3.12) | `python -m coverage run -m pytest tests/` + `coverage report`/`coverage xml` | `pyproject.toml:95` `source = ["tools","main","cli"]` |
+| **Tests** (3.11/3.12/3.13) | `python -m pytest tests/ -v` | CI-only full mocked suite; integration/live-LLM markers deselected |
+| **Coverage** (3.12) | `python -m coverage run -m pytest tests/` + `coverage report`/`coverage xml` | CI-only full coverage; configured sources include `tools`, `main`, `cli`, and `legacy` |
 | **Lint** | `ruff check .` (0 errors) + `ruff format --check .` (0 diffs) | `pyproject.toml:102` line-length 120, `select = ["E","F","W","I"]`, `ignore = ["E501"]` |
 | **Lint guards** | bare-`except Exception` guard + god-file budget + `config.yaml`↔`CONFIG_SCHEMA` sync + `doctor --json` shape | See `ci.yml:99-146` |
 | **Types** | `mypy --follow-imports=skip tools` (0 errors with masks) + strict `tools/validation_utils.py` `tools/exceptions.py` `tools/mcp_shared.py` | Masks at `pyproject.toml:156`; strict hot files at `pyproject.toml:201` |
@@ -107,11 +120,11 @@ ChatGPT provider (`models.provider: chatgpt`) uses browser OAuth tokens at `~/.c
 
 Plus 1 approving review, no bypass actors (admins included), no force-push, no deletion. While `main` is red: **feature-freeze-until-green** — no feature PRs merge; red-fixing PRs jump the queue (see §11b).
 
-### Run the same checks locally before opening a PR
+### Run focused verification locally before opening a PR
 
 ```powershell
 python -m pip install -e ".[dev]"
-python -m pytest tests/ -v
+python -m pytest tests/test_scope_gate.py -v -p no:cacheprovider -n 0
 ruff check .
 ruff format --check .
 mypy --follow-imports=skip tools
@@ -124,13 +137,13 @@ And verify `README.md` flags/config still match reality if you added any.
 ### Focused test commands
 
 ```powershell
-python -m pytest tests/test_scope_gate.py -v
-python -m pytest tests/test_recon_pipeline.py::TestClass::test_method -v
-python -m pytest tests/ -v -k "scope"
-python -m coverage run -m pytest tests/; python -m coverage report   # coverage (CI command; pytest-cov is not installed)
+python -m pytest tests/test_scope_gate.py -v -p no:cacheprovider -n 0
+python -m pytest tests/test_recon_pipeline.py::TestClass::test_method -v -n 0
 ```
 
-On Linux/macOS `make test`, `make test-one F=tests/test_scope_gate.py`, `make doctor` also work.
+Run the tests relevant to your change in sequential slices: one file preferred, about 30 files maximum, `-n 0` or `-n 2`, no parallel sessions, and retain default markers. Full-suite tests and coverage are CI-only. See [AGENTS.md](AGENTS.md) and [testing-guide.md](docs/testing-guide.md).
+
+On Linux/macOS `make test-one F=tests/test_scope_gate.py` and `make doctor` also work.
 
 ## 5. Non-obvious rules (you will otherwise break)
 
@@ -182,9 +195,9 @@ Add `@audit_tool` (or `@require_allowlist()` for target-touching) in `tools/mcp_
 
 Domains resolve via `tools/validation_utils.py:resolve_target_to_ip` and thread `EXPLOIT_TARGET`/`EXPLOIT_TARGET_IP`/`EXPLOIT_TARGET_DOMAIN`/`EXPLOIT_DISCOVERED_TARGETS` (`tools/mcp_shared.py:494`, `tools/mcp_session.py:255`). Discovered subdomains auto-authorize via `tools/mcp_shared.py:add_discovered_target`.
 
-### 5.7 Ollama Cloud is the default model path
+### 5.7 The checked-in config selects OpenCode Go
 
-`ollama.host` defaults to `https://api.ollama.com` (`config.yaml:3`); the `ollama` Python client auto-attaches `Authorization: Bearer $OLLAMA_API_KEY`. Override `ollama.host` for a local daemon — same code path. Embeddings stay local via `ollama.embed_host` (`nomic-embed-text`). `OLLAMA_API_KEY` missing surfaces as 401 on first chat. ChatGPT provider seam is `tools/model_router.py:290` `_build_model_client`.
+The checked-in `config.yaml` sets `models.provider: opencode_go` and uses `OPENCODE_GO_API_KEY`. The code fallback when `models.provider` is absent is Ollama (`tools/config/loader.py::get_ai_provider`). Ollama chat uses `ollama.host` (default `https://api.ollama.com`) and needs `OLLAMA_API_KEY` for that cloud endpoint; setting a local host uses the same provider adapter. Embeddings are a separate provider selection and default to Ollama. Chat and embedding provider details are in [providers.md](docs/providers.md).
 
 ## 6. Where to add things
 
@@ -237,7 +250,7 @@ Keep `pyproject.toml` and `requirements.txt` synced — header says "Synced from
 Before requesting review, confirm:
 
 - [ ] Read `AGENTS.md` and the relevant `docs/` guide
-- [ ] `python -m pytest tests/ -v` passes (or focused suite with justification)
+- [ ] Relevant targeted tests pass in approved sequential slices; full-suite CI is green
 - [ ] `ruff check .` — 0 errors; `ruff format --check .` — 0 diffs
 - [ ] `mypy --follow-imports=skip tools` — 0 errors (with documented masks)
 - [ ] `config.yaml` ↔ `CONFIG_SCHEMA` in sync (add key to both + validator + test if needed)
@@ -291,4 +304,3 @@ By contributing, you agree that your contributions will be licensed under the **
 - Diagnostics: `python main.py --doctor --json` (machine-readable)
 - Issues: https://github.com/braydos-h/BreachPilot/issues
 - Feedback on this guide: open an issue or PR editing `CONTRIBUTING.md`
-

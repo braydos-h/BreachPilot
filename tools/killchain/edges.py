@@ -49,9 +49,7 @@ EDGES: dict[str, Edge] = {
                 "args": {"command": "nmap -Pn -p {port} {target_ip}"},
             }
         ],
-        "verify": [
-            {"id": "port_open_probe", "type": "http_request", "url": "http://{target_ip}:{port}/", "expect_status": 200}
-        ],
+        "verify": [{"id": "port_open_probe", "type": "tcp_connect", "host": "{target_ip}", "port": "{port}"}],
         "evidence_type": "port_scan",
     },
     "service_confirmed": {
@@ -71,6 +69,7 @@ EDGES: dict[str, Edge] = {
                 "type": "http_request",
                 "url": "http://{target_ip}:{port}/",
                 "expect_status": 200,
+                "expect_body_contains": "{service_banner_marker}",
             }
         ],
         "evidence_type": "service_fingerprint",
@@ -95,6 +94,7 @@ EDGES: dict[str, Edge] = {
                 "url": "http://{target_ip}:{port}/login",
                 "user": "{user}",
                 "password": "{password}",
+                "expect_body_contains": "{login_success_marker}",
             }
         ],
         "evidence_type": "valid_credentials",
@@ -148,6 +148,7 @@ EDGES: dict[str, Edge] = {
                 "url": "http://{target_ip}:{port}/login",
                 "user": "{user}",
                 "password": "{password}",
+                "expect_body_contains": "{login_success_marker}",
             }
         ],
         "evidence_type": "authenticated_web_session",
@@ -185,6 +186,7 @@ EDGES: dict[str, Edge] = {
                 "type": "http_request",
                 "url": "http://{target_ip}:{port}/{shell_path}",
                 "expect_status": 200,
+                "expect_body_contains": "{webshell_probe_marker}",
             }
         ],
         "evidence_type": "webshell",

@@ -13,6 +13,7 @@ into a fake exploitation failure.
 
 from __future__ import annotations
 
+import ipaddress
 import socket
 import subprocess
 from typing import Any
@@ -126,6 +127,9 @@ class TargetManager:
             )
         container_id = proc.stdout.strip().splitlines()[-1] if proc.stdout.strip() else ""
         snapshot.container_id = container_id
+        # A remote image may have been pulled by `docker run`, so resolve its
+        # immutable pin only after the image exists locally.
+        snapshot.image_digest = self._image_digest(scenario.target_image)
         self._containers[scenario.scenario_id] = container_id
         return snapshot
 
@@ -181,12 +185,23 @@ class TargetManager:
 
     @staticmethod
     def _port_args(scenario: BenchmarkScenario) -> list[str]:
-        """``-p host:container`` args. Container port == host port by convention."""
+        """Publish benchmark ports only on the scenario's literal loopback IP."""
+        try:
+            host = ipaddress.ip_address(str(scenario.target_host).strip())
+        except ValueError as exc:
+            raise TargetProvisionError("docker benchmark target_host must be a literal loopback IP") from exc
+        if not host.is_loopback:
+            raise TargetProvisionError("docker benchmark targets may only publish ports on loopback")
+        bind_host = f"[{host.compressed}]" if host.version == 6 else host.compressed
         args: list[str] = []
-        for port in scenario.target_ports:
+        for raw_port in scenario.target_ports:
+            if isinstance(raw_port, bool):
+                raise TargetProvisionError(f"invalid docker benchmark target port: {raw_port!r}")
             try:
-                port = int(port)
-            except (TypeError, ValueError):
-                continue
-            args.extend(["-p", f"{port}:{port}"])
+                port = int(raw_port)
+            except (TypeError, ValueError) as exc:
+                raise TargetProvisionError(f"invalid docker benchmark target port: {raw_port!r}") from exc
+            if not 1 <= port <= 65535:
+                raise TargetProvisionError(f"invalid docker benchmark target port: {raw_port!r}")
+            args.extend(["-p", f"{bind_host}:{port}:{port}"])
         return args

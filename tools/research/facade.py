@@ -272,6 +272,9 @@ class WebResearcher:
                 timeout_seconds=settings.timeout_seconds,
                 max_content_chars=settings.max_content_chars,
                 user_agent=settings.user_agent,
+                allow_local_fetch=settings.allow_local_fetch,
+                allowed_domains=settings.allowed_domains,
+                blocked_domains=settings.blocked_domains,
             ),
         }
 

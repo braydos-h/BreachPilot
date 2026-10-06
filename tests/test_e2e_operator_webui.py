@@ -70,8 +70,7 @@ def _make_client(tmp_path, monkeypatch, token: str = TOKEN):
             encoding="utf-8",
         )
         (reports_dir / "exploit_audit.jsonl").write_text(
-            json.dumps({"tool_name": "e2e_probe", "status": "completed", "target_ip": kwargs.get("target_ip")})
-            + "\n",
+            json.dumps({"tool_name": "e2e_probe", "status": "completed", "target_ip": kwargs.get("target_ip")}) + "\n",
             encoding="utf-8",
         )
         return {"total_actions": 1, "workspace": str(reports_dir), "audit_path": ""}
@@ -316,12 +315,13 @@ def test_sandbox_enforcing_fail_closed():
     assert cfg.fallback_native is False
 
 
-def test_sandbox_explicit_disable_required():
-    """Missing sandbox section defaults to contained; only explicit false opts out."""
+def test_sandbox_cannot_be_disabled():
+    """Missing sandbox config defaults to contained; an explicit opt-out is rejected."""
     from tools.sandbox.models import SandboxConfig
 
     assert SandboxConfig.from_config({}).enabled is True
-    assert SandboxConfig.from_config({"sandbox": {"enabled": False}}).enabled is False
+    with pytest.raises(ValueError, match="sandbox.enabled=false is unsafe"):
+        SandboxConfig.from_config({"sandbox": {"enabled": False}})
 
 
 # ── WebUI gates (static: TokenGate → OnboardingGate → run routes) ────────────

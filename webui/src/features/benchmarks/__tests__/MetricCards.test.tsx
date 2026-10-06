@@ -54,6 +54,27 @@ describe("MetricCards", () => {
     render(<MetricCards summary={makeSummary({ estimated_cost: null, median_solve_time: null })} />);
     expect(screen.getAllByText("n/a").length).toBeGreaterThanOrEqual(2);
   });
+
+  it("marks unmeasured rates as neutral instead of successful zeroes", () => {
+    render(
+      <MetricCards
+        summary={
+          makeSummary({
+            trials_total: 3,
+            trials_completed: 0,
+            solved: 0,
+            verified_success_rate: null,
+            false_positive_rate: null,
+          })
+        }
+      />,
+    );
+
+    expect(screen.getAllByText("n/a")).toHaveLength(2);
+    expect(screen.getAllByText("unmeasured — no completed trials")).toHaveLength(2);
+    expect(screen.getByText("Verified success").closest("[data-tone]")).toHaveAttribute("data-tone", "neutral");
+    expect(screen.getByText("False positives").closest("[data-tone]")).toHaveAttribute("data-tone", "neutral");
+  });
 });
 
 describe("formatters", () => {

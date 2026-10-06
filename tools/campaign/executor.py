@@ -7,16 +7,16 @@ Moved from tools.autonomous_orchestrator to break the god file.
 from __future__ import annotations
 
 import asyncio
-import inspect
-import re
+import shlex
 import time
 from typing import Any, Callable
 
 from tools.attack_modules import AttackModule, ModuleContext, ModuleResult, _module_target_signature
 from tools.attack_planner import StepContext
 from tools.attack_ui import get_ui
-from tools.exceptions import _EXC_GROUP_CATCH
-from tools.failure_taxonomy import classify_failure
+from tools.exceptions import _EXC_GROUP_CATCH, _is_exception_group, _log_nested_exceptions
+from tools.failure_taxonomy import FailureClass, classify_failure
+from tools.kernel.workspace import write_workspace_script
 from tools.logging_setup import get_logger
 from tools.scope_verdict import ScopeVerdict, verdict_for
 
@@ -31,6 +31,10 @@ from tools.campaign.state import (
 
 logger = get_logger()
 ui = get_ui()
+
+
+class _ModuleRunTimeout(TimeoutError):
+    """Distinguish a still-running module thread from later async timeouts."""
 
 
 def _result_evidence(result: Any) -> list[str]:
@@ -94,13 +98,12 @@ class AttackModuleExecutor:
         # output, instead of treating the module's dict as dead data. When wired
         # (AutonomousOrchestrator passes its own _tool_executor through), a
         # script/suggested_command is run, the output is classified via
-        # ``classify_exploit_outcome`` (outcome_truth, strict), and
-        # ``shell_type`` / ``privilege_level`` are only set when a real
-        # compromise marker (meterpreter / uid=0 / NT AUTHORITY\SYSTEM) appears
-        # -- so ``access_achieved`` and the downstream
-        # privesc/lateral phases only fire on a verified foothold. Unwired
-        # (legacy callers, most tests) -> behaves exactly as before: module
-        # dicts pass through unchanged.
+        # ``classify_exploit_outcome`` (outcome_truth, strict). Raw output
+        # markers are unverified claims and must not populate shell or
+        # privilege state. Only a target-bound verifier may unlock
+        # ``access_achieved`` and downstream post-exploit phases. Unwired
+        # callers may still report module metadata operationally, but it is not
+        # verified evidence.
         self._tool_executor: Callable[[str, dict[str, Any]], str] | None = tool_executor
         # Swarm integration (Tier 0 item 0.6b): the autonomous attack path
         # previously ran modules with only inline scope/risk checks and NO
@@ -119,6 +122,12 @@ class AttackModuleExecutor:
         self._critic = critic_agent
         self._reflection = reflection_agent
         self._action_count = 0
+        # ``asyncio.to_thread`` cannot stop a running extension module when
+        # its awaiter times out or is cancelled. Keep a strong reference until
+        # the worker exits, and remember timed-out task IDs so the campaign
+        # cannot silently retry an operation whose side effects are unknown.
+        self._module_workers: dict[str, asyncio.Task[Any]] = {}
+        self._timed_out_module_task_ids: set[str] = set()
         # Snapshot/rollback (design §snapshots): lazily-built in
         # _snapshot_before_destructive; None until a destructive dispatch
         # first needs it (opt-in — snapshots.enabled defaults false).
@@ -130,6 +139,23 @@ class AttackModuleExecutor:
         state: AttackState,
     ) -> dict[str, Any]:
         """Execute an attack module with full lifecycle management."""
+        if task.task_id in self._timed_out_module_task_ids:
+            task.status = TaskStatus.BLOCKED
+            task.error = "Previous module execution timed out with an unknown outcome; automatic retry is blocked."
+            task.last_error = task.error
+            task.failure_class = FailureClass.OUTCOME_UNKNOWN.value
+            state.add_timeline_event("execution_unknown", task.error, {"task_id": task.task_id})
+            return {"success": False, "error": task.error, "blocked": True, "execution_unknown": True}
+
+        existing_worker = self._module_workers.get(task.task_id)
+        if existing_worker is not None and not existing_worker.done():
+            task.status = TaskStatus.BLOCKED
+            task.error = "A module worker for this task is still running; duplicate execution is blocked."
+            task.last_error = task.error
+            task.failure_class = FailureClass.OUTCOME_UNKNOWN.value
+            state.add_timeline_event("execution_unknown", task.error, {"task_id": task.task_id})
+            return {"success": False, "error": task.error, "blocked": True, "execution_unknown": True}
+
         task.status = TaskStatus.RUNNING
         task.started_at = time.monotonic()
         self._action_count += 1
@@ -318,30 +344,57 @@ class AttackModuleExecutor:
         # Execute with timeout
         try:
             timeout = task.parameters.get("timeout", 300)
-            module_run = asyncio.to_thread(module.run, ctx)
+            module_worker = asyncio.create_task(
+                asyncio.to_thread(module.run, ctx),
+                name=f"campaign-module-{task.task_id}",
+            )
+            self._retain_module_worker(task.task_id, module_worker)
             try:
-                result = await asyncio.wait_for(module_run, timeout=timeout)
-            except asyncio.TimeoutError:
-                if inspect.iscoroutine(module_run):
-                    module_run.close()
+                result = await asyncio.wait_for(asyncio.shield(module_worker), timeout=timeout)
+            except asyncio.CancelledError:
+                self._timed_out_module_task_ids.add(task.task_id)
+                self._mark_module_execution_unknown(task, state, "cancelled while its worker thread remained active")
                 raise
+            except asyncio.TimeoutError:
+                self._timed_out_module_task_ids.add(task.task_id)
+                raise _ModuleRunTimeout from None
 
             # Phase 2.1: adapt the module's dict return into a typed
-            # ModuleResult, then -- when a tool_executor is wired -- actually
-            # DISPATCH any runnable artifact (suggested_command or generated
-            # script) and classify the real output. Previously the module's
-            # suggested_command / script keys were dead data on Path B (counted
-            # as succeeded but never executed), so ``access_achieved`` was never
-            # set and the downstream privesc / lateral phases never fired. Now a
-            # real shell marker (meterpreter / uid=0 / NT AUTHORITY\SYSTEM) in
-            # the dispatch output sets ``shell_type`` / ``privilege_level``, and
-            # ``record_success`` flips ``access_achieved`` only on that verified
-            # signal. Info-stub modules (status=info with no runnable script)
-            # skip dispatch and stay info-stubs, so they never falsely set
-            # access_achieved. Unwired (no tool_executor) -> the module's own
-            # dict passes through unchanged, preserving legacy behavior.
-            mresult = ModuleResult.to_result(result)
+            # ModuleResult and, when a tool_executor is wired, dispatch its
+            # runnable artifact. The returned text is still a claim source:
+            # only a target-bound verifier may promote access, credentials, or
+            # a successful exploit. Info-stub modules skip dispatch. Without a
+            # tool_executor, generated artifacts remain unverified.
+            mresult = ModuleResult.to_result(result.to_dict() if isinstance(result, ModuleResult) else result)
+            # Module output, including plugin output, is a claim source rather
+            # than a verifier. Keep the operational fields needed to dispatch
+            # the artifact, but clear any module-supplied access/credential
+            # state before it can reach AttackState or public result consumers.
+            mresult.shell_type = ""
+            mresult.privilege_level = ""
+            mresult.credentials_found.clear()
+            mresult.verdict = "inconclusive"
+            for key in (
+                "success",
+                "verified_success",
+                "access_achieved",
+                "shell_type",
+                "privilege_level",
+                "credentials",
+                "credentials_found",
+                "pivot_targets",
+                "compromised_hosts",
+                "verdict",
+            ):
+                mresult.extra.pop(key, None)
+
             dispatch_failure = False
+            classification: dict[str, Any] = {
+                "outcome": "unknown",
+                "shell_type": "",
+                "privilege_level": "",
+                "evidence": [],
+            }
             if self._tool_executor is not None and mresult.status not in ("info",):
                 dispatch_out = await self._dispatch_module_artifact(module, mresult, ctx, task, state)
                 if dispatch_out is not None:
@@ -386,6 +439,13 @@ class AttackModuleExecutor:
                             f"{task.module_name} dispatch output signalled failure",
                             {"evidence": classification.get("evidence", [])},
                         )
+                elif mresult.status == "script_generated":
+                    # A generated-artifact claim without a dispatchable command
+                    # is not an executed attempt. Keep it out of the completed
+                    # task count so the bounded retry policy can report it.
+                    dispatch_failure = True
+                    if not mresult.note:
+                        mresult.note = "Generated artifact could not be dispatched"
                     # 'partial' / 'unknown' -> ran but no verified compromise;
                     # leave shell_type empty so access_achieved stays False.
 
@@ -393,15 +453,25 @@ class AttackModuleExecutor:
             # the renderer / record_success / task.result expect. Pass-through
             # extra keys are preserved by to_dict().
             result = mresult.to_dict()
+            verified_success = str(classification.get("outcome", "")).lower() in ("compromise", "cred_dump")
+            execution_completed = (
+                result.get("status") in ("success", "exploited", "script_generated") and not dispatch_failure
+            )
+            result["verified_success"] = verified_success
+            result["execution_completed"] = execution_completed
+            result["outcome"] = (
+                str(classification.get("outcome", "unknown"))
+                if verified_success
+                else "unverified"
+                if execution_completed
+                else "failure"
+            )
 
-            # Phase 1: feed this module run into the ExperienceStore so the
-            # Bayesian learning loop reflects orchestrator history, not just
-            # the exploit-agent loop. Best-effort -- a None store (legacy
-            # callers) or a module with no target signature (no target_services)
-            # is silently skipped. Maps info -> partial (neutral), real
-            # compromise -> success, failure -> failure. This is the missing
-            # wiring that makes find_modules on the next campaign prefer
-            # proven modules and demote known-bad ones.
+            # Feed this run into the ExperienceStore so the Bayesian learning
+            # loop reflects orchestrator history, not just the exploit-agent
+            # loop. Only verified outcomes count as success; a completed but
+            # unverified attempt maps to partial (neutral), and failed attempts
+            # map to failure. A missing store or target signature is skipped.
             if self._experience_store is not None:
                 try:
                     sig = _module_target_signature(module, ctx)
@@ -409,7 +479,9 @@ class AttackModuleExecutor:
                         self._experience_store.record_module_outcome(
                             target_signature=sig,
                             module_name=module.name,
-                            status_str=str(result.get("status", "")),
+                            status_str=(
+                                "success" if verified_success else "partial" if execution_completed else "failure"
+                            ),
                             metadata={"target": task.target, "phase": state.current_phase.value},
                         )
                 except Exception:  # noqa: BLE001 -- learning loop is best-effort
@@ -423,21 +495,15 @@ class AttackModuleExecutor:
             # result["success"] / task.status, so a ran-but-failed module must
             # report success=False and TaskStatus.FAILED -- otherwise failed
             # modules are counted as completed and never retried.
-            # Phase 1: stop counting status="info" as _succeeded. Info-stub
-            # modules produce no runnable artifact and no compromise signal --
-            # counting them as success was a silent false-positive that left
-            # ValidateFinding/LateralMovement "succeeding" without ever
-            # dispatching (the dispatcher at line 659 correctly skips info
-            # status, but _succeeded then counted them as wins). Now only
-            # success/exploited/script_generated count as succeeded; info
-            # modules are recorded as failures so the retry loop can re-queue
-            # them with a dispatchable status (the module recipe must emit
-            # script/suggested_command to actually win).
-            _succeeded = result.get("status") in ("success", "exploited", "script_generated") and not dispatch_failure
-            task.status = TaskStatus.COMPLETED if _succeeded else TaskStatus.FAILED
+            # Keep operational completion separate from verified exploitation.
+            # An unverified but completed artifact is not retried as though it
+            # never ran; it also does not update successful_exploits or unlock
+            # post-exploit phases. An info stub or failed dispatch is not
+            # completed and remains eligible for bounded retry.
+            task.status = TaskStatus.COMPLETED if execution_completed else TaskStatus.FAILED
             task.completed_at = time.monotonic()
 
-            if _succeeded:
+            if verified_success:
                 state.record_success(task.module_name, result)
                 state.add_timeline_event(
                     "success",
@@ -453,13 +519,19 @@ class AttackModuleExecutor:
                 # action_type keeps this from polluting the operational
                 # exploit-action confidence rows in the ExperienceStore.
                 await asyncio.to_thread(self._record_lesson_on_success, task, state, result)
-            else:
+            elif not execution_completed:
                 task.error = result.get("note", "Module did not achieve exploitation")
                 task.last_error = task.error
                 task.failure_class = classify_failure(task.error).value
                 state.record_failure(task.module_name, task.error)
                 state.add_timeline_event("failure", f"{task.module_name} did not achieve exploitation")
                 self._record_failure_on_blackboard(task.module_name)
+            else:
+                state.add_timeline_event(
+                    "attempt_unverified",
+                    f"{task.module_name} completed without target-bound verification against {task.target}",
+                    {"reported_status": result.get("status"), "evidence": classification.get("evidence", [])},
+                )
 
             # Reflection post-check (Tier 0 item 0.6b): feed this attempt into the
             # ReflectionAgent. The agent updates the shared blackboard itself
@@ -471,23 +543,34 @@ class AttackModuleExecutor:
                 self._run_reflection,
                 task,
                 state,
-                {"success": _succeeded, "result": result},
+                {"success": verified_success, "completed": execution_completed, "result": result},
             )
 
-            return {"success": _succeeded, "result": result}
+            return {
+                "success": verified_success,
+                "verified_success": verified_success,
+                "completed": execution_completed,
+                "result": result,
+            }
 
-        except asyncio.TimeoutError:
-            task.status = TaskStatus.FAILED
-            task.error = f"Timeout after {timeout}s"
+        except _ModuleRunTimeout:
+            task.status = TaskStatus.BLOCKED
+            task.error = (
+                f"Timeout after {timeout}s; the module worker may still be running, so its outcome is unknown "
+                "and automatic retry is blocked."
+            )
             task.last_error = task.error
-            task.failure_class = classify_failure(task.error).value
+            task.failure_class = FailureClass.OUTCOME_UNKNOWN.value
+            task.completed_at = time.monotonic()
             state.record_failure(task.module_name, task.error)
-            state.add_timeline_event("timeout", task.error)
+            state.add_timeline_event("execution_unknown", task.error, {"task_id": task.task_id})
             logger.warning(f"Module {task.module_name} timed out against {task.target}")
             self._record_failure_on_blackboard(task.module_name)
-            return {"success": False, "error": task.error, "timeout": True}
+            return {"success": False, "error": task.error, "timeout": True, "blocked": True, "execution_unknown": True}
 
-        except Exception as exc:
+        except _EXC_GROUP_CATCH as exc:
+            if _is_exception_group(exc):
+                _log_nested_exceptions(exc)
             task.status = TaskStatus.FAILED
             task.error = str(exc)
             task.last_error = task.error
@@ -497,6 +580,35 @@ class AttackModuleExecutor:
             logger.exception(f"Module {task.module_name} failed against {task.target}")
             self._record_failure_on_blackboard(task.module_name)
             return {"success": False, "error": task.error}
+
+    def _retain_module_worker(self, task_id: str, worker: asyncio.Task[Any]) -> None:
+        """Retain and observe a thread-backed module task until it exits."""
+        self._module_workers[task_id] = worker
+
+        def _finished(completed: asyncio.Task[Any]) -> None:
+            if self._module_workers.get(task_id) is completed:
+                self._module_workers.pop(task_id, None)
+            if completed.cancelled():
+                return
+            try:
+                error = completed.exception()
+            except asyncio.CancelledError:
+                return
+            if error is not None:
+                if _is_exception_group(error):
+                    _log_nested_exceptions(error)
+                logger.error(f"Background module worker {task_id} failed after its awaiter exited: {error}")
+
+        worker.add_done_callback(_finished)
+
+    def _mark_module_execution_unknown(self, task: AttackTask, state: AttackState, reason: str) -> None:
+        task.status = TaskStatus.BLOCKED
+        task.error = f"Module execution was {reason}; its outcome is unknown and automatic retry is blocked."
+        task.last_error = task.error
+        task.failure_class = FailureClass.OUTCOME_UNKNOWN.value
+        task.completed_at = time.monotonic()
+        state.record_failure(task.module_name, task.error)
+        state.add_timeline_event("execution_unknown", task.error, {"task_id": task.task_id})
 
     async def execute_plan_step(self, step: StepContext) -> dict[str, Any]:
         """Run ONE planner step with no cross-step memory (FSM executor role).
@@ -519,6 +631,8 @@ class AttackModuleExecutor:
         try:
             raw = await self.execute(task, state)
         except _EXC_GROUP_CATCH as exc:
+            if _is_exception_group(exc):
+                _log_nested_exceptions(exc)
             err = f"{type(exc).__name__}: {exc}"[:2000]
             task.failure_class = classify_failure(err).value
             return {
@@ -558,7 +672,9 @@ class AttackModuleExecutor:
             from tools.intelligence.adapters.planner_adapter import AttackPhaseBridge
 
             mapped = AttackPhaseBridge.to_orchestrator(planner_phase)
-        except _EXC_GROUP_CATCH:
+        except _EXC_GROUP_CATCH as exc:
+            if _is_exception_group(exc):
+                _log_nested_exceptions(exc)
             mapped = None
         return mapped if mapped is not None else AttackPhase.RECONNAISSANCE
 
@@ -590,10 +706,10 @@ class AttackModuleExecutor:
         as a non-verified run, NOT a hard failure -- the script itself may be
         valid and just need a manual operator run).
 
-        The classification comes from ``classify_exploit_result`` (Phase 1.1),
-        imported lazily so a missing dep never breaks the executor. The
-        classifier is conservative: only strong shell / uid=0 / Meterpreter /
-        NT AUTHORITY\\SYSTEM markers yield ``compromise``.
+        The classification comes from ``classify_exploit_outcome`` in
+        ``outcome_truth``. Strong shell / uid=0 / Meterpreter /
+        NT AUTHORITY\\SYSTEM markers are unverified claims; a target-bound
+        verifier is required to classify compromise.
         """
         executor = self._tool_executor
         if executor is None:
@@ -611,12 +727,8 @@ class AttackModuleExecutor:
                     script_text = ""
             if script_text:
                 try:
-                    modules_dir = ctx.workspace / "modules"
-                    modules_dir.mkdir(parents=True, exist_ok=True)
-                    safe_name = re.sub(r"[^A-Za-z0-9_.-]", "_", f"{module.name}_{ctx.target_ip}.py")
-                    script_path = modules_dir / safe_name
-                    script_path.write_text(script_text, encoding="utf-8")
-                    command = f"python {script_path} {ctx.target_ip}"
+                    script_path = write_workspace_script(ctx.workspace, f"{module.name}_{ctx.target_ip}", script_text)
+                    command = f"python {shlex.quote(str(script_path))} {shlex.quote(ctx.target_ip)}"
                 except Exception as exc:  # noqa: BLE001 -- best-effort
                     state.add_timeline_event(
                         "dispatch_write_err",
@@ -649,13 +761,15 @@ class AttackModuleExecutor:
 
         try:
             output = await asyncio.to_thread(executor, command, {"target": task.target})
-        except Exception as exc:  # noqa: BLE001 -- best-effort dispatch
+        except _EXC_GROUP_CATCH as exc:  # noqa: BLE001 -- containment failure is a failed dispatch
+            if _is_exception_group(exc):
+                _log_nested_exceptions(exc)
             state.add_timeline_event(
                 "dispatch_err",
                 f"{module.name} dispatch raised: {exc}",
                 {"command": command[:200]},
             )
-            return None
+            return "", {"outcome": "failure", "shell_type": "", "privilege_level": "", "evidence": [str(exc)[:500]]}
 
         output_text = str(output or "")
         state.add_timeline_event(

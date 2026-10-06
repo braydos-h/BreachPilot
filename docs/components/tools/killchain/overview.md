@@ -44,14 +44,14 @@ Each edge is one verified transition: `edge_id`, `from_state`/`to_state`, `playb
 
 | Edge | From → To | Playbook → Verify |
 |---|---|---|
-| `tcp_reachable` | `discovered → reachable` | nmap port probe → `http_request` port check |
-| `service_confirmed` | `reachable → service_access` | `get_service_fingerprint` → banner probe |
-| `cred_harvest` | `service_access → creds_in_hand` | login POST → `http_login` |
+| `tcp_reachable` | `discovered → reachable` | nmap port probe → host/port-scoped `tcp_connect` |
+| `service_confirmed` | `reachable → service_access` | `get_service_fingerprint` → HTTP body contains `service_banner_marker` |
+| `cred_harvest` | `service_access → creds_in_hand` | login POST → `http_login` with `login_success_marker` |
 | `cred_ssh_login` | `creds_in_hand → shell_as_user` | sshpass `id` → `shell_command` `uid=` |
 | `cred_smb_login` | `creds_in_hand → service_access` | `lateral_exec whoami` → session probe |
-| `cred_http_login` | `creds_in_hand → service_access` | (no playbook) → `http_login` |
+| `cred_http_login` | `creds_in_hand → service_access` | (no playbook) → `http_login` with `login_success_marker` |
 | `msf_validated_exploit` | `service_access → shell_as_user` | `run_msf_module` → session probe |
-| `file_upload_webshell` | `service_access → shell_as_user` | upload POST → webshell URL probe |
+| `file_upload_webshell` | `service_access → shell_as_user` | upload POST → webshell URL probe with `webshell_probe_marker` |
 | `privesc_sudo_to_root` | `shell_as_user → shell_as_root` | `sudo -n id` → `uid=0(` probe |
 | `domain_login_validate` | `creds_in_hand → domain_creds` | `lateral_exec` → NetExec `[+]` logon probe |
 | `kerberoast_to_da` | `domain_creds → da` | `kerberoast` → DCSync `:::` hash-line probe |
@@ -94,6 +94,13 @@ def can_transition(self, from_state: str, to_state: str) -> bool: ...
 ## MCP surface (`tools/mcp_tools/killchain.py`)
 
 Registered only when `killchain.enabled` is true (default false). The machine is wired with an in-process tool executor (same decorated functions the agent calls, so every playbook step re-applies the allowlist + audit) and `AttackGraphStore` at `<workspace>/killchain_graph.db` (or `killchain.graph_db`).
+
+HTTP/TCP verification uses the literal target address and selected numeric
+`port` from the transition context. The shared evaluator rejects hostname
+aliases, undeclared ports, status-only HTTP success, and unresolved markers.
+Credential and webshell transitions therefore need a target-specific
+`login_success_marker` or `webshell_probe_marker`; the service transition
+needs `service_banner_marker`.
 
 | Tool | Signature | Notes |
 |---|---|---|

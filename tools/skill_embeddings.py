@@ -17,7 +17,11 @@ from __future__ import annotations
 
 import math
 import threading
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    import numpy as np
+    from numpy.typing import NDArray
 
 # ponytail: numpy imports lazily inside _cosine (its only use). Importing this
 # module must stay cheap for --help/--doctor paths that never rank skills.
@@ -49,8 +53,8 @@ def _cosine(a: list[float] | tuple[float, ...], b: list[float] | tuple[float, ..
         return 0.0
     import numpy as np  # ponytail: lazy — see module docstring note
 
-    av = np.asarray(a, dtype=np.float64)
-    bv = np.asarray(b, dtype=np.float64)
+    av: NDArray[np.float64] = np.asarray(a, dtype=np.float64)
+    bv: NDArray[np.float64] = np.asarray(b, dtype=np.float64)
     na = float(np.dot(av, av))
     nb = float(np.dot(bv, bv))
     if na <= 0.0 or nb <= 0.0:
@@ -78,13 +82,14 @@ class SkillEmbedder:
         return self._sm is not None and hasattr(self._sm, "embed")
 
     def embed_text(self, text: str) -> list[float] | None:
-        if not self.available() or not text:
+        semantic_memory = self._sm
+        if semantic_memory is None or not hasattr(semantic_memory, "embed") or not text:
             return None
         cached = self._cache.get(text)
         if cached is not None:
             return cached
         try:
-            vec = self._sm.embed(text)
+            vec = semantic_memory.embed(text)
         except Exception:
             vec = None
         if vec:

@@ -1,7 +1,7 @@
 ---
 title: Kernel — Overview
 package: tools/kernel
-files: [allowlist.py, audit.py, config.py, workspace.py, parse.py]
+files: [allowlist.py, audit.py, segmented_audit.py, config.py, workspace.py, parse.py]
 ---
 
 # Kernel — Overview (`tools/kernel/`)
@@ -13,7 +13,8 @@ Extracted safety/portability shims re-exported by `tools/mcp_shared` for backwar
 | File | LOC | Role | Re-export via |
 |---|---|---|---|
 | `allowlist.py` | 238 | Target-IP allowlist union + extraction | `tools.mcp_shared._allowed_target_list`, `_check_allowlist` |
-| `audit.py` | 374 | Credential redaction + audit decorators | `tools.mcp_shared.make_audit_tool`, `make_require_allowlist` |
+| `audit.py` | 700 | Credential redaction + audit decorators; re-exports segmented audit-chain API | `tools.mcp_shared.make_audit_tool`, `make_require_allowlist` |
+| `segmented_audit.py` | 651 | Segmented audit-chain writer, verifier, checkpoints, and recovery | `tools.kernel.audit` compatibility exports |
 | `config.py` | 25 | YAML `load_config(path)` | `tools.mcp_shared` / `tools.config_cli` |
 | `workspace.py` | 132 | Path containment + per-attempt dirs | `tools.mcp_shared._resolve_workspace_file` |
 | `parse.py` | 15 | Re-export shim | `tools.exploit_agent.context._parse_reasoning_block` + `tool_calls._filter_and_validate_tool_calls` |
@@ -44,7 +45,7 @@ Extracted safety/portability shims re-exported by `tools/mcp_shared` for backwar
 | `_MASK_RES` | tuple | 107 | 10 regexes: `_MASK_URL_AUTH_RE`, `_MASK_U_FLAG_RE`, `_MASK_LONG_PW_RE`, `_MASK_HYDRA_P_RE`, `_MASK_MSF_SET_RE`, `_MASK_HASHES_RE`, `_MASK_NTLM_FLAG_RE`, `_MASK_KV_SECRET_RE`, `_MASK_AUTH_HDR_RE`, `_MASK_PY_AUTH_TUPLE_RE` |
 | `_mask_secret_content(value)` | def | 123 | Applies `_MASK_RES` over string value |
 | `_redact_nested(value)` | def | 137 | Dict key redaction + string mask |
-| `_redact_args(args)` | def | 148 | Per-arg redaction + `_WHOLESALE_REDACT_FIELDS={"input_text","notes"}` |
+| `_redact_args(args)` | def | 148 | Per-arg redaction; code values become `{redacted, chars, sha256}` metadata |
 | `_audit_log(audit_path, target_ip, tool_name, approved, status, command, args, attempt_id, code_sha256, duration)` | def | 165 | Append `{timestamp,target_ip,tool_name,approved,status,command(mask),args(redacted),…}` JSONL |
 | `_result_is_blocked(result)` | def | 200 | `upper().startswith(("BLOCKED:", "TERMINAL_RESULT: BLOCKED", …))` |
 | `_extract_audit_target(bound)` | def | 208 | From `command/script_content` + `lhost` via `_extract_msf_rhosts` |
@@ -107,6 +108,7 @@ No kernel-specific block; kernel reads the same `exploit.*` keys.
 | `tests/test_scanner_target_extraction.py` | yes | `_extract_scanner_targets` argv-walk + value-flag skip |
 | `tests/test_audit_redaction.py` | yes | `_mask_secret_content`, `_redact_args`, 10 regexes |
 | `tests/test_audit_chain.py` | yes | `verify_audit_chain` (policy) + kernel audit log append |
+| `tests/test_segmented_audit.py` | yes | Compatibility exports, segment rotation/modes, torn-tail quarantine |
 | `tests/test_mcp_shared_helpers.py` | yes | `load_config`, `_extract_msf_rhosts` |
 | `tests/test_mcp_workspace.py` | yes | `_resolve_workspace_file`, `_is_inside_workspace`, `_find_file` |
 | `tests/test_workspace_binary_write.py` | yes | `read_workspace` truncation + binary flag |

@@ -3,6 +3,8 @@ version: 0.1.0
 description: BloodHound CE data exchange - neo4j/CE API client for AD attack-path ingest and query. Pairs with the existing bloodhound_collect tool (which emits a zip); this plugin ingests the zip into BloodHound CE and queries attack paths. Target-touching tools are allowlist-locked.
 author: BreachPilot
 capabilities: [mcp_tool]
+target_touching: true
+provides_mcp_tools: [bloodhound_ce_ingest, bloodhound_ce_list_queries, bloodhound_ce_query]
 enabled: false
 config_section:
   bloodhound_ce:

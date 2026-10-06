@@ -46,6 +46,9 @@ export interface ToolGroupSnapshot {
   completed: boolean;
   result?: string;
   error?: string;
+  operational_status?: string;
+  exploit_outcome?: string;
+  verified_success?: boolean;
   arguments?: unknown;
   timestamp?: string;
 }
@@ -93,6 +96,18 @@ export function buildEventRows({ older, events, decisionsById, goalSelectAnswere
         started: event.type === "tool_start",
         completed: false,
         arguments: event.type === "tool_request" ? event.payload.arguments : undefined,
+        operational_status:
+          event.type === "tool_result" && typeof event.payload.operational_status === "string"
+            ? event.payload.operational_status
+            : undefined,
+        exploit_outcome:
+          event.type === "tool_result" && typeof event.payload.exploit_outcome === "string"
+            ? event.payload.exploit_outcome
+            : undefined,
+        verified_success:
+          event.type === "tool_result" && typeof event.payload.verified_success === "boolean"
+            ? event.payload.verified_success
+            : undefined,
         timestamp: event.timestamp,
         searchText: needSearch ? payloadText(event) : "",
       });
@@ -106,6 +121,15 @@ export function buildEventRows({ older, events, decisionsById, goalSelectAnswere
         existing.result = typeof event.payload.result === "string" ? event.payload.result : undefined;
         const errStr = typeof event.payload.error === "string" ? event.payload.error : undefined;
         existing.error = event.payload.success === false ? (errStr ?? "tool failed") : errStr;
+        if (typeof event.payload.operational_status === "string") {
+          existing.operational_status = event.payload.operational_status;
+        }
+        if (typeof event.payload.exploit_outcome === "string") {
+          existing.exploit_outcome = event.payload.exploit_outcome;
+        }
+        if (typeof event.payload.verified_success === "boolean") {
+          existing.verified_success = event.payload.verified_success;
+        }
       }
       if (needSearch) existing.searchText += ` ${payloadText(event)}`;
     }

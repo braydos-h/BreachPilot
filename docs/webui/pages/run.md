@@ -123,7 +123,7 @@ Artifact readiness gate (`RunPage.tsx:98`): `artifactReady(name)= !isActiveState
 
 #### EventViewer
 
-`components/events/EventViewer.tsx` — renders `events.events` (deduped by `sequence`, capped `MAX_EVENTS_PER_RUN=1000`). Correlation of `tool_request → tool_start → tool_result` by `action/correlation_id` into `ToolCallCard` (`components/ToolCallCard.tsx`). `boot|ok` → `BootChecklist`, `recon_assessment` → `ReconAssessmentCard`, `goal_suggestions` → `GoalSuggestionCard`, `state/progress/assistant/swarm/artifact/completion/error/heartbeat` inline. Sticky-to-bottom + "jump to latest", `dropped` banner.
+`components/events/EventViewer.tsx` — renders `events.events` (deduped by `sequence`, capped `MAX_EVENTS_PER_RUN=1000`). Correlation of `tool_request → tool_start → tool_result` by `action/correlation_id` into `ToolCallCard` (`components/ToolCallCard.tsx`). Tool cards keep a failed call's result text visible alongside any error and display normalized operational/outcome fields when present. Completed calls are marked `Not verified` unless the event carries the explicit `verified_success: true` field; missing normalized fields show as `unknown`, and raw result text never establishes verification. `boot|ok` → `BootChecklist`, `recon_assessment` → `ReconAssessmentCard`, `goal_suggestions` → `GoalSuggestionCard`, `state/progress/assistant/swarm/artifact/completion/error/heartbeat` inline. Sticky-to-bottom + "jump to latest", `dropped` banner.
 
 #### Tabs (`RunPage.tsx:321`)
 

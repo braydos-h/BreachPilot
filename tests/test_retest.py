@@ -128,15 +128,15 @@ def _call(mcp: FakeMCP, **kwargs: Any) -> str:
 # ── verdict paths ──────────────────────────────────────────────────────────
 
 
-def test_still_open_when_poc_lands(tmp_path: Path) -> None:
+def test_worker_shell_text_does_not_mark_finding_still_open(tmp_path: Path) -> None:
     # Retest only accepts VERIFIED findings (lifecycle-enforced) — start there.
     path = _write_report(tmp_path, "run1", [_verified_finding()])
     mcp, _ctx = _register(tmp_path, "exploit ok\nuid=0(root) gid=0(root)")
     out = _call(mcp, target_ip=TARGET, finding_id=FINDING_ID)
-    assert f"VERDICT: {STILL_OPEN}" in out
+    assert f"VERDICT: {INCONCLUSIVE}" in out
     saved = json.loads(path.read_text(encoding="utf-8"))["technical_findings"][0]
-    assert saved["retest_status"] == STILL_OPEN
-    assert saved["retest_history"][-1]["verdict"] == STILL_OPEN
+    assert saved["retest_status"] == INCONCLUSIVE
+    assert saved["retest_history"][-1]["verdict"] == INCONCLUSIVE
 
 
 def _write_full_report(root: Path, run_id: str) -> tuple[Path, str]:
@@ -178,19 +178,16 @@ def _write_full_report(root: Path, run_id: str) -> tuple[Path, str]:
     return path, finding_id
 
 
-def test_fixed_when_poc_fails(tmp_path: Path) -> None:
+def test_failed_probe_does_not_mark_finding_fixed(tmp_path: Path) -> None:
     path, finding_id = _write_full_report(tmp_path, "run1")
     assert "not retested" in (path.parent / "enhanced_report.md").read_text(encoding="utf-8")
     mcp, _ctx = _register(tmp_path, "curl: (7) Failed to connect: connection refused")
     out = _call(mcp, target_ip=TARGET, finding_id=finding_id)
-    assert f"VERDICT: {FIXED}" in out
+    assert f"VERDICT: {INCONCLUSIVE}" in out
     saved = json.loads(path.read_text(encoding="utf-8"))["technical_findings"][0]
-    assert saved["retest_status"] == FIXED
-    assert saved["retest_history"][-1]["verdict"] == FIXED
-    # Lifecycle gate: FIXED is terminal — the regenerated siblings hide the
-    # finding (JSON artifact retains the verdict + history for audit).
-    assert "run_exploit_terminal on 10.0.0.50" not in (path.parent / "enhanced_report.md").read_text(encoding="utf-8")
-    assert "run_exploit_terminal on 10.0.0.50" not in (path.parent / "enhanced_report.html").read_text(encoding="utf-8")
+    assert saved["retest_status"] == INCONCLUSIVE
+    assert saved["retest_history"][-1]["verdict"] == INCONCLUSIVE
+    assert "run_exploit_terminal on 10.0.0.50" in (path.parent / "enhanced_report.md").read_text(encoding="utf-8")
 
 
 def test_inconclusive_on_ambiguous_output(tmp_path: Path) -> None:
@@ -271,7 +268,7 @@ def test_run_id_defaults_to_latest_containing_run(tmp_path: Path) -> None:
     mcp, _ctx = _register(tmp_path, "uid=0(root)")
     out = _call(mcp, target_ip=TARGET, finding_id=FINDING_ID)
     assert "RUN: run_new" in out
-    assert json.loads(new.read_text(encoding="utf-8"))["technical_findings"][0]["retest_status"] == STILL_OPEN
+    assert json.loads(new.read_text(encoding="utf-8"))["technical_findings"][0]["retest_status"] == INCONCLUSIVE
 
 
 def test_explicit_run_id_honored(tmp_path: Path) -> None:
@@ -280,17 +277,17 @@ def test_explicit_run_id_honored(tmp_path: Path) -> None:
     mcp, _ctx = _register(tmp_path, "connection refused")
     out = _call(mcp, target_ip=TARGET, finding_id=FINDING_ID, run_id="run_old")
     assert "RUN: run_old" in out
-    assert f"VERDICT: {FIXED}" in out
+    assert f"VERDICT: {INCONCLUSIVE}" in out
 
 
 # ── pure helpers ───────────────────────────────────────────────────────────
 
 
 def test_classify_retest_output_matrix() -> None:
-    assert classify_retest_output("uid=0(root)")[0] == STILL_OPEN
-    assert classify_retest_output("credentials: admin:deadbeef")[0] == STILL_OPEN
-    assert classify_retest_output("connection refused")[0] == FIXED
-    assert classify_retest_output("exploit failed")[0] == FIXED
+    assert classify_retest_output("uid=0(root)")[0] == INCONCLUSIVE
+    assert classify_retest_output("credentials: admin:deadbeef")[0] == INCONCLUSIVE
+    assert classify_retest_output("connection refused")[0] == INCONCLUSIVE
+    assert classify_retest_output("exploit failed")[0] == INCONCLUSIVE
     assert classify_retest_output("some ambiguous prose")[0] == INCONCLUSIVE
     assert classify_retest_output("")[0] == INCONCLUSIVE
     assert classify_retest_output("BLOCKED: off-allowlist")[0] == INCONCLUSIVE
@@ -394,6 +391,9 @@ def test_prepare_captures_exploit_probes() -> None:
                 "timestamp": "t",
                 "command": "curl -s http://10.0.0.50/poc",
                 "detail": "uid=0(root)",
+                "exploit_outcome": "compromise",
+                "outcome_evidence": ["shell:uid=0\\("],
+                "privilege_level": "root",
             }
         ],
     }

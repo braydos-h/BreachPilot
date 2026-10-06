@@ -367,15 +367,15 @@ export interface SandboxStatusResponse {
   image: string;
   user: string;
   read_only_rootfs: boolean;
-  /** Effective execution posture: disabled | contained | native_fallback | blocked. */
-  mode: string;
-  /** sandbox.fallback_native config value (true = degrade to host mode, false = fail closed). */
-  fallback_native: boolean;
-  /** Why the sandbox degraded (Docker down / image missing); "" when contained. */
+  /** Effective startup posture. Invalid config and unavailable Docker are blocked. */
+  mode: "contained" | "blocked";
+  /** Deprecated API compatibility field. The backend always reports false. */
+  fallback_native: false;
+  /** Why startup is blocked; empty when contained. */
   fallback_reason: string;
   docker_available: boolean;
   docker_error: string;
-  /** null = unknowable (sandbox disabled / daemon down); true/false when probed. */
+  /** null = unknowable (invalid configuration / daemon down); true/false when probed. */
   image_present: boolean | null;
   network: {
     enforce: boolean;
@@ -748,7 +748,7 @@ export function useRun(runId: string | null | undefined, live = false) {
     enabled: !!runId,
     refetchInterval: (query) => {
       const data = query.state.data;
-      if (!data) return 1_000;
+      if (!data) return query.state.status === "error" ? POLL_IDLE : 1_000;
       // ``preparing`` is the run-creation startup window — poll fast so the
       // wizard's startup panel reflects the transition promptly.
       if (data.state === "preparing") return 1_000;

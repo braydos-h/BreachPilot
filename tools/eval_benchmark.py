@@ -43,6 +43,7 @@ Usage::
 from __future__ import annotations
 
 import hashlib
+import ipaddress
 import json
 import statistics
 import time
@@ -51,10 +52,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Protocol
 
+from tools.eval.metrics import _count_outcome
+from tools.exceptions import _EXC_GROUP_CATCH, _is_exception_group, _log_nested_exceptions
+
 __all__ = [
     "Oracle",
     "Scenario",
     "BenchmarkConfig",
+    "TargetResetError",
     "TrialResult",
     "BenchmarkReport",
     "run_benchmark",
@@ -86,6 +91,22 @@ class Scenario:
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
+class TargetResetError(RuntimeError):
+    """A target could not be reset, so benchmark results would be contaminated."""
+
+    def __init__(self, scenario_id: str, condition: str, trial_index: int) -> None:
+        self.scenario_id = scenario_id
+        self.condition = condition
+        self.trial_index = trial_index
+        self.partial_report: BenchmarkReport | None = None
+        self.report_path: Path | None = None
+        super().__init__(
+            "target reset failed before "
+            f"scenario={scenario_id!r}, condition={condition!r}, trial={trial_index}; "
+            "aborting benchmark to avoid scoring a contaminated target"
+        )
+
+
 @dataclass
 class TrialResult:
     """One trial's outcome."""
@@ -93,10 +114,14 @@ class TrialResult:
     scenario_id: str
     condition: str  # "baseline" | "treatment"
     trial_index: int
-    verified_success: bool  # oracle-confirmed
+    verified_success: bool | None  # None means the oracle did not produce a verdict
     agent_claimed_success: bool  # the agent's own verdict (for contrast)
     total_actions: int
     duration_seconds: float
+    oracle_before_status: str = "pending"  # verified | not_verified | error
+    oracle_status: str = "pending"  # verified | not_verified | preexisting | unattributed | error
+    oracle_error: str = ""
+    # No online oracle polling exists, so this remains unknown for post-run checks.
     time_to_first_verified_success: float | None = None
     model_id: str = ""
     config_hash: str = ""
@@ -117,20 +142,23 @@ class BenchmarkReport:
 
     conditions: list[str]
     trials: list[TrialResult]
-    verified_success_rate: dict[str, float]  # condition -> rate
+    verified_success_rate: dict[str, float | None]  # None when condition measurements are incomplete
     risk_ratio: float | None  # treatment / baseline
     risk_ratio_ci_low: float | None  # bootstrap 95% lower
     risk_ratio_ci_high: float | None  # bootstrap 95% upper
-    false_positive_rate: dict[str, float]  # agent-claimed but not verified
-    actions_per_verified_success: dict[str, float]
+    false_positive_rate: dict[str, float | None]  # None when condition measurements are incomplete
+    actions_per_verified_success: dict[str, float | None]
     time_to_first_verified_success: dict[str, float | None]
     # D5: throughput + cost efficiency. ``findings_per_hour`` is
     # verified-successes per hour of wall time; ``token_cost_per_finding`` is
     # the mean token cost per verified success (None when no successes or no
     # cost data). Both are per condition.
-    findings_per_hour: dict[str, float] = field(default_factory=dict)
+    findings_per_hour: dict[str, float | None] = field(default_factory=dict)
     token_cost_per_finding: dict[str, float | None] = field(default_factory=dict)
     timestamp: str = ""
+    status: str = "completed"  # completed | completed_with_errors | completed_with_unscored_trials | aborted
+    error: str = ""
+    oracle_measurements: dict[str, dict[str, int]] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -146,6 +174,9 @@ class BenchmarkReport:
             "findings_per_hour": self.findings_per_hour,
             "token_cost_per_finding": self.token_cost_per_finding,
             "timestamp": self.timestamp,
+            "status": self.status,
+            "error": self.error,
+            "oracle_measurements": self.oracle_measurements,
         }
 
 
@@ -324,11 +355,14 @@ async def _run_one_trial(
                 goal=goal,
                 exploit_settings=settings,
                 config_path=Path("config.yaml"),
+                config_override=merged,
                 reports_dir=workspace_root,
             )
         # The agent's own claim (for false-positive rate).
         outcome_summary = str(agent_result.get("outcome_summary", "") or "")
-        agent_claimed = "compromises: " in outcome_summary and "compromises: 0" not in outcome_summary
+        agent_claimed = any(
+            _count_outcome(outcome_summary, label) > 0 for label in ("compromises", "cred dumps", "unverified claims")
+        )
     except Exception as exc:
         error = str(exc)[:500]
 
@@ -362,133 +396,200 @@ async def _run_one_trial(
     return result, agent_result
 
 
-async def run_benchmark(cfg: BenchmarkConfig) -> BenchmarkReport:
-    """Run the paired benchmark and return an aggregated report.
+def _persist_report(report: BenchmarkReport, output_dir: Path) -> Path:
+    """Persist a complete or partial report atomically and return its path."""
+    output_dir.mkdir(parents=True, exist_ok=True)
+    out_path = output_dir / f"benchmark_{report.timestamp.replace(':', '-')}.json"
+    temp_path = out_path.with_suffix(out_path.suffix + ".tmp")
+    temp_path.write_text(json.dumps(report.to_dict(), indent=2, default=str), encoding="utf-8")
+    temp_path.replace(out_path)
+    return out_path
 
-    For each scenario × condition × trial:
-      1. Reset the target (if ``reset_target_between_trials`` is supplied).
-      2. Run the exploit session with the condition's config.
-      3. Call the oracle to verify the objective independently.
-      4. Record the trial result.
 
-    Then aggregate per condition: verified success rate, false-positive
-    rate, actions per verified success, and a bootstrap risk-ratio CI.
-    """
-    condition_configs = cfg.condition_configs or {
-        "baseline": DEFAULT_BASELINE_CONFIG,
-        "treatment": DEFAULT_TREATMENT_CONFIG,
-    }
-    trials: list[TrialResult] = []
+def _oracle_observation(target_ip: str, scenario: Scenario, oracle: Oracle) -> tuple[bool | None, str]:
+    """Read one strict boolean oracle verdict without leaking exception text."""
+    try:
+        verdict = oracle(target_ip, scenario)
+    except _EXC_GROUP_CATCH as exc:
+        if _is_exception_group(exc):
+            _log_nested_exceptions(exc)
+        return None, f"{type(exc).__name__}: oracle check failed"
+    if type(verdict) is not bool:
+        return None, f"oracle returned {type(verdict).__name__}; expected bool"
+    return verdict, ""
 
-    for scenario in cfg.scenarios:
-        for condition in cfg.conditions:
-            cond_cfg = condition_configs.get(condition, {})
-            chash = _config_hash(cond_cfg)
-            for trial_idx in range(cfg.trials_per_scenario):
-                if cfg.reset_target_between_trials is not None:
-                    try:
-                        cfg.reset_target_between_trials(scenario)
-                    except Exception:
-                        pass  # best-effort; a reset failure doesn't abort the trial
 
-                result, agent_result = await _run_one_trial(
-                    scenario=scenario,
-                    condition=condition,
-                    trial_index=trial_idx,
-                    config=cond_cfg,
-                    config_hash=chash,
-                    run_session=cfg.run_session,
-                )
-                # Oracle verification -- the ONLY source of verified_success.
-                try:
-                    result.verified_success = bool(cfg.oracle(scenario.target_ip, scenario))
-                except Exception:
-                    result.verified_success = False
+def _canonical_target(value: Any) -> str:
+    text = str(value or "").strip().strip("[]").rstrip(".")
+    try:
+        return ipaddress.ip_address(text).compressed
+    except ValueError:
+        return text.lower()
 
-                if result.verified_success and result.time_to_first_verified_success is None:
-                    result.time_to_first_verified_success = result.duration_seconds
 
-                trials.append(result)
+def _has_attributed_target_exploit(agent_result: dict[str, Any], target_ip: str) -> bool:
+    """Require an approved exploit record with normalized target-bound proof."""
+    if not isinstance(agent_result, dict):
+        return False
+    records = agent_result.get("records")
+    if not isinstance(records, list):
+        return False
+    expected_target = _canonical_target(target_ip)
+    from tools.exploit_agent.outcome_truth import _EXPLOIT_VALIDATION_TOOLS
 
-    # ── Aggregate ──
-    conditions = cfg.conditions
-    verified_rate: dict[str, float] = {}
-    false_pos_rate: dict[str, float] = {}
-    actions_per_success: dict[str, float] = {}
-    time_to_first: dict[str, float | None] = {}
-    # D5: throughput (verified findings per hour of wall time) + cost
-    # efficiency (mean token cost per verified finding). None when a condition
-    # has no verified successes or no cost data.
-    findings_per_hour: dict[str, float] = {}
-    token_cost_per_finding: dict[str, float | None] = {}
-
-    for cond in conditions:
-        cond_trials = [t for t in trials if t.condition == cond]
-        n = len(cond_trials)
-        if n == 0:
+    for record in records:
+        if not isinstance(record, dict):
             continue
-        verified = [t for t in cond_trials if t.verified_success]
-        claimed_not_verified = [t for t in cond_trials if t.agent_claimed_success and not t.verified_success]
-        verified_rate[cond] = len(verified) / n
-        false_pos_rate[cond] = len(claimed_not_verified) / n
-        success_actions = [t.total_actions for t in verified]
-        actions_per_success[cond] = statistics.mean(success_actions) if success_actions else 0.0
-        first_times = [
-            t.time_to_first_verified_success for t in verified if t.time_to_first_verified_success is not None
-        ]
-        time_to_first[cond] = statistics.mean(first_times) if first_times else None
-        # D5: findings/hour = verified_successes / total_wall_hours.
-        # ponytail: rounded trial durations can collapse to 0.0 for sub-ms
-        # mock runs; guard the division so we don't get ZeroDivisionError.
-        # A real trial is seconds-to-minutes so this never trips in prod.
-        total_seconds = sum(t.duration_seconds for t in cond_trials)
-        if total_seconds > 0:
-            findings_per_hour[cond] = (len(verified) / total_seconds) * 3600.0
-        else:
-            findings_per_hour[cond] = 0.0
-        # D5: token_cost_per_finding = mean cost over verified successes.
-        # None when no successes; 0.0 when successes but no cost data (the
-        # harness can't synthesize a cost, so it reports the zero it has).
-        if verified:
-            costs = [t.token_cost for t in verified]
-            token_cost_per_finding[cond] = statistics.mean(costs)
-        else:
-            token_cost_per_finding[cond] = None
+        action = str(record.get("action", "") or "").strip().lower()
+        if (
+            action not in _EXPLOIT_VALIDATION_TOOLS
+            or str(record.get("status", "") or "").lower() not in {"completed", "executed"}
+            or record.get("approved") is not True
+            or _canonical_target(record.get("target_ip")) != expected_target
+            or record.get("exit_code") not in (None, 0)
+            or record.get("exploit_outcome") not in {"compromise", "cred_dump"}
+        ):
+            continue
+        evidence = record.get("outcome_evidence")
+        if not isinstance(evidence, list) or not any(isinstance(item, str) and item.strip() for item in evidence):
+            continue
+        detail = record.get("detail")
+        try:
+            arguments = json.loads(detail) if isinstance(detail, str) else {}
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(arguments, dict):
+            continue
+        if any(_canonical_target(arguments.get(key)) == expected_target for key in ("target", "target_ip", "host")):
+            return True
+    return False
 
-    # Risk ratio (treatment / baseline) + bootstrap CI.
-    rr = None
-    rr_low = None
-    rr_high = None
-    if "baseline" in verified_rate and "treatment" in verified_rate:
+
+def _build_benchmark_report(
+    cfg: BenchmarkConfig,
+    trials: list[TrialResult],
+    *,
+    status: str = "completed",
+    error: str = "",
+) -> BenchmarkReport:
+    """Aggregate only complete oracle measurements; expose missing data as None."""
+    conditions = list(cfg.conditions)
+    expected_per_condition = len(cfg.scenarios) * max(0, cfg.trials_per_scenario)
+    verified_rate: dict[str, float | None] = {}
+    false_pos_rate: dict[str, float | None] = {}
+    actions_per_success: dict[str, float | None] = {}
+    # Before/after oracle observations can bound a transition but do not give
+    # an exact discovery timestamp.
+    time_to_first: dict[str, float | None] = {condition: None for condition in conditions}
+    findings_per_hour: dict[str, float | None] = {}
+    token_cost_per_finding: dict[str, float | None] = {}
+    oracle_measurements: dict[str, dict[str, int]] = {}
+    complete_by_condition: dict[str, bool] = {}
+
+    for condition in conditions:
+        condition_trials = [trial for trial in trials if trial.condition == condition]
+        verified = [trial for trial in condition_trials if trial.oracle_status == "verified"]
+        not_verified = [trial for trial in condition_trials if trial.oracle_status == "not_verified"]
+        preexisting = [trial for trial in condition_trials if trial.oracle_status == "preexisting"]
+        unattributed = [trial for trial in condition_trials if trial.oracle_status == "unattributed"]
+        errors = [trial for trial in condition_trials if trial.oracle_status == "error"]
+        complete = (
+            expected_per_condition > 0
+            and len(condition_trials) == expected_per_condition
+            and len(verified) + len(not_verified) == expected_per_condition
+        )
+        complete_by_condition[condition] = complete
+        oracle_measurements[condition] = {
+            "expected": expected_per_condition,
+            "attempted": len(condition_trials),
+            "verified": len(verified),
+            "not_verified": len(not_verified),
+            "preexisting": len(preexisting),
+            "unattributed": len(unattributed),
+            "error": len(errors),
+            "unmeasured": max(
+                0,
+                expected_per_condition
+                - len(verified)
+                - len(not_verified)
+                - len(preexisting)
+                - len(unattributed)
+                - len(errors),
+            ),
+        }
+
+        # An aborted run keeps every completed trial for diagnosis, but none of
+        # its partial aggregates should look like a finished benchmark score.
+        scoreable = complete and status != "aborted"
+        if not scoreable:
+            verified_rate[condition] = None
+            false_pos_rate[condition] = None
+            actions_per_success[condition] = None
+            findings_per_hour[condition] = None
+            token_cost_per_finding[condition] = None
+            continue
+
+        measured = verified + not_verified
+        verified_rate[condition] = len(verified) / len(measured)
+        false_pos_rate[condition] = sum(
+            1 for trial in measured if trial.agent_claimed_success and trial.oracle_status == "not_verified"
+        ) / len(measured)
+        actions_per_success[condition] = (
+            statistics.mean(trial.total_actions for trial in verified) if verified else None
+        )
+        elapsed_seconds = sum(trial.duration_seconds for trial in condition_trials)
+        findings_per_hour[condition] = (len(verified) / elapsed_seconds) * 3600.0 if elapsed_seconds > 0 else 0.0
+        token_cost_per_finding[condition] = (
+            statistics.mean(trial.token_cost for trial in verified) if verified else None
+        )
+
+    rr: float | None = None
+    rr_low: float | None = None
+    rr_high: float | None = None
+    if (
+        status != "aborted"
+        and complete_by_condition.get("baseline", False)
+        and complete_by_condition.get("treatment", False)
+    ):
         base_rate = verified_rate["baseline"]
-        treat_rate = verified_rate["treatment"]
-        if base_rate > 0:
-            rr = treat_rate / base_rate
-            # Paired bootstrap: resample scenarios with replacement.
+        treatment_rate = verified_rate["treatment"]
+        if base_rate is not None and treatment_rate is not None and base_rate > 0:
+            rr = treatment_rate / base_rate
+            # Cluster bootstrap: keep all repeated trials for each resampled
+            # scenario, then divide by the number of sampled trials.
             import random
 
             rng = random.Random(42)
             rr_samples: list[float] = []
-            scenario_ids = [s.scenario_id for s in cfg.scenarios]
+            scenario_ids = [scenario.scenario_id for scenario in cfg.scenarios]
             for _ in range(1000):
-                # Resample scenarios (cluster bootstrap).
                 resampled = [rng.choice(scenario_ids) for _ in scenario_ids]
-                b_wins = t_wins = 0
-                for sid in resampled:
-                    b_trials = [t for t in trials if t.condition == "baseline" and t.scenario_id == sid]
-                    t_trials = [t for t in trials if t.condition == "treatment" and t.scenario_id == sid]
-                    b_wins += sum(1 for t in b_trials if t.verified_success)
-                    t_wins += sum(1 for t in t_trials if t.verified_success)
-                b_rate = b_wins / max(1, len([t for t in trials if t.condition == "baseline"]))
-                t_rate = t_wins / max(1, len([t for t in trials if t.condition == "treatment"]))
-                if b_rate > 0:
-                    rr_samples.append(t_rate / b_rate)
+                baseline_trials = [
+                    trial
+                    for sid in resampled
+                    for trial in trials
+                    if trial.condition == "baseline" and trial.scenario_id == sid
+                ]
+                treatment_trials = [
+                    trial
+                    for sid in resampled
+                    for trial in trials
+                    if trial.condition == "treatment" and trial.scenario_id == sid
+                ]
+                if not baseline_trials or not treatment_trials:
+                    continue
+                baseline_rate = sum(t.oracle_status == "verified" for t in baseline_trials) / len(baseline_trials)
+                sampled_treatment_rate = sum(t.oracle_status == "verified" for t in treatment_trials) / len(
+                    treatment_trials
+                )
+                if baseline_rate > 0:
+                    rr_samples.append(sampled_treatment_rate / baseline_rate)
             if rr_samples:
                 rr_samples.sort()
                 rr_low = rr_samples[int(0.025 * len(rr_samples))]
-                rr_high = rr_samples[int(0.975 * len(rr_samples))]
+                rr_high = rr_samples[min(len(rr_samples) - 1, int(0.975 * len(rr_samples)))]
 
-    report = BenchmarkReport(
+    return BenchmarkReport(
         conditions=conditions,
         trials=trials,
         verified_success_rate=verified_rate,
@@ -501,11 +602,121 @@ async def run_benchmark(cfg: BenchmarkConfig) -> BenchmarkReport:
         findings_per_hour=findings_per_hour,
         token_cost_per_finding=token_cost_per_finding,
         timestamp=datetime.now(timezone.utc).isoformat(),
+        status=status,
+        error=error,
+        oracle_measurements=oracle_measurements,
     )
 
-    # Persist.
-    cfg.output_dir.mkdir(parents=True, exist_ok=True)
-    out_path = cfg.output_dir / f"benchmark_{report.timestamp.replace(':', '-')}.json"
-    out_path.write_text(json.dumps(report.to_dict(), indent=2, default=str), encoding="utf-8")
 
+async def run_benchmark(cfg: BenchmarkConfig) -> BenchmarkReport:
+    """Run the paired benchmark and return an aggregated report.
+
+    For each scenario × condition × trial:
+      1. Reset the target (if ``reset_target_between_trials`` is supplied).
+      2. Record the oracle state before the agent runs.
+      3. Run the exploit session with the condition's config.
+      4. Recheck the oracle and require a successful approved target action.
+      5. Record the trial result. Pre-existing or unattributed objectives are
+         reported separately and excluded from success-rate aggregates.
+
+    Then aggregate per condition: verified success rate, false-positive
+    rate, actions per verified success, and a bootstrap risk-ratio CI.
+    """
+    condition_configs = cfg.condition_configs or {
+        "baseline": DEFAULT_BASELINE_CONFIG,
+        "treatment": DEFAULT_TREATMENT_CONFIG,
+    }
+    trials: list[TrialResult] = []
+    oracle_errors = 0
+
+    for scenario in cfg.scenarios:
+        for condition in cfg.conditions:
+            cond_cfg = condition_configs.get(condition, {})
+            chash = _config_hash(cond_cfg)
+            for trial_idx in range(cfg.trials_per_scenario):
+                if cfg.reset_target_between_trials is not None:
+                    try:
+                        cfg.reset_target_between_trials(scenario)
+                    except _EXC_GROUP_CATCH as exc:
+                        if _is_exception_group(exc):
+                            _log_nested_exceptions(exc)
+                        reset_error = TargetResetError(scenario.scenario_id, condition, trial_idx)
+                        partial = _build_benchmark_report(
+                            cfg,
+                            trials,
+                            status="aborted",
+                            error=f"{reset_error} (cause type: {type(exc).__name__})",
+                        )
+                        reset_error.partial_report = partial
+                        reset_error.report_path = _persist_report(partial, cfg.output_dir)
+                        raise reset_error from exc
+
+                before_verdict, before_error = _oracle_observation(scenario.target_ip, scenario, cfg.oracle)
+
+                result, agent_result = await _run_one_trial(
+                    scenario=scenario,
+                    condition=condition,
+                    trial_index=trial_idx,
+                    config=cond_cfg,
+                    config_hash=chash,
+                    run_session=cfg.run_session,
+                )
+                result.oracle_before_status = (
+                    "error" if before_verdict is None else ("verified" if before_verdict else "not_verified")
+                )
+                if before_verdict is None:
+                    result.verified_success = None
+                    result.oracle_status = "error"
+                    result.oracle_error = before_error
+                    oracle_errors += 1
+                elif before_verdict:
+                    # A positive state that predates this trial cannot be
+                    # attributed to the agent, even if it remains present.
+                    result.verified_success = None
+                    result.oracle_status = "preexisting"
+                else:
+                    after_verdict, after_error = _oracle_observation(scenario.target_ip, scenario, cfg.oracle)
+                    if after_verdict is None:
+                        result.verified_success = None
+                        result.oracle_status = "error"
+                        result.oracle_error = after_error
+                        oracle_errors += 1
+                    elif not after_verdict:
+                        result.verified_success = False
+                        result.oracle_status = "not_verified"
+                    elif result.error:
+                        result.verified_success = None
+                        result.oracle_status = "unattributed"
+                    elif _has_attributed_target_exploit(agent_result, scenario.target_ip):
+                        result.verified_success = True
+                        result.oracle_status = "verified"
+                    else:
+                        result.verified_success = None
+                        result.oracle_status = "unattributed"
+
+                trials.append(result)
+
+    unscored_trials = sum(t.oracle_status in {"preexisting", "unattributed"} for t in trials)
+    report_status = (
+        "completed_with_errors"
+        if oracle_errors
+        else "completed_with_unscored_trials"
+        if unscored_trials
+        else "completed"
+    )
+    report_error = (
+        f"{oracle_errors} oracle measurement(s) unavailable"
+        if oracle_errors
+        else f"{unscored_trials} trial(s) lack attributable objective evidence"
+        if unscored_trials
+        else ""
+    )
+
+    report = _build_benchmark_report(
+        cfg,
+        trials,
+        status=report_status,
+        error=report_error,
+    )
+    _persist_report(report, cfg.output_dir)
     return report

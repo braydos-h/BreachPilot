@@ -486,8 +486,8 @@ print(f"probing {{host}}")
 8. **Add tests** to `tests/test_attack_modules.py` covering registry
    registration, applicability, run output, and edge cases
    (`docs/extension-guide.md:88`).
-9. **Run the suite**: `python -m pytest tests/ -v` and `ruff check .`
-   (`AGENTS.md §Commands`).
+9. **Run focused checks**: run the affected test file and `ruff check .`.
+   Full-suite verification belongs to CI (`AGENTS.md` test-run rules).
 
 Read-only / detection modules should follow the detection-family conventions:
 no `shell_type`/`privilege_level` in results, target-locked to `ctx.target_ip`,

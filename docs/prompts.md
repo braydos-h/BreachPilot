@@ -54,15 +54,15 @@ The ULTRATHINK `[REASONING]` blocks from prior rounds are re-injected as a
   `tests/test_cve_to_poc.py`, `tests/test_env_probe.py`,
   `tests/test_outcome_truth.py` (COMPROMISE marker), `tests/test_safety_reviewer.py`
   (bool coercion), `tests/test_semantic_memory.py` assert specific blocks
-  appear/disappear. Run `python -m pytest tests/ -v` after any prompt edit.
+  appear/disappear. Run the relevant prompt test file using the focused-test
+  guidance in `docs/testing-guide.md`; full-suite verification belongs to CI.
 - **Safety text is load-bearing.** The RULES block in `prompt.py` and the
   FILE & KEY HANDLING block encode real failure modes (fabricated URLs,
   heredoc key corruption, nmap crashes). Do not trim them for brevity.
-- **Canonical outcome markers.** Exploit-generation prompts
-  (`payload_crafter.py`, `synthesis.py`, the main RULES block) require the
-  generated script to print `COMPROMISE: <desc> target=<ip>` on success or
-  `VULN_NOT_CONFIRMED: <reason>` on failure. `outcome_truth.py` recognizes
-  `^COMPROMISE:` as a strong-shell pattern. Do not revert to `[+] EXPLOIT SUCCESS`.
+- **Outcome labels are claims.** A generated script may print
+  `COMPROMISE: <desc> target=<ip>` or `VULN_NOT_CONFIRMED: <reason>` to label
+  its own output, but `outcome_truth.py` treats those lines as unverified
+  claims. They do not prove access or refute a vulnerability.
 - **Swarm SYSTEM_PROMPT constants are now live.** The six
   `tools/swarm/agents/*.SYSTEM_PROMPT` constants are sent as the system
   message in the `_llm_analyze` / `_llm_review` / `_llm_reflect` calls

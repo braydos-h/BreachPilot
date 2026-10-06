@@ -84,8 +84,9 @@ flip the completion to `approved=False, status="blocked"`
 
 ### Audit log and redaction
 
-Every record is appended to `exploit_workspace/exploit_audit.jsonl` by
-`_audit_log` (`tools/mcp_shared.py:459-491`) with timestamp, target, tool
+Every record is appended to the run's host-owned audit file
+(`reports/<run_id>/exploit_audit.jsonl` in RunService) by `_audit_log`
+(`tools/kernel/audit.py`) with timestamp, target, tool
 name, approved, status, command, args, attempt_id, code sha256, duration.
 The log is append-only plaintext, so arguments are redacted before writing:
 `_redact_args` (`tools/mcp_shared.py:429-456`) masks values whose parameter
@@ -256,8 +257,16 @@ interactive prompt.
 | `get_service_fingerprint` | `target_ip`, `port` | yes | allowlist |
 | `diff_recon_runs` | `old_path`, `new_path` | no touch | allowlist (audit consistency) |
 
-Recon pipelines (`ReconPipeline`) honor `nmap.sudo`/`priv_fallback` for
-privileged flags.
+The target-active MCP TCP tools use fixed Nmap argv through
+`run_argv_in_sandbox` after bounded DNS resolution and target validation. The
+authorized hostname is passed to the worker scope gate while the resolved IP
+literal is pinned in Nmap argv. Worker errors fail closed without host
+fallback. `check_os` reports a service-metadata heuristic without TTL or
+privileged OS probes; `run_full_recon` does not run secondary enumerators.
+`run_udp_recon` returns `SANDBOX_UNSUPPORTED` because the worker drops
+`NET_RAW`. `run_osint_recon` remains bounded passive access to fixed public
+providers. These MCP handlers are separate from direct in-process
+`ReconPipeline` callers.
 
 ### Research — `tools/mcp_tools/research.py` (no target touch, no lock)
 
@@ -345,14 +354,15 @@ metacharacters; msfvenom run as argv list.
 | `cred_store_add` | `target_ip`, `username`, `password`, `credential_type`, `source_host`, `target_host`, `notes` | yes | allowlist |
 | `cred_store_get` | `target_ip`, `username`, `target_host`, `include_secret` | yes | allowlist |
 | `cred_store_list` | `target_ip` | yes | allowlist |
-| `cred_store_confirm` | `target_ip`, `username`, `target_host`, `credential_type`, `validated` | yes | allowlist |
+| `cred_store_confirm` | none | no | — |
 | `lateral_exec` | `target_ip`, `method`, `username`, `password`, `ntlm_hash`, `command` | yes | allowlist |
 | `dump_credentials` | `target_ip`, `method`, `username`, `password`, `ntlm_hash`, `domain`, `output_file`, `target_user` | yes | allowlist |
 | `kerberoast` | `target_ip`, `domain`, `username`, `password`, `ntlm_hash`, `dc_ip` | yes | allowlist + targets (dc_ip) |
 
-Vault secrets are Fernet-encrypted at rest (`CredentialStore`); the `notes`
-and `password` args are redacted from the audit log. `cred_store_confirm`
-requires `validated=True` — unvalidated credentials are never promoted.
+Vault passwords and free-text notes are Fernet-encrypted at rest (`CredentialStore`);
+raw vault files are blocked from workspace reads, including legacy plaintext rows.
+`cred_store_confirm` is a compatibility shim that always blocks: only an
+authenticated operator can confirm a credential after reviewing reuse evidence.
 
 ### Active Directory / Kerberos — `tools/mcp_tools/ad.py` (all per-tool gates under `exploit.ad_kerberos.*`, default OFF except `smb_signing_check`)
 
@@ -575,10 +585,11 @@ filter (APPROVED-only).
 ### Browser — `tools/mcp_tools/browser.py` (cfg: `browser.enabled` + `backend: playwright`)
 
 Conditional family (the killchain/snapshots precedent): nothing registers
-unless browser execution is actually runnable (host Playwright SDK or a
-configured sandbox worker). Every target-touching tool takes `target` first
-(`@require_allowlist("target")` + `@audit_tool`) and cross-checks the session's
-target lock; URL hosts are re-checked against the allowlist per navigation.
+unless the required sandbox worker is configured and usable with the browser
+backend. A host Playwright SDK does not enable execution. Every target-touching tool takes `target` first and uses
+`@require_allowlist("target")`, which enforces the target lock and audits by
+default; each session also cross-checks the target lock and URL hosts are
+re-checked against the allowlist per navigation.
 Chromium runs one op per docker exec inside the browser worker netns
 (`SandboxPlaywrightLauncher`) — strict fail-closed, never host fallback.
 The launcher is cached per workspace so engine sessions survive across tool
@@ -637,5 +648,6 @@ Matches AGENTS.md rule 4 and `mcp_exploit_server.py:153-177` (30 families — 24
    or `_WHOLESALE_REDACT_FIELDS` so `_redact_args` masks them in the audit
    log, and never write raw command text to the audit log a second time
    (double-logging leaks credentials).
-9. **Tests**: add a mock-subprocess test under `tests/` (no live Nmap) and
-   run `python -m pytest tests/ -v` + `ruff check .` before PR (no CI).
+9. **Tests**: add a mock-subprocess regression test under `tests/` (no live
+   Nmap), then run its single test file and `ruff check .` before PR. Full-suite
+   verification belongs to CI.

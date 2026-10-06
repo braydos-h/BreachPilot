@@ -15,7 +15,10 @@
 #   is a strict superset of breachpilot-sandbox:latest, so terminal/Python
 #   execution keeps working unchanged).
 
-FROM breachpilot-sandbox:latest
+# Local builds keep the documented base-first workflow. Published builds
+# supply the immutable base manifest produced in the same workflow run.
+ARG BASE_WORKER_IMAGE=breachpilot-sandbox:latest
+FROM ${BASE_WORKER_IMAGE}
 
 ARG DEBIAN_FRONTEND=noninteractive
 
@@ -27,9 +30,11 @@ USER root
 ENV VIRTUAL_ENV=/opt/bp-browser-venv
 ENV PATH="/opt/bp-browser-venv/bin:$PATH"
 ENV PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright
+ARG PLAYWRIGHT_VERSION=1.63.0
 
 # Playwright SDK + Chromium runtime (+ OS deps for headless Chromium).
-# Pinned major line via requirements-style floor; refresh with the base image.
+# Keep the SDK and Chromium bundle at one version; update the CI constraint
+# and this build argument together when refreshing the browser worker.
 RUN set -eux; \
     apt-get update; \
     apt-get install -y --no-install-recommends \
@@ -51,7 +56,7 @@ RUN set -eux; \
     ; \
     rm -rf /var/lib/apt/lists/*; \
     python3 -m venv /opt/bp-browser-venv; \
-    /opt/bp-browser-venv/bin/pip install --no-cache-dir "playwright>=1.44"; \
+    /opt/bp-browser-venv/bin/pip install --no-cache-dir "playwright==${PLAYWRIGHT_VERSION}"; \
     mkdir -p /opt/ms-playwright; \
     /opt/bp-browser-venv/bin/playwright install --with-deps chromium; \
     chmod -R a+rX /opt/bp-browser-venv /opt/ms-playwright; \

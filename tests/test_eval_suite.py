@@ -29,6 +29,12 @@ from tools.eval_harness import (
     score_against_oracle,
 )
 
+
+def _fixture_evidence_is_trusted(_finding: dict[str, object]) -> bool:
+    """Stand in for a run-bound evidence verifier in pure scoring tests."""
+    return True
+
+
 # ── Compose file ─────────────────────────────────────────────────────────────
 
 
@@ -96,24 +102,30 @@ def test_dvwa_oracle_has_web_vulns():
 
 def test_score_true_positive_service():
     oracle = {"target_id": "t", "expected_findings": {"services": ["ssh", "http"]}}
-    findings = [{"type": "service", "value": "ssh"}, {"type": "service", "value": "http"}]
-    result = score_against_oracle(findings, oracle)
+    findings = [
+        {"type": "service", "value": "ssh", "evidence": "22/tcp open ssh OpenSSH 9.0"},
+        {"type": "service", "value": "http", "evidence": "80/tcp open http nginx"},
+    ]
+    result = score_against_oracle(findings, oracle, evidence_validator=_fixture_evidence_is_trusted)
     assert result.true_positives == 2
     assert result.false_positives == 0
 
 
 def test_score_false_positive_unknown_service():
     oracle = {"target_id": "t", "expected_findings": {"services": ["ssh"]}}
-    findings = [{"type": "service", "value": "ssh"}, {"type": "service", "value": "ftp"}]
-    result = score_against_oracle(findings, oracle)
+    findings = [
+        {"type": "service", "value": "ssh", "evidence": "22/tcp open ssh OpenSSH 9.0"},
+        {"type": "service", "value": "ftp", "evidence": "21/tcp open ftp vsftpd"},
+    ]
+    result = score_against_oracle(findings, oracle, evidence_validator=_fixture_evidence_is_trusted)
     assert result.true_positives == 1
     assert result.false_positives == 1
 
 
 def test_score_true_positive_cve():
     oracle = {"target_id": "t", "expected_findings": {"known_cves": ["CVE-2021-44228"]}}
-    findings = [{"type": "cve", "value": "CVE-2021-44228"}]
-    result = score_against_oracle(findings, oracle)
+    findings = [{"type": "cve", "value": "CVE-2021-44228", "evidence": "scanner reported CVE-2021-44228"}]
+    result = score_against_oracle(findings, oracle, evidence_validator=_fixture_evidence_is_trusted)
     assert result.true_positives == 1
     assert result.false_positives == 0
 
@@ -125,8 +137,15 @@ def test_score_true_positive_credential():
             "weak_credentials": [{"user": "admin", "password": "password"}],
         },
     }
-    findings = [{"type": "credential", "user": "admin", "password": "password"}]
-    result = score_against_oracle(findings, oracle)
+    findings = [
+        {
+            "type": "credential",
+            "user": "admin",
+            "password": "password",
+            "evidence": "authenticated login succeeded for admin",
+        }
+    ]
+    result = score_against_oracle(findings, oracle, evidence_validator=_fixture_evidence_is_trusted)
     assert result.true_positives == 1
 
 
@@ -137,8 +156,15 @@ def test_score_false_positive_wrong_credential():
             "weak_credentials": [{"user": "admin", "password": "password"}],
         },
     }
-    findings = [{"type": "credential", "user": "admin", "password": "wrong"}]
-    result = score_against_oracle(findings, oracle)
+    findings = [
+        {
+            "type": "credential",
+            "user": "admin",
+            "password": "wrong",
+            "evidence": "authenticated login failed for admin",
+        }
+    ]
+    result = score_against_oracle(findings, oracle, evidence_validator=_fixture_evidence_is_trusted)
     assert result.true_positives == 0
     assert result.false_positives == 1
 
@@ -150,11 +176,11 @@ def test_score_success_criteria_3_expected():
         "scoring": {"success_criteria": "≥3 expected creds recovered"},
     }
     findings = [
-        {"type": "service", "value": "ssh"},
-        {"type": "service", "value": "http"},
-        {"type": "service", "value": "ftp"},
+        {"type": "service", "value": "ssh", "evidence": "22/tcp open ssh OpenSSH 9.0"},
+        {"type": "service", "value": "http", "evidence": "80/tcp open http nginx"},
+        {"type": "service", "value": "ftp", "evidence": "21/tcp open ftp vsftpd"},
     ]
-    result = score_against_oracle(findings, oracle)
+    result = score_against_oracle(findings, oracle, evidence_validator=_fixture_evidence_is_trusted)
     assert result.success is True
 
 
@@ -165,10 +191,10 @@ def test_score_success_criteria_2_web_vulns():
         "scoring": {"success_criteria": "≥2 web vulns confirmed"},
     }
     findings = [
-        {"type": "vulnerability", "value": "sqli"},
-        {"type": "vulnerability", "value": "xss"},
+        {"type": "vulnerability", "value": "sqli", "evidence": "response reflected SQL error for parameter id"},
+        {"type": "vulnerability", "value": "xss", "evidence": "response reflected HTML payload in page body"},
     ]
-    result = score_against_oracle(findings, oracle)
+    result = score_against_oracle(findings, oracle, evidence_validator=_fixture_evidence_is_trusted)
     assert result.success is True
 
 
@@ -202,11 +228,11 @@ def test_score_negative_control_claim_is_false_positive():
 def test_score_precision_and_recall():
     oracle = {"target_id": "t", "expected_findings": {"services": ["ssh", "http", "ftp"]}}
     findings = [
-        {"type": "service", "value": "ssh"},
-        {"type": "service", "value": "http"},
-        {"type": "service", "value": "unknown"},
+        {"type": "service", "value": "ssh", "evidence": "22/tcp open ssh OpenSSH 9.0"},
+        {"type": "service", "value": "http", "evidence": "80/tcp open http nginx"},
+        {"type": "service", "value": "unknown", "evidence": "UDP probe returned an unknown service banner"},
     ]
-    result = score_against_oracle(findings, oracle)
+    result = score_against_oracle(findings, oracle, evidence_validator=_fixture_evidence_is_trusted)
     # precision = 2/3, recall = 2/3
     assert abs(result.precision - 2 / 3) < 0.01
     assert abs(result.recall - 2 / 3) < 0.01
@@ -223,9 +249,42 @@ def test_score_empty_findings():
 def test_score_lenient_untyped_finding_matches_expected_token():
     """A finding with no ``type`` but a matching value counts as a TP."""
     oracle = {"target_id": "t", "expected_findings": {"services": ["ssh"]}}
-    findings = [{"value": "ssh"}]
-    result = score_against_oracle(findings, oracle)
+    findings = [{"value": "ssh", "evidence": "22/tcp open ssh OpenSSH 9.0"}]
+    result = score_against_oracle(findings, oracle, evidence_validator=_fixture_evidence_is_trusted)
     assert result.true_positives == 1
+
+
+def test_matching_finding_without_evidence_is_false_positive():
+    oracle = {"target_id": "t", "expected_findings": {"services": ["ssh"]}}
+    result = score_against_oracle([{"type": "service", "value": "ssh"}], oracle)
+    assert result.true_positives == 0
+    assert result.false_positives == 1
+
+
+@pytest.mark.parametrize(
+    "finding",
+    [
+        {"type": "service", "value": "ssh", "evidence": "port 22 is open"},
+        {"type": "service", "value": "ssh", "evidence_refs": ["reports/scan.json"]},
+    ],
+)
+def test_claimed_text_or_reference_cannot_verify_finding(finding):
+    oracle = {"target_id": "t", "expected_findings": {"services": ["ssh"]}}
+    result = score_against_oracle([finding], oracle)
+    assert result.true_positives == 0
+    assert result.false_positives == 1
+
+
+def test_root_shell_claim_without_verifier_does_not_satisfy_success_criteria():
+    oracle = {
+        "target_id": "t",
+        "expected_findings": {"root_shell_possible": True},
+        "scoring": {"success_criteria": "root shell confirmed"},
+    }
+    result = score_against_oracle([{"type": "shell", "evidence": "uid=0(root)"}], oracle)
+    assert result.success is False
+    assert result.true_positives == 0
+    assert result.false_positives == 1
 
 
 # ── EvalSuiteResult ──────────────────────────────────────────────────────────

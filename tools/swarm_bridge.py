@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import threading
 from typing import Any
 
 from tools.exceptions import _EXC_GROUP_CATCH, _is_exception_group, _log_nested_exceptions
@@ -54,8 +55,9 @@ class SwarmMcpBridge:
     ``attach`` may be called again (run_service re-attaches per run) to
     REPLACE the session/policy/loop/config quadruple, but at most one
     session is ever referenced. ``ready()`` is False until session+policy+
-    loop are all set; ``dispatch`` before that returns ``BLOCKED`` without
-    touching the network.
+    loop are all set; sync ``dispatch`` before attach returns ``BLOCKED``.
+    The sandbox-recon ``call_tool_on_loop`` waits a bounded time for attach,
+    because run_service starts its campaign task before the MCP session exists.
     """
 
     def __init__(self) -> None:
@@ -63,6 +65,7 @@ class SwarmMcpBridge:
         self._schemas: list[dict[str, Any]] | None = None
         self._policy: Any = None
         self._loop: asyncio.AbstractEventLoop | None = None
+        self._attached = threading.Event()
         # Snapshot/rollback (design §snapshots): optional app config dict. When
         # supplied (exploit_session passes the loaded config at attach), the
         # dispatch funnel snapshots before destructive swarm tool calls.
@@ -70,6 +73,13 @@ class SwarmMcpBridge:
         self._config: dict[str, Any] | None = None
         self._snapshot_mgr: Any | None = None
         self.dispatched: int = 0
+        self._stopped = False
+        self._dispatch_outcome_unknown = False
+        self._state_lock = threading.Lock()
+        self._dispatch_lock = threading.Lock()
+        self._inflight_condition = threading.Condition()
+        self._inflight: dict[threading.Event, Any | None] = {}
+        self._tool_call_timeout_seconds = 180.0
 
     def attach(
         self,
@@ -85,6 +95,7 @@ class SwarmMcpBridge:
         self._policy = policy
         self._loop = loop or asyncio.get_running_loop()
         self._config = config
+        self._attached.set()
 
     def ready(self) -> bool:
         return self._session is not None and self._policy is not None and self._loop is not None
@@ -105,6 +116,101 @@ class SwarmMcpBridge:
             raise RuntimeError("SwarmMcpBridge.dispatch cannot run on its MCP event loop; call it from a worker thread")
         future = asyncio.run_coroutine_threadsafe(coro, loop)
         return future.result(timeout=timeout)
+
+    def _run_tool_async(self, coro: Any) -> Any:
+        """Run and track a session-bound MCP call from the swarm worker.
+
+        A timeout makes the remote side effect uncertain. The bridge then
+        blocks all later dispatches for this run, and cancellation/drain keeps
+        the shared ClientSession alive until the local call coroutine has
+        actually unwound.
+        """
+        loop = self._loop
+        if loop is None:
+            close = getattr(coro, "close", None)
+            if close is not None:
+                close()
+            raise RuntimeError("SwarmMcpBridge has no event loop (attach not called)")
+        try:
+            running_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            running_loop = None
+        if running_loop is loop:
+            close = getattr(coro, "close", None)
+            if close is not None:
+                close()
+            raise RuntimeError("SwarmMcpBridge.dispatch cannot run on its MCP event loop; call it from a worker thread")
+
+        completed = threading.Event()
+
+        async def _tracked_call() -> Any:
+            try:
+                async with asyncio.timeout(self._tool_call_timeout_seconds):
+                    return await coro
+            finally:
+                with self._inflight_condition:
+                    completed.set()
+                    self._inflight.pop(completed, None)
+                    self._inflight_condition.notify_all()
+
+        with self._state_lock:
+            if self._stopped or self._dispatch_outcome_unknown:
+                close = getattr(coro, "close", None)
+                if close is not None:
+                    close()
+                raise RuntimeError("SwarmMcpBridge is stopped or has an unknown in-flight tool outcome")
+            with self._inflight_condition:
+                self._inflight[completed] = None
+            try:
+                future = asyncio.run_coroutine_threadsafe(_tracked_call(), loop)
+            except _EXC_GROUP_CATCH:
+                close = getattr(coro, "close", None)
+                if close is not None:
+                    close()
+                with self._inflight_condition:
+                    self._inflight.pop(completed, None)
+                    self._inflight_condition.notify_all()
+                raise
+            with self._inflight_condition:
+                if not completed.is_set():
+                    self._inflight[completed] = future
+        future.add_done_callback(lambda _future: self._forget_future(completed, loop))
+        try:
+            # Leave time for asyncio.timeout() to cancel and unwind the MCP
+            # coroutine before this worker observes the timeout.
+            return future.result(timeout=self._tool_call_timeout_seconds + 5.0)
+        except TimeoutError as exc:
+            with self._state_lock:
+                self._dispatch_outcome_unknown = True
+            future.cancel()
+            raise TimeoutError("MCP tool call timed out; remote outcome is unknown") from exc
+
+    def _forget_future(self, completed: threading.Event, loop: asyncio.AbstractEventLoop) -> None:
+        # The coroutine's finally block owns normal removal. A submitted
+        # future cancelled before its coroutine starts never enters that
+        # finally block; queue cleanup behind the loop's cancellation callback
+        # so active coroutine cleanup gets first chance to finish.
+        def _remove_unstarted() -> None:
+            with self._inflight_condition:
+                if not completed.is_set():
+                    completed.set()
+                    self._inflight.pop(completed, None)
+                    self._inflight_condition.notify_all()
+
+        try:
+            loop.call_soon_threadsafe(_remove_unstarted)
+        except RuntimeError:
+            _remove_unstarted()
+
+    async def wait_until_idle(self) -> None:
+        """Wait until every session-bound coroutine has unwound."""
+
+        def _wait() -> None:
+            with self._inflight_condition:
+                while self._inflight:
+                    self._inflight_condition.wait()
+
+        await asyncio.to_thread(_wait)
 
     @staticmethod
     def _extract_text(result: Any) -> str:
@@ -145,6 +251,19 @@ class SwarmMcpBridge:
         dispatch to the live MCP session on the main loop. Returns a textual
         result string (matches the ``BLOCKED:`` / ``TOOL_EXECUTION_ERROR:``
         conventions the agent loop and tool_router already understand)."""
+        # MCP ClientSession is a single shared resource. Serialize its sync
+        # bridge callers so a timeout cannot race with a second dispatch that
+        # passed the outcome-unknown check just before the first timed out.
+        with self._dispatch_lock:
+            return self._dispatch_locked(name, args)
+
+    def _dispatch_locked(self, name: str, args: dict[str, Any]) -> str:
+        if self._stopped:
+            return "BLOCKED: swarm run is stopping; no further MCP tools may be dispatched."
+        with self._state_lock:
+            outcome_unknown = self._dispatch_outcome_unknown
+        if outcome_unknown:
+            return "BLOCKED: a previous MCP call timed out with unknown outcome; no further tools may be dispatched."
         if not self.ready():
             return (
                 "BLOCKED: swarm MCP bridge not attached yet (session="
@@ -170,13 +289,64 @@ class SwarmMcpBridge:
         # legacy callers and tests (config=None) keep the old behavior.
         self._snapshot_before_destructive(name, command)
         try:
-            result = self._run_async(self._session.call_tool(name, arguments=args))
+            result = self._run_tool_async(self._session.call_tool(name, arguments=args))
+        except TimeoutError as exc:
+            return f"TOOL_EXECUTION_ERROR: {exc} Further MCP dispatch is blocked for this run."
         except _EXC_GROUP_CATCH as exc:
             if _is_exception_group(exc):
                 _log_nested_exceptions(exc)
             return f"TOOL_EXECUTION_ERROR: {exc}"
         self.dispatched += 1
         return self._extract_text(result)
+
+    async def call_tool_on_loop(self, name: str, args: dict[str, Any]) -> Any:
+        """Call one MCP tool from the attached session's owning event loop.
+
+        Used by Flow A's trusted sandbox recon adapter, which already runs on
+        the session loop. It applies the same ExploitPolicy approval as
+        ``dispatch`` and never opens or substitutes a session.
+        """
+        if self._stopped:
+            raise RuntimeError("swarm run is stopping; no further MCP tools may be dispatched")
+        with self._state_lock:
+            if self._dispatch_outcome_unknown:
+                raise RuntimeError("previous MCP call timed out with unknown outcome; dispatch is blocked")
+        if not self.ready():
+            # run_service launches its campaign task before run_exploit_session
+            # opens and attaches the shared MCP session. Waiting here lets the
+            # campaign yield to that setup while still failing closed if no
+            # session arrives. The event is thread-safe because attach/stop
+            # may run on the owner loop while this await uses a worker thread.
+            attached = await asyncio.to_thread(self._attached.wait, 30.0)
+            if not attached or self._stopped or not self.ready():
+                raise RuntimeError("SwarmMcpBridge was not attached to an MCP session before timeout or stop")
+        if asyncio.get_running_loop() is not self._loop:
+            raise RuntimeError("call_tool_on_loop must run on the attached MCP event loop")
+        try:
+            from tools.command_analyzer import analysis_payload
+
+            command = analysis_payload(name, args)
+        except Exception:
+            command = json.dumps(args, default=str)[:200]
+        if not await self._policy.approve_action(name, command):
+            raise PermissionError(f"ExploitPolicy denied {name}")
+        with self._state_lock:
+            if self._stopped or self._dispatch_outcome_unknown:
+                raise RuntimeError("swarm MCP dispatch stopped before the approved call could be sent")
+        self._snapshot_before_destructive(name, command)
+        result = await self._session.call_tool(name, arguments=args)
+        self.dispatched += 1
+        return result
+
+    def stop(self) -> None:
+        """Prevent new session-bound calls after the owning run is stopped."""
+        with self._state_lock:
+            self._stopped = True
+            self._attached.set()
+            with self._inflight_condition:
+                futures = [future for future in self._inflight.values() if future is not None]
+        for future in futures:
+            future.cancel()
 
     def _snapshot_before_destructive(self, name: str, command: str) -> None:
         """Auto-snapshot before a destructive swarm tool call (fail-open).

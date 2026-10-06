@@ -4,6 +4,13 @@
 
 The codebase is organized around an authorized security research workflow. Most modules are plain Python services backed by SQLite and filesystem evidence, with CLI and MCP entry points on top.
 
+There are two execution flows. **Flow A is the active exploit, swarm, and
+WebUI path** shown second below. **Flow B is the frozen mission-database
+workflow** shown first for compatibility and reference; new work belongs in
+Flow A unless it explicitly maintains legacy behavior.
+
+**Flow B — legacy, frozen:**
+
 ```text
 User
   -> main.py / cli.py / MCP client
@@ -18,11 +25,11 @@ User
   -> ReportGenerator
 ```
 
-There is also a newer exploit, swarm, and WebUI path:
+**Flow A — active:**
 
 ```text
 main.py / app.py (WebUI daemon @ :8765, or direct CLI run)
-  -> tools.run_service.AssessmentService (transport-neutral prep + execute)
+  -> tools.run_service.AssessmentService (shared prep + execute; provider-routed decisions/events plus direct AttackUi status output)
   -> tools.exploit_session.run_exploit_session
   -> tools.exploit_agent (tools/exploit_agent/runner/_impl.py loop) + ExploitPolicy
   -> mcp_exploit_server.py
@@ -91,9 +98,12 @@ Important functions (`main.py:342-635` `parse_args`; `tools/config_cli.py:30` `l
 
 Note: `open_exploit_mcp_session` and several of the functions above are re-wrapped/imported from the Flow A CLI orchestration layer — a set of top-level `tools/*.py` modules (`config_cli.py`, `cli_exploit_settings.py`, `exploit_session.py`, `mcp_session.py`, `recon_assessment_cli.py`, `resume_state.py`, `safety_review_cli.py`, `skills_cli.py`, `swarm_bridge.py`) extracted from `main.py` during the cleanup. See "## Flow A CLI Orchestration Layer" below.
 
-### `cli.py`
+### `cli.py` compatibility shim
 
-The workflow CLI over the mission database. It is useful for deterministic local operations without the full AI loop.
+The root `cli.py` is a deprecation shim to `legacy.cli`. That legacy workflow
+CLI operates on the mission database and remains useful for deterministic
+local operations without the full AI loop. New Flow A CLI work belongs in
+`main.py` and `tools/run_service/`.
 
 Commands:
 
@@ -317,7 +327,7 @@ delegates to the canonical layer.
 
 - `tools/kernel/` is the single source for `allowlist` / `audit` / `workspace` pure functions; `tools/mcp_shared.py` and `tools/mcp_tools/registry.py` re-export for backwards compat (`from tools.kernel.allowlist import _allowed_target_list` etc.).
 - `tools/persistent_session_manager.py:_is_inside_workspace` duplicate is deleted; it imports from `tools/kernel/workspace.py`.
-- No behavior change: `python -m pytest tests/ -q` + `python main.py --doctor` + `python main.py --self-test` remain green.
+- No behavior change: approved sequential targeted test slices + `python main.py --doctor` + `python main.py --self-test` (full-suite verification is CI-only) remain green.
 - Future phases (3–6) may add `collect_tools()` introspection, `tools/recon/` / `tools/campaign/` splits, and `pkgutil.iter_modules` module discovery without touching the frozen surface.
 
 **Alternatives considered:** Physical `legacy/` directory move in Phase 2 (rejected — would touch 12+ import sites and exceed 400-line budget); deleting Flow B outright (rejected — `cli.py` workflow still used deterministically, and tests cover it).

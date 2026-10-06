@@ -151,7 +151,8 @@ where the term is defined or primarily used.
 - **Sandbox** — Disposable per-run Docker worker (`tools/sandbox/`,
   default-on). Network containment via netns firewall over the effective
   allowlist; mid-session failures = `SANDBOX_*` fail-closed blocks; boot
-  fallback = `sandbox.fallback_native` degrade-to-native + `SANDBOX_FALLBACK:` lines. See [sandbox.md](sandbox.md).
+  Fail-closed execution is required: `sandbox.enabled: false` and
+  `sandbox.fallback_native: true` are rejected. See [sandbox.md](sandbox.md).
 - **Loot / vault / credential_store** — Captured creds/loot per run
   (encrypted at rest via `tools/credential_store.py`); surfaced in WebUI
   Loot & Credentials page.

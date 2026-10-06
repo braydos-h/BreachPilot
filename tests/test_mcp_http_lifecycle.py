@@ -253,6 +253,36 @@ def test_http_session_failure_after_yield_does_not_retry_over_stdio(monkeypatch,
     assert calls == ["http"]
 
 
+def test_http_child_receives_network_telemetry_sideband_path(monkeypatch, tmp_path: Path) -> None:
+    seen: dict[str, object] = {}
+    log_handle = MagicMock()
+    telemetry_path = tmp_path / "measurement.json"
+
+    monkeypatch.setattr(ms, "port_is_open", lambda *_args: False)
+    monkeypatch.setattr(Path, "mkdir", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(Path, "open", lambda *_args, **_kwargs: log_handle)
+
+    def _popen(args, **kwargs):
+        seen["args"] = args
+        return MagicMock()
+
+    monkeypatch.setattr(ms.subprocess, "Popen", _popen)
+    ms.start_exploit_http_server(
+        server_path=tmp_path / "mcp_exploit_server.py",
+        config_path=tmp_path / "config.yaml",
+        port=8001,
+        workspace=tmp_path,
+        env={},
+        network_telemetry_path=telemetry_path,
+    )
+
+    args = seen["args"]
+    assert isinstance(args, list)
+    assert "--network-telemetry-path" in args
+    path_index = args.index("--network-telemetry-path")
+    assert args[path_index + 1] == str(telemetry_path.resolve())
+
+
 @pytest.mark.skipif(not hasattr(subprocess, "CREATE_NEW_PROCESS_GROUP"), reason="Windows only")
 def test_http_server_starts_in_a_new_windows_process_group(monkeypatch, tmp_path: Path) -> None:
     popen_kwargs = {}

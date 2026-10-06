@@ -1,14 +1,16 @@
-"""Per-run run.log: tees console output and all logging records into reports/<run_id>/run.log.
+"""Per-run run.log capture for console output and logging records.
 
-``RunLog.attach`` is process-global: the API daemon runs runs sequentially in
-one process, so attach() re-points the same global tee/handler to the new
-run's file. attach() detaches any previous run first, and a stale attach
-self-heals on the next attach (the crash window's lines stay in the old log,
-which is exactly what you want when debugging).
+The console streams and root logging handler are process-global, while API
+assessments can execute concurrently. A context-local session routes each
+write to the run that produced it; closing one run leaves other sessions
+attached. Calls made in an unpropagated worker thread are routed only when
+there is exactly one active session, avoiding cross-run attribution.
 """
 
 from __future__ import annotations
 
+import asyncio
+import contextvars
 import logging
 import re
 import sys
@@ -20,28 +22,63 @@ from typing import Any, TextIO
 _ANSI_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 
 _FORMAT = "%(asctime)s [%(levelname)-8s] %(name)s:%(funcName)s:%(lineno)d — %(message)s"
+_FORMATTER = logging.Formatter(_FORMAT, datefmt="%Y-%m-%d %H:%M:%S")
+
+
+class _RunSession:
+    """One run's log file and serialized write operations."""
+
+    def __init__(self, path: Path, handle: TextIO | None) -> None:
+        self.path = path
+        self.handle = handle
+        self.lock = threading.Lock()
+        self.active = True
+        self.context_token: contextvars.Token[_RunSession | None] | None = None
+
+    def write(self, text: str) -> None:
+        with self.lock:
+            if not self.active:
+                return
+            if self.handle is None:
+                return
+            try:
+                self.handle.write(text)
+                self.handle.flush()
+            except Exception:
+                pass
+
+    def close(self) -> None:
+        with self.lock:
+            if not self.active:
+                return
+            self.active = False
+            if self.handle is None:
+                return
+            try:
+                self.handle.close()
+            except OSError:
+                pass
+
+
+_CURRENT_SESSION: contextvars.ContextVar[_RunSession | None] = contextvars.ContextVar(
+    "breachpilot_run_log_session", default=None
+)
 
 
 class _Tee:
-    """Mirrors writes to the real stream and the run log."""
+    """Mirror a process stream and route captured text by execution context."""
 
-    def __init__(self, real: TextIO, log_handle: Any) -> None:
+    def __init__(self, real: TextIO) -> None:
         self._real = real
-        self._log = log_handle
-        self._lock = threading.Lock()
 
     def write(self, data: str) -> int:
         try:
             self._real.write(data)
         except Exception:
             pass
-        try:
-            with self._lock:
-                text = _ANSI_RE.sub("", data).replace("\r", "")
-                self._log.write(text)
-                self._log.flush()
-        except Exception:
-            pass
+        session = RunLog._current_session()
+        if session is not None:
+            session.write(_ANSI_RE.sub("", data).replace("\r", ""))
         return len(data)
 
     def flush(self) -> None:
@@ -60,66 +97,125 @@ class _Tee:
         return getattr(self._real, name)
 
 
-class RunLog:
-    """One process-wide run log, re-attached per run."""
+class _ContextLogHandler(logging.Handler):
+    """Single process-wide handler that routes each record to its run context."""
 
-    _instance: "RunLog | None" = None
+    def __init__(self) -> None:
+        super().__init__(logging.DEBUG)
+        self.setFormatter(_FORMATTER)
+
+    def emit(self, record: logging.LogRecord) -> None:
+        session = RunLog._current_session()
+        if session is None:
+            return
+        try:
+            session.write(self.format(record) + "\n")
+        except Exception:
+            self.handleError(record)
+
+
+class RunLog:
+    """Capture console and logging output in context-local per-run files."""
+
+    _lock = threading.RLock()
+    _sessions: set[_RunSession] = set()
+    _stdout: TextIO | None = None
+    _stderr: TextIO | None = None
+    _stdout_tee: _Tee | None = None
+    _stderr_tee: _Tee | None = None
+    _handler: _ContextLogHandler | None = None
+    _old_root_level: int | None = None
+
+    @classmethod
+    def _current_session(cls) -> _RunSession | None:
+        session = _CURRENT_SESSION.get()
+        if session is not None:
+            return session if session.active else None
+        # asyncio.to_thread copies context, but run_in_executor does not. Keep
+        # legacy single-run CLI capture for unpropagated workers while refusing
+        # to guess when concurrent runs make ownership ambiguous. Never apply
+        # this fallback to another asyncio task, such as an unrelated API
+        # request running alongside the assessment.
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            pass
+        else:
+            return None
+        with cls._lock:
+            active = [candidate for candidate in cls._sessions if candidate.active]
+            return active[0] if len(active) == 1 else None
 
     @classmethod
     def attach(cls, reports_dir: Path) -> None:
-        inst = cls._instance or cls()
-        cls._instance = inst
-        inst._attach(reports_dir)
+        """Attach the current execution context to ``reports_dir/run.log``."""
+        path = Path(reports_dir) / "run.log"
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            handle = path.open("a", encoding="utf-8", errors="replace")
+        except OSError as exc:
+            # Install a disabled context so this failed run cannot accidentally
+            # fall back to another concurrent run's log.
+            disabled = _RunSession(path, None)
+            disabled.close()
+            disabled.context_token = _CURRENT_SESSION.set(disabled)
+            logging.getLogger(__name__).warning("run.log unavailable (%s): %s", path, exc)
+            return
+
+        session = _RunSession(path, handle)
+        session.write(
+            f"\n===== run started {datetime.now(timezone.utc).isoformat()} argv={sys.argv!r} log={path} =====\n"
+        )
+        with cls._lock:
+            if not cls._sessions:
+                cls._stdout, cls._stderr = sys.stdout, sys.stderr
+                cls._stdout_tee = _Tee(cls._stdout)
+                cls._stderr_tee = _Tee(cls._stderr)
+                sys.stdout, sys.stderr = cls._stdout_tee, cls._stderr_tee
+
+                root = logging.getLogger()
+                cls._old_root_level = root.level
+                root.setLevel(logging.DEBUG)
+                cls._handler = _ContextLogHandler()
+                root.addHandler(cls._handler)
+            cls._sessions.add(session)
+            session.context_token = _CURRENT_SESSION.set(session)
 
     @classmethod
     def detach(cls) -> None:
-        if cls._instance is not None:
-            cls._instance._detach()
-
-    def _attach(self, reports_dir: Path) -> None:
-        self._detach()
-        self._path = Path(reports_dir) / "run.log"
-        try:
-            self._path.parent.mkdir(parents=True, exist_ok=True)
-            self._handle = self._path.open("a", encoding="utf-8", errors="replace")
-        except OSError as exc:
-            self._handle = None
-            logging.getLogger(__name__).warning("run.log unavailable (%s): %s", self._path, exc)
+        """Detach and close only the current context's run log."""
+        session = _CURRENT_SESSION.get()
+        if session is None:
             return
-        # Let every module's NOTSET-level logger propagate DEBUG+ records to
-        # the single run.log handler; the root logger has no other handlers,
-        # so console output is unchanged. Restored on detach.
-        self._old_root_level = logging.getLogger().level
-        logging.getLogger().setLevel(logging.DEBUG)
-        self._handler = logging.FileHandler(self._path, encoding="utf-8")
-        self._handler.setLevel(logging.DEBUG)
-        self._handler.setFormatter(logging.Formatter(_FORMAT, datefmt="%Y-%m-%d %H:%M:%S"))
-        logging.getLogger().addHandler(self._handler)
-        self._stdout, self._stderr = sys.stdout, sys.stderr
-        sys.stdout = _Tee(self._stdout, self._handle)
-        sys.stderr = _Tee(self._stderr, self._handle)
-        self._handle.write(
-            f"\n===== run started {datetime.now(timezone.utc).isoformat()} argv={sys.argv!r} log={self._path} =====\n"
-        )
-        self._handle.flush()
-
-    def _detach(self) -> None:
-        handler = getattr(self, "_handler", None)
-        if handler is not None:
-            logging.getLogger().removeHandler(handler)
-            handler.close()
-        if getattr(self, "_stdout", None) is not None:
-            sys.stdout = self._stdout
-            sys.stderr = self._stderr
-        if getattr(self, "_old_root_level", None) is not None:
-            logging.getLogger().setLevel(self._old_root_level)
-        handle = getattr(self, "_handle", None)
-        if handle is not None:
+        token = session.context_token
+        if token is not None:
             try:
-                handle.close()
-            except OSError:
-                pass
-        self._handler = None
-        self._stdout = self._stderr = None
-        self._handle = None
-        self._old_root_level = None
+                _CURRENT_SESSION.reset(token)
+            except ValueError:
+                # A copied context cannot reset a token created by its parent.
+                _CURRENT_SESSION.set(None)
+        else:
+            _CURRENT_SESSION.set(None)
+
+        with cls._lock:
+            session.close()
+            cls._sessions.discard(session)
+            if cls._sessions:
+                return
+
+            root = logging.getLogger()
+            handler = cls._handler
+            if handler is not None:
+                root.removeHandler(handler)
+            if cls._old_root_level is not None:
+                root.setLevel(cls._old_root_level)
+            if sys.stdout is cls._stdout_tee and cls._stdout is not None:
+                sys.stdout = cls._stdout
+            if sys.stderr is cls._stderr_tee and cls._stderr is not None:
+                sys.stderr = cls._stderr
+            cls._stdout = cls._stderr = None
+            cls._stdout_tee = cls._stderr_tee = None
+            cls._handler = None
+            cls._old_root_level = None
+        if handler is not None:
+            handler.close()

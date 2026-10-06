@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import subprocess
+from types import SimpleNamespace
 from unittest.mock import patch
 
 
@@ -142,3 +144,35 @@ def test_check_environment_default_derives_from_env_tools():
     # ldapsearch is an extra (not in ENV_TOOLS) but is in the default list.
     assert "ldapsearch" in default
     assert "ldapsearch" not in ENV_TOOLS
+
+
+def _check_environment_tool():
+    from tools.mcp_tools.terminal.privilege import _register_privilege_tools
+
+    registered = {}
+
+    class FakeMCP:
+        def tool(self):
+            return lambda fn: registered.setdefault(fn.__name__, fn)
+
+    _register_privilege_tools(FakeMCP(), ctx=SimpleNamespace(audit_tool=lambda fn: fn))
+    return registered["check_environment"]
+
+
+def test_check_environment_rejects_paths_instead_of_running_them():
+    check_environment = _check_environment_tool()
+    with patch("subprocess.run", side_effect=AssertionError("host binaries must not run")):
+        result = check_environment("/tmp/attacker-tool")
+    assert result.startswith("BLOCKED:")
+
+
+def test_check_environment_never_executes_a_shadowed_host_binary(monkeypatch):
+    check_environment = _check_environment_tool()
+    monkeypatch.setattr(
+        "tools.mcp_tools.terminal.privilege.shutil.which",
+        lambda _tool: "/tmp/attacker-controlled/nmap",
+    )
+    with patch("subprocess.run", side_effect=AssertionError("host binaries must not run")):
+        result = check_environment("nmap")
+    assert "[+] nmap: /tmp/attacker-controlled/nmap" in result
+    assert "version not probed" in result

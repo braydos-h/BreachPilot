@@ -77,6 +77,45 @@ async def test_dispatch_on_bound_loop_returns_tool_execution_error():
 
 
 @pytest.mark.asyncio
+async def test_sandbox_mcp_call_waits_for_session_attach():
+    """The campaign can start before its owning run attaches the MCP session."""
+    bridge = SwarmMcpBridge()
+    session = MagicMock()
+    session.call_tool = AsyncMock(return_value="sandbox recon result")
+    policy = MagicMock()
+    policy.approve_action = AsyncMock(return_value=True)
+
+    pending_call = asyncio.create_task(bridge.call_tool_on_loop("run_full_recon", {"target_ip": "192.0.2.10"}))
+    await asyncio.sleep(0)
+    assert not pending_call.done()
+    session.call_tool.assert_not_awaited()
+
+    bridge.attach(session, [], policy, loop=asyncio.get_running_loop())
+    assert await pending_call == "sandbox recon result"
+    policy.approve_action.assert_awaited_once()
+    session.call_tool.assert_awaited_once_with("run_full_recon", arguments={"target_ip": "192.0.2.10"})
+
+
+@pytest.mark.asyncio
+async def test_stopping_unattached_bridge_releases_waiting_recon():
+    bridge = SwarmMcpBridge()
+    pending_call = asyncio.create_task(bridge.call_tool_on_loop("run_full_recon", {"target_ip": "192.0.2.10"}))
+    await asyncio.sleep(0)
+
+    bridge.stop()
+
+    with pytest.raises(RuntimeError, match="not attached"):
+        await pending_call
+
+    session = MagicMock()
+    session.call_tool = AsyncMock(return_value="must not dispatch")
+    bridge.attach(session, [], MagicMock(), loop=asyncio.get_running_loop())
+    with pytest.raises(RuntimeError, match="stopping"):
+        await bridge.call_tool_on_loop("run_full_recon", {"target_ip": "192.0.2.10"})
+    session.call_tool.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_snapshot_hook_fires_on_destructive_dispatch(tmp_path, monkeypatch):
     calls: dict[str, Any] = {}
 

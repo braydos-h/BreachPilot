@@ -45,7 +45,7 @@ above follow `docs/architecture.md` and `CLAUDE.md`.
 | System | Primary implementation | Documentation |
 |---|---|---|
 | Run lifecycle endpoints | `tools/api/routes/runs.py`, `tools/api/routes/decisions.py`, `tools/api/routes/events.py` | [api/endpoints/runs.md](../api/endpoints/runs.md), [api/endpoints/decisions.md](../api/endpoints/decisions.md), [api/endpoints/events.md](../api/endpoints/events.md) |
-| System, ops, users, connections, benchmarks endpoints | `tools/api/routes/system.py`, `tools/api/routes/ops.py`, `tools/api/routes/users.py`, `tools/api/routes/connections.py`, `tools/api/routes/benchmarks.py` | [api/endpoints/system.md](../api/endpoints/system.md), [api/overview.md](../api/overview.md) |
+| System, ops, users, connections, benchmarks endpoints | `tools/api/routes/system/`, `tools/api/routes/ops.py`, `tools/api/routes/users.py`, `tools/api/routes/connections.py`, `tools/api/routes/benchmarks.py` | [api/endpoints/system.md](../api/endpoints/system.md), [api/overview.md](../api/overview.md) |
 | Evidence graph endpoints | `tools/api/routes/graph.py`, `tools/api/routes/graph_explorer.py` | [api/endpoints/graph.md](../api/endpoints/graph.md) |
 | Route package wiring | `tools/api/routes/__init__.py` | [api/overview.md](../api/overview.md) |
 | Transport-neutral run engine (prepare + execute, typed models, providers, tasks) | `tools/run_service/service.py`, `tools/run_service/models.py`, `tools/run_service/providers.py`, `tools/run_service/tasks.py`, `tools/run_service/prepare.py`, `tools/run_service/execute.py`, `tools/run_service/warmup.py` | [run-service.md](../run-service.md), [api/run-manager.md](../api/run-manager.md) |
@@ -101,7 +101,7 @@ individually re-read for this table.
 
 | System | Primary implementation | Documentation |
 |---|---|---|
-| Kernel (audit chain, allowlist, orchestration vocabulary, workspace, config) | `tools/kernel/audit.py`, `tools/kernel/allowlist.py`, `tools/kernel/orchestration.py`, `tools/kernel/workspace.py`, `tools/kernel/config.py`, `tools/kernel/parse.py`, `tools/kernel/discovered.py` | [components/tools/kernel/overview.md](../components/tools/kernel/overview.md), [safety-model.md](../safety-model.md) |
+| Kernel (audit chain, allowlist, orchestration vocabulary, workspace, config) | `tools/kernel/audit.py`, `tools/kernel/segmented_audit.py`, `tools/kernel/allowlist.py`, `tools/kernel/orchestration.py`, `tools/kernel/workspace.py`, `tools/kernel/config.py`, `tools/kernel/parse.py`, `tools/kernel/discovered.py` | [components/tools/kernel/overview.md](../components/tools/kernel/overview.md), [safety-model.md](../safety-model.md) |
 | Sandbox (manager, Docker backend/lifecycle, network, policy) | `tools/sandbox/manager.py`, `tools/sandbox/docker_backend.py`, `tools/sandbox/docker_lifecycle.py`, `tools/sandbox/network.py`, `tools/sandbox/policy.py`, `tools/sandbox/mcp_bridge.py`, `tools/sandbox/models.py` | [sandbox.md](../sandbox.md), [safety-model.md](../safety-model.md) |
 | Scope, safety review, killchain, snapshots, verification | `scope_gate.py`, `tools/safety_reviewer.py`, `tools/killchain/`, `tools/snapshots.py`, `tools/verification/`, `tools/command_analyzer.py`, `tools/validation_utils.py` | [safety-model.md](../safety-model.md) |
 

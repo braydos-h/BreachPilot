@@ -3,6 +3,8 @@ version: 0.1.0
 description: SNMP enumeration plugin - snmpwalk/snmp-check style queries for system inventory, users, processes, and community-string guessing. Target-touching tools are allowlist-locked; plugin default-off.
 author: BreachPilot
 capabilities: [attack_module, mcp_tool]
+target_touching: true
+provides_mcp_tools: [snmp_crack_community, snmp_enum_target]
 enabled: false
 config_section:
   snmp:

@@ -11,13 +11,13 @@
 # pip resolves every transitive version to the pins below.
 #
 # Refresh (after changing pyproject.toml ranges, or monthly for security
-# patches) from a clean venv on the OLDEST supported Python (3.11), then run
-# the full suite + lint + typecheck before committing:
+# patches) from a clean venv on the OLDEST supported Python (3.11). Verify the
+# affected test files plus lint and type checks locally; the complete suite is
+# a CI gate and must not be run as one unrestricted local command.
 #
 #   python3.11 -m venv /tmp/refresh && /tmp/refresh/bin/pip install -e ".[dev]"
 #   /tmp/refresh/bin/pip list --format=freeze | grep -vi "^pip==" | sort > constraints-dev.txt
-#   # re-add this header, then:
-#   python -m pytest tests/ -q -m "not integration" && ruff check . && mypy --follow-imports=skip tools
+#   # re-add this header, then run approved targeted test slices, ruff, and mypy.
 #
 # CI validates these pins on Python 3.11, 3.12, and 3.13 (tests matrix), so a
 # refresh must install cleanly on all three before merge.
@@ -36,6 +36,7 @@ cryptography==50.0.1
 docutils==0.23
 execnet==2.1.2
 fastapi==0.141.1
+greenlet==3.5.6
 h11==0.16.0
 httpcore==1.0.9
 httpx==0.28.1
@@ -62,14 +63,16 @@ numpy==2.4.6
 ollama==0.6.2
 packaging==26.3
 pathspec==1.1.1
+playwright==1.63.0
 pluggy==1.6.0
+pyee==13.0.1
 prompt_toolkit==3.0.53
 pycparser==3.0
 pydantic==2.13.5
 pydantic_core==2.46.5
 pydantic-settings==2.15.0
 Pygments==2.21.0
-PyJWT==2.13.0
+PyJWT==2.15.1
 pyproject_hooks==1.2.0
 pytest==9.1.1
 pytest-asyncio==1.4.0
@@ -93,7 +96,7 @@ starlette==1.6.0
 twine==7.0.0
 typing_extensions==4.16.0
 typing-inspection==0.4.4
-urllib3==2.7.0
+urllib3==2.8.0
 uvicorn==0.52.4
 wcwidth==0.8.3
 websockets==17.1

@@ -15,6 +15,8 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
 
+import pytest
+
 # ── 1. recon_assessment event ──────────────────────────────────────────────
 
 
@@ -57,8 +59,11 @@ def test_recon_first_emits_recon_assessment_event(tmp_path):
         overall_risk_score=65,
     )
 
+    session_arguments: dict[str, Any] = {}
+
     @contextlib.asynccontextmanager
-    async def _open_session(**_kw):
+    async def _open_session(**kwargs):
+        session_arguments.update(kwargs)
         yield MagicMock()  # non-None so run_recon_assessment is invoked
 
     async def _run_recon(**_kw):
@@ -68,7 +73,7 @@ def test_recon_first_emits_recon_assessment_event(tmp_path):
     service = AssessmentService(callables=callables)
 
     sink = _RecordingSink()
-    config = {"mcp": {"http_port": 8001}}
+    config = {"mcp": {"http_port": 8001}, "exploit": {"workspace_dir": "custom_workspace"}}
     request = RunRequest(target="10.0.0.50", mode="recon", config_path=tmp_path / "config.yaml")
 
     async def _go():
@@ -102,6 +107,38 @@ def test_recon_first_emits_recon_assessment_event(tmp_path):
     assert recon_payload["assessment"] == assessment.to_dict()
     assert recon_payload["assessment"]["os_verdict"] == "LINUX"
     assert result_goal.name == "recon_only"
+    assert session_arguments["workspace"] == (tmp_path / "custom_workspace").resolve()
+    assert session_arguments["audit_path"] == (tmp_path / "exploit_audit.jsonl").resolve()
+    assert session_arguments["config_override"] == config
+
+    @contextlib.asynccontextmanager
+    async def _cancelled_session(**_kwargs):
+        raise BaseExceptionGroup("operator cancellation", [asyncio.CancelledError()])
+        yield  # pragma: no cover - unreachable
+
+    cancelled_service = AssessmentService(callables=Callables(open_session=_cancelled_session))
+
+    async def _cancelled_recon():
+        await cancelled_service._recon_first(
+            request=request,
+            config=config,
+            config_path=tmp_path / "config.yaml",
+            target_ip="10.0.0.50",
+            original_target="10.0.0.50",
+            resolved_ip=None,
+            resolved_domain=None,
+            reports_dir=tmp_path / "cancelled-run",
+            model_client=MagicMock(),
+            model_alias="glm",
+            risk_profile="standard_authorized",
+            goal_engine=GoalEngine(),
+            decision_provider=_StubDecisionProvider("recon_only"),
+            event_sink=_RecordingSink(),
+            cancellation=CancellationToken(),
+        )
+
+    with pytest.raises(BaseExceptionGroup, match="operator cancellation"):
+        asyncio.run(_cancelled_recon())
 
 
 # ── 2. RunManager allowlist auto-save ──────────────────────────────────────

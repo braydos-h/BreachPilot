@@ -78,11 +78,11 @@ def sandbox_fallback_notice(ctx: Any) -> str
 def loopback_hint(target_ip: str, config: Any) -> str
 ```
 
-- `run_command_in_sandbox` / `run_argv_in_sandbox` return `(True, SandboxResult)` on a contained execution, `(False, None)` when no sandbox manager is attached (sandbox disabled → documented legacy host-execution mode), and raise `SandboxError` on sandbox/policy/scope/entry failure — the caller renders the `SANDBOX_*` block. Fail-closed: host execution is never an automatic fallback for attack commands.
+- `run_command_in_sandbox` / `run_argv_in_sandbox` return `(True, SandboxResult)` on a contained execution and raise `SandboxError` on sandbox/policy/scope/entry failure — the caller renders the `SANDBOX_*` block. A missing manager is treated as a sandbox failure; attack commands never execute on the host.
 - Scope: the FULL extracted target list (not just the primary) goes through the manager's own `_enforce_scope` first (`_enforce_full_scope`), so a multi-destination command whose primary is allowlisted but whose secondary is not still blocks. `collect_command_targets` uses the same extractor union as the tool-layer target lock, so the scope gate can never authorize what the string layer would deny.
 - Entry gates: non-empty command/argv, positive-int timeout, safe `--user` token (`_SAFE_USER_RE`), path-like `cwd_host` mapped via `manager.container_path` (outside-workspace fails closed). The argv variant runs `argv` verbatim (never shelled); its `command` string is extraction-only.
 - `loopback_hint` returns a `HINT:` remediation line when a loopback target fails from inside the sandbox (container-local loopback; needs `sandbox.network.map_host_loopback:true`), decoding obfuscated loopback forms via the shared endpoint-IP extractor. Advisory only.
-- `sandbox_fallback_notice` emits `SANDBOX_FALLBACK:` only when the server degraded via the boot-time native fallback (`ctx.sandbox_notice`); configured host mode stays quiet. Config: `sandbox.*` (`enabled`, `fallback_native`, `network.map_host_loopback`).
+- The deprecated `fallback_native` config key must remain `false`; `true` and `enabled: false` are rejected. Config: `sandbox.*` (`enabled`, `fallback_native`, `network.map_host_loopback`).
 
 ### `egress_guard.py` — runtime egress enforcement for `run_python_file` children
 

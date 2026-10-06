@@ -9,6 +9,7 @@ import pytest
 
 from tools.benchmark.envinfo import collect_environment, config_hash, resolve_model_metadata
 from tools.benchmark.events import BenchmarkEventLogger, truncate_output
+from tools.benchmark.targets import TargetManager, TargetProvisionError
 from tools.benchmark.xben.adapter import XbenProvider
 from tools.benchmark.xben.manifest import ManifestError, load_manifest_file, parse_manifest
 
@@ -66,9 +67,32 @@ def test_parse_manifest_requires_oracle_flags():
         parse_manifest(data)
 
 
+def test_parse_manifest_rejects_unknown_ownership_condition():
+    data = dict(_VALID, oracle={**_VALID["oracle"], "host_owned_when": "sometimes"})
+    with pytest.raises(ManifestError, match="host_owned_when"):
+        parse_manifest(data)
+
+
 def test_parse_manifest_list_form():
     scenarios = [parse_manifest(d) for d in [_VALID, dict(_VALID, benchmark_id="xben-002")]]
     assert [s.scenario_id for s in scenarios] == ["xben-001", "xben-002"]
+
+
+def test_docker_target_ports_bind_only_to_literal_loopback():
+    scenario = parse_manifest(_VALID)
+    assert TargetManager._port_args(scenario) == ["-p", "127.0.0.1:8080:8080"]
+
+
+@pytest.mark.parametrize("target_host", ["0.0.0.0", "192.0.2.10", "localhost"])
+def test_docker_target_rejects_non_literal_or_non_loopback_bind_hosts(target_host):
+    scenario = parse_manifest({**_VALID, "target_host": target_host})
+    with pytest.raises(TargetProvisionError, match="literal loopback IP|only publish ports on loopback"):
+        TargetManager._port_args(scenario)
+
+
+def test_docker_target_supports_explicit_ipv6_loopback_bind():
+    scenario = parse_manifest({**_VALID, "target_host": "::1"})
+    assert TargetManager._port_args(scenario) == ["-p", "[::1]:8080:8080"]
 
 
 def test_load_manifest_file(tmp_path):

@@ -1,12 +1,11 @@
 """Deterministic verify-or-it-didn't-happen oracle.
 
-Scanner output (nuclei/nikto/ZAP/web_scan) is CANDIDATE only. A finding
-becomes CONFIRMED (``VERIFIED``) only when this named machine oracle
-re-proves it N/N times via a replayable proof capsule. LLM text,
-OutcomeJudge text, and exit codes NEVER decide — every run classifies
-through the authoritative ``outcome_truth`` classifier
-(``tools/exploit_agent/outcome_truth.py``), and anything that is not
-N/N compromise evidence fails closed to ``HOLDING``/``INCONCLUSIVE``.
+Scanner output (nuclei/nikto/ZAP/web_scan) is CANDIDATE only. This oracle
+records repeatable probe output, but the current Flow A probe executor is
+``run_exploit_terminal`` in a sandbox worker. Its output is not target-bound
+proof, so raw shell or credential markers can never produce ``VERIFIED``.
+LLM text, OutcomeJudge text, and exit codes never decide; results are
+``HOLDING`` or ``INCONCLUSIVE`` until a trusted target-bound verifier is wired.
 
 Reuse (no new execution paths, no new stores):
 
@@ -15,16 +14,16 @@ Reuse (no new execution paths, no new stores):
   (``SANDBOX_*``/``BLOCKED:``/executor crashes) mean "the probe did not
   run to a verdict" and fail closed to ``INCONCLUSIVE`` — never a host
   fallback, never a pass;
-- compromise evidence is ``outcome_truth`` ``COMPROMISE``/``CRED_DUMP``
-  only (strong shell/root/SYSTEM markers), the same bar the retest
-  ``STILL_OPEN`` verdict and the benchmark ``IndependentVerifier``
-  (crash=FAIL) hold.
+- ``outcome_truth`` currently classifies raw shell/credential markers as
+  ``UNVERIFIED_CLAIM``. The proof outcome constants remain reserved for a
+  future trusted structured verifier and are not reachable from text.
 
 Verdict rules over the N probe outputs:
 
 - any output carrying a containment/policy marker, empty, or ambiguous
   (``PARTIAL``/``UNKNOWN``/``NONE``) → ``INCONCLUSIVE``;
-- all N outputs ``COMPROMISE``/``CRED_DUMP`` → ``VERIFIED``;
+- all N outputs ``COMPROMISE``/``CRED_DUMP`` → ``VERIFIED`` only when a
+  trusted verifier supplies those structured outcomes;
 - otherwise (flaky N/N mix, or demonstrable ``FAILURE``) → ``HOLDING``.
 """
 
@@ -82,6 +81,15 @@ def judge_outputs(outputs: list[str]) -> tuple[str, str]:
     """Deterministic N/N verdict over already-collected probe outputs."""
     if not outputs:
         return INCONCLUSIVE, "no probe outputs"
+    # A later containment failure is more informative than an earlier
+    # unverified claim. Preserve the reason the probe could not be trusted.
+    for output in outputs:
+        text = str(output or "")
+        for marker in _INCONCLUSIVE_MARKERS:
+            if marker in text:
+                lines = [line.strip() for line in text.splitlines() if line.strip()]
+                detail = next((line for line in lines if marker in line), marker)
+                return INCONCLUSIVE, detail[:300]
     per = [classify_verify_output(o) for o in outputs]
     for _proof, inc, detail in per:
         if inc:
@@ -205,8 +213,8 @@ __all__ = [
 
 
 def demo() -> None:
-    """Good probe 2/2 -> VERIFIED, flaky 1/2 -> HOLDING, SANDBOX_* -> INCONCLUSIVE (no network)."""
-    print("verify_oracle demo: candidate-only until the machine re-proves N/N")
+    """Raw worker text is inconclusive; containment failures remain visible."""
+    print("verify_oracle demo: raw worker text is not target-bound proof")
     good = "exploit ok\nuid=0(root) gid=0(root)"
     bad = "curl: (7) Failed to connect: connection refused"
     sandbox = "TERMINAL_RESULT: BLOCKED\nSANDBOX_UNAVAILABLE\ndocker daemon unreachable"
@@ -216,8 +224,8 @@ def demo() -> None:
         return lambda _cmd: next(it)
 
     outcome = VerifyOracle(_run([good, good])).verify_sync({"exec": "curl -s http://10.0.0.50/poc"})
-    assert outcome.verdict == VERIFIED, outcome
-    print(f"  good probe 2/2  -> {outcome.verdict} (sha256={outcome.proof_capsule.sha256[:16]}…)")
+    assert outcome.verdict == INCONCLUSIVE, outcome
+    print(f"  shell marker 2/2 -> {outcome.verdict} ({outcome.detail})")
 
     outcome = VerifyOracle(_run([good, bad])).verify_sync({"exec": "curl -s http://10.0.0.50/poc"})
     assert outcome.verdict == HOLDING, outcome
@@ -226,7 +234,7 @@ def demo() -> None:
     outcome = VerifyOracle(_run([good, sandbox])).verify_sync({"exec": "curl -s http://10.0.0.50/poc"})
     assert outcome.verdict == INCONCLUSIVE, outcome
     print(f"  sandbox-blocked -> {outcome.verdict} ({outcome.detail})")
-    print("demo OK: VERIFIED only on N/N machine proof, fail closed otherwise")
+    print("demo OK: untrusted output never becomes VERIFIED")
 
 
 if __name__ == "__main__":

@@ -34,7 +34,7 @@ All agents read `target`, `task_id`, `config`, `blackboard`, `model_client`, `sk
 
 Stages (`recon_agent.py:192-363`):
 
-1. Build `ReconConfig.from_config(config, aggression_level=stealth→stealth else normal)` + `ReconPipeline(recon_cfg)` + `_run_coro(pipeline.recon_host(target))`.
+1. Call the shared `sandbox_recon_host` adapter with the MCP server's worker context; without that context the agent fails closed and never falls back to host `ReconPipeline`.
 2. Enrich services with `_SERVICE_RISK_SCORES` (`recon_agent.py:67`: smb 90, rdp 85, ssh 70, http 60, …) + `_TECH_SIGNATURES` banner fingerprint.
 3. Attack surface score = mean risk.
 4. Generate downstream `analysis` tasks for `risk≥70` + web services, each with `depends_on=[target,"recon"]`.

@@ -33,17 +33,18 @@ Use this path only when the capability belongs in the broader exploit workspace.
 Edit:
 
 - `tools/mcp_tools/<category>.py`: add the `@mcp.tool()` implementation inside the relevant `register_<category>_tools(...)` function.
-- `tools/mcp_tools/registry.py`: add MCP-tool-local shared helpers or dependency bundle fields only when the helper is genuinely shared by multiple exploit tool modules.
-- `mcp_exploit_server.py`: update wiring only if the new tool needs a new category module or shared service.
+- `tools/mcp_tools/registry.py`: normally no registrar wiring is needed; `collect_tools()` discovers `register_*_tools` functions and validates their safety decorators. Edit it only for genuinely shared helpers or `ToolContext` dependency fields.
+- `mcp_exploit_server.py`: normally no edit is needed for a new tool module; it calls `collect_tools()`. Change server wiring only when adding a server-level dependency or behavior.
 - `tools/mcp_shared.py`: reuse workspace path resolution, audit logging, allowlist checks, and redaction helpers.
-- `tools/exploit_agent/policy.py`: update `ExploitPolicy` so the model cannot call the tool outside the intended permission mode.
-- `tools/command_analyzer.py`: update command/code analysis if the tool runs shell, Python, Metasploit, package installs, listeners, callbacks, or file writes.
+- `tools/exploit_agent/policy.py`: change `ExploitPolicy` only when the run-wide permission or mission-scope contract changes. It is not a per-tool permission registry.
+- `tools/mcp_tools/sandbox_exec.py` / `tools/sandbox/`: route command execution through the supported sandbox helpers; do not add host-side execution fallbacks.
 - `tests/`: add policy, audit, redaction, and workspace tests.
 
 Required safety work:
 
-- Gate the tool by `ExploitPermission` mode.
-- Check `exploit.require_explicit_allowlist` and `exploit.allowed_targets` for target-touching calls.
+- Decorate target-touching tools with `@require_allowlist()` and use `validate_target_or_ip` for target inputs; use `@audit_tool` for free-text command tools. The registry checks decorator presence, while the decorators and tool-specific checks enforce their own runtime behavior.
+- Keep run-wide `ExploitPermission` and mission-scope enforcement in `ExploitPolicy`; there is no per-tool permission-mode table to update.
+- Send command execution through the sandbox execution helpers and preserve the configured target allowlist.
 - Write generated files into the configured workspace.
 - Redact secrets before audit logging.
 - Sanitize large output before returning it to the model.
@@ -182,31 +183,31 @@ Keep `config.yaml` model aliases and `models.info` synchronized because context-
 
 ## Add a Model Provider (chat, embeddings, or research)
 
-The engine has three provider surfaces, each coupled to Ollama differently.
-For the full architecture, current wiring, and concrete edit-point recipes,
-see [providers.md](providers.md). Summary:
+The engine has separate chat, embedding, and research provider surfaces.
+Read [provider-development.md](provider-development.md) for the chat adapter
+contract and [providers.md](providers.md) for the architecture.
 
-- **Chat/generate**: the single factory is `_build_model_client()` in
-  `tools/model_router.py:290-377`. Every consumer already receives a
-  `ModelClient` and calls `.chat()`, so adding a provider is a branch in the
-  factory plus a config key — no consumer edits. Watch tool-schema
-  conversion (`mcp_tools_to_ollama` in `mcp_session.py:911-935`) and
-  `tools/api/session_titler.py` (constructs its own client).
-- **Embeddings**: `SemanticMemoryManager._generate_embedding` in
-  `tools/semantic_memory.py:48-106` is a raw `urllib` POST to
-  `/api/embeddings`. Abstract it behind an `EmbeddingProvider` base (model on
-  `ResearchProvider`); consumers already call `.embed(text)`. Update both
-  Flow A and Flow B construction sites.
-- **Research**: already multi-provider. Subclass `ResearchProvider` in
-  `tools/web_researcher.py:235-307` and add a config block under `research:`.
+- **Chat/generate**: implement `BaseProvider` in `tools/providers/<id>_provider.py`,
+  register it in `tools/providers/registry.py`, and add schema metadata/defaults
+  in `tools/config/schema.py` plus contract tests. Consumers receive the canonical
+  `ModelClient`. Do not add provider branches to agents, swarm, run service,
+  session titler, or the model factory.
+- **Embeddings**: `tools/providers/embeddings.py` already defines
+  `EmbeddingProvider`, `NullEmbeddingProvider`, `OllamaEmbeddingProvider`, and
+  `build_embedding_provider`. Add an adapter and factory/config support there;
+  consumers use the embedding contract instead of raw backend HTTP requests.
+- **Research**: subclass `ResearchProvider` in `tools/research/providers.py`
+  and wire selection through the research settings/facade under `tools/research/`.
+  `tools/web_researcher.py` is a compatibility export, not the implementation.
+  Preserve public-fetch validation, resource bounds, and focused provider tests.
 
 ## Add Config Keys
 
 Edit:
 
 - `config.yaml`: checked-in operator defaults.
-- `tools/config_manager.py::CONFIG_SCHEMA`: defaults used when config is missing or incomplete.
-- `tools/config_manager.py::ConfigValidator.validate`: type/range validation.
+- `tools/config/schema.py::CONFIG_SCHEMA`: defaults used when config is missing or incomplete.
+- `tools/config/validator.py::ConfigValidator.validate`: type/range validation.
 - `tools/config_cli.py`: handles `load_config` and the startup API-key bootstrap (referenced from `main.py`).
 - `tools/interactive_menu.py`: only if operators should edit the setting interactively.
 - `tests/test_config_manager.py`: defaulting and validation coverage.
@@ -339,6 +340,7 @@ Key facts:
 2. Run `python main.py --doctor` for environment/config issues.
 3. Run `python main.py --self-test` for safe integration smoke testing.
 4. Inspect `research_workspace/logs/app.log` when logging is configured.
-5. Inspect `exploit_workspace/exploit_audit.jsonl` for exploit MCP calls.
+5. Inspect `reports/<run_id>/exploit_audit.jsonl` for the host-owned exploit
+   MCP audit trail (the path is outside the sandbox worker workspace).
 6. Inspect generated `reports/<timestamp>/` directories for session output.
 7. For database state, use the SQLite file under `research_workspace/research.db` or the test workspace being exercised.

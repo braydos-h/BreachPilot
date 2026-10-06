@@ -15,16 +15,29 @@ from tools.enhanced_reporting import EnhancedReportGenerator
 from tools.run_service.service import _build_campaign_result_from_records
 
 
-def _rec(action: str, status: str, *, exit_code: int | None = 0, detail: str = "") -> dict:
+def _rec(
+    action: str,
+    status: str,
+    *,
+    exit_code: int | None = 0,
+    detail: str = "",
+    command: str | None = None,
+    exploit_outcome: str = "none",
+    outcome_evidence: list[str] | None = None,
+    privilege_level: str = "",
+) -> dict:
     return {
         "timestamp": "2026-01-01T00:00:00Z",
         "target_ip": "10.0.0.50",
         "action": action,
         "status": status,
         "exit_code": exit_code,
-        "command": detail or f"{action} ...",
+        "command": command or detail or f"{action} ...",
         "detail": detail or f"{action} output",
         "attempt_id": "att-1",
+        "exploit_outcome": exploit_outcome,
+        "outcome_evidence": list(outcome_evidence or []),
+        "privilege_level": privilege_level,
     }
 
 
@@ -33,56 +46,69 @@ def test_build_campaign_result_returns_none_when_no_records():
     assert _build_campaign_result_from_records({"records": []}, "10.0.0.50") is None
 
 
-def test_build_campaign_result_separates_successful_from_failed():
-    """A completed exploit-tool action counts as ``successful_exploits`` ONLY
-    when the run's ``outcome_summary`` carries a verified compromise/cred-dump
-    count. The old contract counted any ``status=completed`` exploit action as
-    successful; the tightened outcome-truth classifier must confirm a real
-    shell/root/SYSTEM/cred marker, and that confirmation surfaces in
-    ``outcome_summary`` as ``compromises: N`` / ``cred dumps: N``.
-    """
-    # WITHOUT a verified outcome_summary -> completed exploits are NOT successful.
+def test_run_summary_cannot_attribute_success_to_unverified_actions():
+    """A run-level success count cannot be copied onto unrelated audit rows."""
     result = {
         "records": [
             _rec("run_exploit_terminal", "completed", detail="whoami; id"),
-            _rec("run_msf_module", "completed", detail="meterpreter session 1 opened"),
+            _rec("run_msf_module", "completed", detail="module returned"),
             _rec("run_python_file", "executed", exit_code=1, detail="Traceback"),
             _rec("quick_scan", "completed", detail="open ports: 22,80"),
         ],
+        "outcome_summary": "compromises: 1; last outcome: compromise; privilege: root",
     }
     campaign = _build_campaign_result_from_records(result, "10.0.0.50")
     assert campaign is not None
     state = campaign["states"]["10.0.0.50"]
-    # No verified compromise in outcome_summary -> no successful_exploits, even
-    # though two exploit actions completed.
     assert state["successful_exploits"] == []
-    # Recon tools never count as exploits even on success.
-    assert "quick_scan" not in state["successful_exploits"]
-    # Non-zero exit goes to failed_attempts.
+    assert state["exploit_probes"] == {}
+    assert state["privilege_level"] == "none"
     assert "run_python_file" in state["failed_attempts"]
-    # Timeline carries every record.
     assert len(state["timeline"]) == 4
 
-    # WITH a verified outcome_summary -> completed exploits ARE successful.
-    result_verified = {
+
+def test_verified_action_owns_its_success_privilege_and_retest_probe():
+    """Only a row carrying classifier evidence supplies its success and probe."""
+    result = {
         "records": [
-            _rec("run_exploit_terminal", "completed", detail="whoami; id"),
-            _rec("run_msf_module", "completed", detail="meterpreter session 1 opened"),
+            _rec(
+                "run_exploit_terminal",
+                "completed",
+                command="unrelated first attempt",
+                detail="unknown result",
+            ),
+            _rec(
+                "run_exploit_terminal",
+                "executed",
+                command="verified exploit command",
+                detail="uid=0(root)",
+                exploit_outcome="compromise",
+                outcome_evidence=["shell:uid=0\\("],
+                privilege_level="root",
+            ),
+            _rec(
+                "run_msf_module",
+                "completed",
+                command="unverified module command",
+                detail="module returned",
+            ),
             _rec("run_python_file", "executed", exit_code=1, detail="Traceback"),
             _rec("quick_scan", "completed", detail="open ports: 22,80"),
         ],
-        "outcome_summary": "compromises: 1; last outcome: compromise",
+        # The aggregate summary deliberately disagrees with the row metadata;
+        # action-local evidence is the authority for attribution.
+        "outcome_summary": "compromises: 1; privilege: SYSTEM",
     }
-    campaign_v = _build_campaign_result_from_records(result_verified, "10.0.0.50")
-    assert campaign_v is not None
-    state_v = campaign_v["states"]["10.0.0.50"]
-    # Now the completed exploit actions count as successful.
-    assert "run_exploit_terminal" in state_v["successful_exploits"]
-    assert "run_msf_module" in state_v["successful_exploits"]
-    # Recon tools still never count as exploits.
-    assert "quick_scan" not in state_v["successful_exploits"]
-    # Non-zero exit still goes to failed_attempts.
-    assert "run_python_file" in state_v["failed_attempts"]
+    campaign = _build_campaign_result_from_records(result, "10.0.0.50")
+    assert campaign is not None
+    state = campaign["states"]["10.0.0.50"]
+    assert state["successful_exploits"] == ["run_exploit_terminal"]
+    assert state["exploit_probes"] == {
+        "run_exploit_terminal": {"type": "shell_command", "exec": "verified exploit command"}
+    }
+    assert state["privilege_level"] == "root"
+    assert "run_python_file" in state["failed_attempts"]
+    assert "quick_scan" not in state["successful_exploits"]
 
 
 def test_build_campaign_result_blocked_records_go_to_failed():
@@ -94,10 +120,19 @@ def test_build_campaign_result_blocked_records_go_to_failed():
     assert "run_exploit_terminal" in state["failed_attempts"]
 
 
-def test_build_campaign_result_derives_privilege_level_from_summary():
+def test_build_campaign_result_uses_per_action_privilege_evidence():
     result = {
-        "records": [_rec("run_exploit_terminal", "completed", detail="uid=0(root) gid=0(root)")],
-        "outcome_summary": "compromises: 1; last outcome: compromise; privilege: root",
+        "records": [
+            _rec(
+                "run_exploit_terminal",
+                "completed",
+                detail="uid=0(root) gid=0(root)",
+                exploit_outcome="compromise",
+                outcome_evidence=["shell:uid=0\\("],
+                privilege_level="root",
+            )
+        ],
+        "outcome_summary": "compromises: 1; last outcome: compromise; privilege: SYSTEM",
     }
     campaign = _build_campaign_result_from_records(result, "10.0.0.50")
     assert campaign is not None
@@ -109,7 +144,14 @@ def test_enhanced_report_generator_produces_chain_from_flow_a_records(tmp_path: 
     """End-to-end: records → helper → EnhancedReportGenerator → JSON with a chain."""
     result = {
         "records": [
-            _rec("run_exploit_terminal", "completed", detail="reverse shell: uid=0(root)"),
+            _rec(
+                "run_exploit_terminal",
+                "completed",
+                detail="reverse shell: uid=0(root)",
+                exploit_outcome="compromise",
+                outcome_evidence=["shell:uid=0\\("],
+                privilege_level="root",
+            ),
             _rec("run_msf_module", "completed", detail="meterpreter session 1"),
         ],
         "outcome_summary": "compromises: 1; privilege: root",
@@ -129,7 +171,8 @@ def test_enhanced_report_generator_produces_chain_from_flow_a_records(tmp_path: 
     assert chain["target"] == "10.0.0.50"
     assert chain["successful"] is True
     assert chain["final_privilege"] == "root"
-    assert len(chain["entries"]) == 2
+    assert len(chain["entries"]) == 1
+    assert chain["entries"][0]["module"] == "run_exploit_terminal"
     # Stable-name copy: the WebUI fetches /artifacts/enhanced/enhanced_report.json
     stable = tmp_path / "reports" / "enhanced" / "enhanced_report.json"
     stable.write_bytes(json_path.read_bytes())

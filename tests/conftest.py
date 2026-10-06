@@ -9,11 +9,30 @@ fixtures are opt-in, never breaking.
 from __future__ import annotations
 
 import os
+from contextlib import ExitStack
 from unittest.mock import AsyncMock, MagicMock, Mock
 
 import pytest
 
 from tools.api.event_broker import _reset_plugin_dispatcher
+
+
+@pytest.fixture(autouse=True)
+def _api_file_test_client_lifespans(request, monkeypatch):
+    """Enter API TestClient lifespans in every module using the shared helper."""
+    if request.module.__name__ not in {"tests.test_api_frontend", "tests.test_api_file_resources"}:
+        yield
+        return
+    from tests import test_api_frontend
+
+    client_type = test_api_frontend.TestClient
+    with ExitStack() as clients:
+        monkeypatch.setattr(
+            test_api_frontend,
+            "TestClient",
+            lambda app: clients.enter_context(client_type(app)),
+        )
+        yield
 
 
 def pytest_xdist_auto_num_workers(config):  # type: ignore[no-untyped-def]
@@ -59,7 +78,7 @@ _tracked_clients: _weakref.WeakSet = _weakref.WeakSet()  # type: ignore[var-anno
 
 
 @pytest.fixture(autouse=True)
-def _close_leaked_test_clients(monkeypatch):
+def _close_leaked_test_clients(monkeypatch, _shutdown_leaked_run_managers):
     """Auto-close any TestClient created during the test (even if test forgets)."""
     try:
         from fastapi.testclient import TestClient as _FastAPIClient
@@ -84,7 +103,13 @@ def _close_leaked_test_clients(monkeypatch):
     yield
     for c in list(_tracked_clients):
         try:
-            c.close()  # type: ignore[attr-defined]
+            # TestClient.close() closes only the HTTP transport. When a test
+            # entered the client context, __exit__ is required to run the app
+            # lifespan shutdown on its owning portal before manager cleanup.
+            if getattr(c, "exit_stack", None) is not None:
+                c.__exit__(None, None, None)  # type: ignore[attr-defined]
+            else:
+                c.close()  # type: ignore[attr-defined]
         except Exception:
             pass
     _tracked_clients.clear()

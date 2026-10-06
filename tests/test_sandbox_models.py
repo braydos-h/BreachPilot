@@ -2,7 +2,7 @@
 
 Security invariants covered:
 - Missing ``sandbox`` section => CONTAINED defaults (never silent host mode;
-  only explicit ``enabled: false`` opts out).
+  disabling containment is rejected).
 - Present-but-partial section => fail-closed defaults (enforce, fail_closed,
   read_only_rootfs), never silently uncontained.
 - Garbage values fall back to safe defaults instead of crashing.
@@ -10,6 +10,8 @@ Security invariants covered:
 """
 
 from __future__ import annotations
+
+import pytest
 
 from tools.sandbox.models import SandboxConfig
 
@@ -24,8 +26,13 @@ class TestSandboxConfigFromConfig:
     def test_none_config_means_contained(self):
         assert SandboxConfig.from_config(None).enabled is True
 
-    def test_explicit_disabled_stays_disabled(self):
-        assert SandboxConfig.from_config({"sandbox": {"enabled": False}}).enabled is False
+    def test_explicit_disabled_is_rejected(self):
+        with pytest.raises(ValueError, match="sandbox.enabled=false is unsafe"):
+            SandboxConfig.from_config({"sandbox": {"enabled": False}})
+
+    def test_native_fallback_is_rejected(self):
+        with pytest.raises(ValueError, match="sandbox.fallback_native is unsupported"):
+            SandboxConfig.from_config({"sandbox": {"enabled": True, "fallback_native": True}})
 
     def test_enabled_section_parses(self):
         cfg = SandboxConfig.from_config(
@@ -101,20 +108,34 @@ class TestSandboxConfigFromConfig:
         assert cfg.allow_dns == "controlled"
         assert cfg.remove_on_exit is True
 
-    def test_enforce_false_is_explicit_only(self):
-        cfg = SandboxConfig.from_config({"sandbox": {"enabled": True, "network": {"enforce": False}}})
-        assert cfg.network_enforce is False  # honored, but must be explicit
-        assert cfg.network_fail_closed is True
+    @pytest.mark.parametrize("cidr", ["0.0.0.0/0", "::/0"])
+    def test_extra_allow_cidr_cannot_disable_target_lock(self, cidr):
+        with pytest.raises(ValueError, match="authorizes all destinations"):
+            SandboxConfig.from_config({"sandbox": {"network": {"extra_allow_cidrs": [cidr]}}})
 
-    def test_fail_closed_false_is_explicit_only(self):
-        # Wired flag (manager._apply_policy): explicit false degrades
-        # firewall-install failures to bridge-isolation-only + WARNING/audit
-        # instead of blocking; absent/garbage stays fail-closed true.
-        cfg = SandboxConfig.from_config({"sandbox": {"enabled": True, "network": {"fail_closed": False}}})
-        assert cfg.network_fail_closed is False
+    def test_disabling_network_enforcement_is_rejected(self):
+        with pytest.raises(ValueError, match="network.enforce=false is unsafe"):
+            SandboxConfig.from_config({"sandbox": {"enabled": True, "network": {"enforce": False}}})
+
+    def test_disabling_fail_closed_behavior_is_rejected(self):
+        with pytest.raises(ValueError, match="network.fail_closed=false is unsafe"):
+            SandboxConfig.from_config({"sandbox": {"enabled": True, "network": {"fail_closed": False}}})
         assert SandboxConfig.from_config({"sandbox": {"enabled": True}}).network_fail_closed is True
         garbage = SandboxConfig.from_config({"sandbox": {"enabled": True, "network": {"fail_closed": "sometimes"}}})
         assert garbage.network_fail_closed is True
+
+    def test_raw_packet_capability_is_rejected(self):
+        with pytest.raises(ValueError, match="multi_net_raw=true is unsafe"):
+            SandboxConfig.from_config({"sandbox": {"enabled": True, "multi_net_raw": True}})
+        with pytest.raises(ValueError, match="NET_RAW is disabled"):
+            SandboxConfig(
+                enabled=True,
+                backend="docker",
+                image="breachpilot-sandbox:latest",
+                user="sandbox",
+                read_only_rootfs=True,
+                multi_net_raw=True,
+            )
 
     def test_config_schema_default_is_enabled(self):
         # The shipped default (CONFIG_SCHEMA + config.yaml) enables the sandbox
@@ -126,6 +147,7 @@ class TestSandboxConfigFromConfig:
         assert sec.get("network", {}).get("enforce") is True
         assert sec.get("network", {}).get("fail_closed") is True
         assert sec.get("network", {}).get("map_host_loopback") is False
+        assert sec.get("multi_net_raw") is False
 
     def test_config_yaml_and_schema_stay_in_sync(self):
         import yaml

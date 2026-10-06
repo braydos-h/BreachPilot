@@ -21,15 +21,15 @@ from tools.eval_harness import FlagCheckResult, verify_flag_check
 from tools.exploit_agent.outcome_truth import ActionResult, ExploitOutcome, OperationalStatus, normalize_action_result
 
 
-def test_oracle_flag_via_shell_command_with_session(tmp_path: Path):
-    # shell_command executed via fake session → verifies flag
+def test_oracle_flag_via_explicit_target_shell_executor(tmp_path: Path):
+    # Only the dedicated target-bound seam can verify shell command output.
     sentinel = "FLAG_ORACLE_123"
 
-    def fake_session(tool_name: str, args: dict):
-        assert tool_name == "run_exploit_terminal"
+    def fake_target_shell(command: str):
+        assert command == f"cat /flag && echo {sentinel}"
         return {"output": f"flag content: {sentinel}\nuid=0"}
 
-    executor = default_check_executor(session=fake_session, workspace=None, loop=None)
+    executor = default_check_executor(target_shell_executor=fake_target_shell, workspace=None, loop=None)
     passed, detail = executor(
         {"type": "shell_command", "exec": f"cat /flag && echo {sentinel}", "expect_stdout": sentinel}
     )
@@ -84,9 +84,23 @@ def test_evidence_quality_gate_on_verified_success():
     weak = normalize_action_result(tool_name="run_exploit_terminal", result_text="No meterpreter session was created")
     strong = normalize_action_result(tool_name="run_exploit_terminal", result_text="meterpreter session 1 opened")
     assert weak.verified_success is False
-    assert strong.verified_success is True
-    # Findings should be created only on verified_success, not on bare claim
-    assert weak.verified_success is False  # not a finding
+    assert strong.verified_success is False
+    assert strong.exploit_outcome == "unverified_claim"
+
+
+def test_oracle_does_not_treat_mcp_session_output_as_target_execution():
+    calls = []
+
+    def sandbox_session(tool_name: str, arguments: dict):
+        calls.append((tool_name, arguments))
+        return {"output": "FLAG_ORACLE_123"}
+
+    executor = default_check_executor(session=sandbox_session)
+    passed, detail = executor({"type": "shell_command", "exec": "id", "expect_stdout": "0"})
+
+    assert passed is False
+    assert "UNVERIFIED" in detail
+    assert calls == []
 
 
 def test_authentication_oracle_via_http_login_structure():

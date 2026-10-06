@@ -2,7 +2,7 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter } from "react-router-dom";
+import { createMemoryRouter, Route, Routes, RouterProvider } from "react-router-dom";
 import { SettingsPage } from "@/features/settings/SettingsPage";
 
 vi.mock("@/api/hooks", () => ({
@@ -156,12 +156,22 @@ function setup() {
   defaultModelMock.mockReturnValue("glm");
 
   const user = userEvent.setup();
-  render(
-    <MemoryRouter>
-      <SettingsPage />
-    </MemoryRouter>,
+  const router = createMemoryRouter(
+    [
+      {
+        path: "*",
+        element: (
+          <Routes>
+            <Route path="/system" element={<SettingsPage />} />
+            <Route path="/runs" element={<h1>Runs page</h1>} />
+          </Routes>
+        ),
+      },
+    ],
+    { initialEntries: ["/system"] },
   );
-  return { user };
+  render(<RouterProvider router={router} />);
+  return { user, router };
 }
 
 async function goTo(user: ReturnType<typeof userEvent.setup>, name: string) {
@@ -232,6 +242,40 @@ describe("SettingsPage", () => {
     await user.click(screen.getByRole("button", { name: "Save changes" }));
     expect(mutate).toHaveBeenCalledTimes(1);
     expect(mutate.mock.calls[0]![0]).toEqual({ api: { max_concurrent_runs: 5 } });
+  });
+
+  it("blocks leaving with unsaved changes and offers accessible stay or discard actions", async () => {
+    const { user, router } = setup();
+    const input = screen.getByLabelText("Simultaneous assessments");
+    await user.clear(input);
+    await user.type(input, "5");
+
+    await router.navigate("/runs");
+    const dialog = await screen.findByRole("dialog", { name: "Discard unsaved settings?" });
+    expect(dialog).toHaveTextContent("Stay here to keep editing");
+    expect(router.state.location.pathname).toBe("/system");
+
+    await user.click(within(dialog).getByRole("button", { name: "Stay on settings" }));
+    expect(screen.getByText("1 unsaved change")).toBeInTheDocument();
+    expect(router.state.location.pathname).toBe("/system");
+
+    await router.navigate("/runs");
+    const discardDialog = await screen.findByRole("dialog", { name: "Discard unsaved settings?" });
+    await user.click(within(discardDialog).getByRole("button", { name: "Discard changes and leave" }));
+
+    expect(await screen.findByRole("heading", { name: "Runs page" })).toBeInTheDocument();
+    expect(screen.queryByText("1 unsaved change")).not.toBeInTheDocument();
+  });
+
+  it("prompts before closing or refreshing while the settings draft is dirty", async () => {
+    const { user } = setup();
+    const input = screen.getByLabelText("Simultaneous assessments");
+    await user.clear(input);
+    await user.type(input, "5");
+
+    const event = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(event);
+    expect(event.defaultPrevented).toBe(true);
   });
 
   it("consolidates provider status, default model, and secrets under AI & Models", async () => {

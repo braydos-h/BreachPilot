@@ -99,6 +99,13 @@ include = ["tools*", "legacy*", "skills*"]
 skills = ["**/*"]
 tools = ["mitre_technique_map.json"]
 
+# The WebUI source is built by Node in package/release workflows. Install the
+# generated SPA beneath the environment data prefix; tools.paths resolves it
+# for normal and user installs without a repository checkout.
+[tool.setuptools.data-files]
+"webui/dist" = ["webui/dist/index.html"]
+"webui/dist/assets" = ["webui/dist/assets/*"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"

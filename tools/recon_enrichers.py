@@ -21,15 +21,16 @@ responsible for routing through ``require_allowlist``. These are pure helpers.
 
 from __future__ import annotations
 
+import ipaddress
 import json
 import re
-import urllib.error
-import urllib.request
 from collections import deque
 from html.parser import HTMLParser
 from typing import Callable, Optional
+from urllib.parse import urlsplit
 
 from tools.opsec import process_user_agent
+from tools.research.http_fetch import FetchPolicy, fetch_response
 
 # ---------------------------------------------------------------------------
 # Internal helpers
@@ -580,16 +581,30 @@ def _detect_technologies(body: str, status: int) -> list[str]:
     return techs
 
 
-def _default_fetch(url: str) -> tuple[int, str]:
-    """Real-network fetch via urllib. Only invoked when fetch_fn is None."""
-    req = urllib.request.Request(url, headers={"User-Agent": process_user_agent("BreachPilot-recon-spider/1.0")})
+def _default_fetch(
+    url: str,
+    *,
+    pin_cache: dict[tuple[str, int], tuple[tuple[int, str], ...]] | None = None,
+    allow_local_fetch: bool = False,
+) -> tuple[int, str]:
+    """Fetch one target response with a pinned address and no redirect follow."""
     try:
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            status = getattr(resp, "status", resp.getcode())
-            body = resp.read().decode("utf-8", errors="replace")
-            return int(status), body
-    except urllib.error.HTTPError as e:
-        return int(e.code), ""
+        host = urlsplit(url).hostname
+        if not host:
+            return 0, ""
+        status, _headers, body, _clean_url = fetch_response(
+            url,
+            policy=FetchPolicy(allow_local_fetch=allow_local_fetch, allowed_domains=(host,)),
+            timeout=10,
+            user_agent=process_user_agent("BreachPilot-recon-spider/1.0"),
+            max_bytes=2_000_000,
+            pin_cache=pin_cache,
+        )
+        # Redirects are returned as evidence but never followed. Their bodies
+        # are excluded so an error page cannot enqueue misleading links.
+        if 300 <= status < 400:
+            return int(status), ""
+        return int(status), body.decode("utf-8", errors="replace")
     except Exception:
         return 0, ""
 
@@ -616,7 +631,16 @@ def http_spider(
     ``target_ip:port``; off-site absolute links are recorded but never
     fetched.
     """
-    base_url = f"{scheme}://{target_ip}:{port}"
+    target_url_host = target_ip
+    allow_local_fetch = False
+    try:
+        parsed_target = ipaddress.ip_address(target_ip.strip("[]"))
+        allow_local_fetch = True
+        if parsed_target.version == 6 and not target_ip.startswith("["):
+            target_url_host = f"[{target_ip}]"
+    except ValueError:
+        pass
+    base_url = f"{scheme}://{target_url_host}:{port}"
     result = {
         "target_ip": target_ip,
         "port": port,
@@ -637,7 +661,17 @@ def http_spider(
         if max_pages is None or max_pages <= 0:
             max_pages = 20
 
-        fetch = fetch_fn if fetch_fn is not None else _default_fetch
+        if fetch_fn is not None:
+            fetch = fetch_fn
+        else:
+            pins: dict[tuple[str, int], tuple[tuple[int, str], ...]] = {}
+
+            def fetch(current_url: str) -> tuple[int, str]:
+                return _default_fetch(
+                    current_url,
+                    pin_cache=pins,
+                    allow_local_fetch=allow_local_fetch,
+                )
 
         start_path = "/"
         visited: set[str] = set()

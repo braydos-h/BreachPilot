@@ -1,13 +1,15 @@
 # Run Service & API Layer — Architecture
 
-The run service (`tools/run_service/`) is the transport-neutral engine the CLI
-and the WebUI API daemon share; the API layer (`tools/api/`) is the
+The run service (`tools/run_service/`) shares preparation and execution code
+between the CLI and the WebUI API daemon; the API layer (`tools/api/`) is the
 loopback-only REST + WebSocket gateway that lets the WebUI drive that engine.
 `main.async_main` (CLI) and `RunManager` (API) both build an
-`AssessmentService`, but supply different providers: the CLI adapters are
-backed by `AttackUi` questionary prompts, the API adapters by persisted
-decision rows + WebSocket event pushes. The service never knows which one is
-calling.
+`AssessmentService` and supply different decision, event, and approval
+providers. Those providers route operator decisions and structured events, but
+the service also calls the process-wide `AttackUi` directly for status,
+progress, errors, and completion output (`prepare.py`, `execute.py`, and
+`tasks.py`). API runs can therefore write terminal output as well as API
+events; not every user-visible message is delivered through the API event sink.
 
 - **HTTP surface:** see [docs/api.md](api.md) for full endpoint reference.
 - **Daemon entry:** `app.py` (ASGI factory at repo root) → `tools/api/`.
@@ -52,7 +54,7 @@ calling.
 | `tools/api/run_manager.py` | `RunManager` + `RunHandle`: single-active-run owner, task lifecycle, MCP session handle, tool-call serialization (`run_manager.py:49-417`) |
 | `tools/api/session_titler.py` | AI session titles via `gemma4:31b-cloud` (best-effort) (`session_titler.py:92-155`) |
 | `tools/api/routes/__init__.py` | Route package marker |
-| `tools/api/routes/system.py` | `/health`, `/capabilities`, `/config`, `/secrets`, `/models`, `/plugins`, `/skills`, `/goals`, `/diagnostics` (`system.py:49-529`) |
+| `tools/api/routes/system/` | System/admin route package; `__init__.py` composes `core.py`, `config.py`, `models.py`, `diagnostics.py`, `goals.py`, and `skills.py` under `/api/v1` |
 | `tools/api/routes/runs.py` | `POST/GET /runs`, get/cancel/resume/title/tools, artifacts, audit, swarm/campaign, logs, credentials, loot, delete (`runs.py:149-616`) |
 | `tools/api/routes/decisions.py` | `GET/POST /runs/{id}/decisions[/{decision_id}]` (`decisions.py:55-92`) |
 | `tools/api/routes/events.py` | `GET /runs/{id}/events`, SSE stream, `WS /ws/v1/runs/{id}` (`events.py:65-156`) |
@@ -206,12 +208,16 @@ an `approval` event, then blocks on `broker.await_answer(decision.id)`.
 Model selection is not part of `providers.py`; it is routed through
 `tools/model_router.py` (`build_router` / `get_client`), wired by
 `AssessmentService.prepare` (`service.py:344-359`) and `execute`
-(`service.py:545-558`). The LLM backend is Ollama (cloud by default):
+(`service.py:545-558`). The active provider comes from `models.provider`:
+the checked-in config selects OpenCode Go; the schema fallback when the key is
+absent is Ollama. Ollama-specific settings apply when Ollama is selected:
 
 - `ollama.host` (default `https://api.ollama.com`) — chat/generate; the
   ollama client auto-attaches `Authorization: Bearer $OLLAMA_API_KEY`.
-- `ollama.embed_host` (default `http://localhost:11434`) — local embeddings
-  (`nomic-embed-text`); falls back to `ollama.host` when absent.
+- `ollama.embed_host` (default `http://localhost:11434`) — endpoint used by
+  the Ollama embedding provider; it falls back to `ollama.host` when absent.
+  The checked-in config selects `embeddings.provider: none`, so this endpoint
+  is not used for embeddings by default.
 - `models.registry` maps aliases → model IDs; `models.default_alias`
   (default `glm`) picks the run model; `models.info` carries labels/context
   windows (`config.yaml:15-44`).
@@ -401,12 +407,12 @@ session, runs `run_recon_assessment`, emits `recon_assessment` +
 The SPA (`webui/`, Vite + React + TypeScript) talks only to the API:
 
 - **REST client** — `webui/src/api/client.ts` wraps `fetch` under
-  `/api/v1`, attaches `Authorization: Bearer <token>` from
-  `sessionStorage` (`client.ts:8-27, 69-123`), and normalizes the error
+  `/api/v1`, attaches `Authorization: Bearer <token>` from module memory
+  (`client.ts`, `apiFetch`), and normalizes the error
   envelope into `ApiError` with `isAuth`/`isConflict`/`isNotFound` helpers
   (`client.ts:29-57, 125-159`).
-- **Token storage** — `breachpilot.apiToken.v1` in `sessionStorage`
-  (`client.ts:6`); cleared on WS `4401` auth rejection (`ws.ts:149-153`).
+- **Token storage** — the API bearer token stays in module memory and is
+  cleared on reload, sign-out, session expiry, or WS `4401` rejection.
 - **Live events** — `webui/src/api/ws.ts` `useRunEvents(runId, {after})`
   opens `WS /api/v1/ws/v1/runs/{id}` and sends `{auth, after: lastSeq}`
   (`ws.ts:101-130`); dedupes by `sequence` (`ws.ts:40-55`); reconnects with
@@ -432,9 +438,9 @@ Keys consumed by the run service / API layer (`config.yaml`, see
 | Key | Default | Used by |
 |-----|---------|---------|
 | `ollama.host` | `https://api.ollama.com` | Model chat/generate routing (`service.py:336, 546`) + titler host (`run_manager.py:275-278`) |
-| `ollama.embed_host` | `http://localhost:11434` | Local embeddings (skills/memory); falls back to `ollama.host` |
+| `ollama.embed_host` | `http://localhost:11434` | Ollama embedding endpoint when `embeddings.provider: ollama`; falls back to `ollama.host`; shipped config sets provider to `none` |
 | `ollama.api_key_env` | `OLLAMA_API_KEY` | Cloud auth (auto-attached bearer) |
-| `models.registry` / `models.default_alias` / `models.info` | `glm` | Model alias resolution + `/models` (`system.py:188-196`) |
+| `models.registry` / `models.default_alias` / `models.info` | `glm` | Model alias resolution + `/models` (`tools/api/routes/system/models.py`) |
 | `mcp.http_port` | `8001` | MCP exploit session transport port (`service.py:446, 918, 1054`) |
 | `exploit.permission` | `read_only` | Preview `permission` + `destructive` verdict (`service.py:435-450`); `full_access` auto-approves |
 | `exploit.max_rounds` / `max_commands` / `max_duration_minutes` | n/a | Preview `budgets` (`service.py:452-456`) |

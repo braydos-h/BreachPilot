@@ -62,12 +62,14 @@ def test_recon_profile_is_propose_only():
     assert merged["exploit"]["auto_post_exploit"] is False
 
 
-def test_ci_profile_is_hermetic():
+def test_ci_profile_is_hermetic_and_sandboxed():
     from tools.config.profiles import apply_profile
 
     merged = apply_profile({}, "ci")
     assert merged["models"]["auto_update"] is False
-    assert merged["sandbox"]["enabled"] is False
+    from tools.sandbox.models import SandboxConfig
+
+    assert SandboxConfig.from_config(merged).enabled is True
     assert merged["witness"]["enabled"] is False
     assert merged["multi_model"]["enabled"] is False
     assert merged["reasoning"]["ultrathink"] is False

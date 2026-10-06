@@ -8,12 +8,12 @@ escapes this module — every method translates at the boundary into
 :mod:`tools.browser.models` types.
 
 Execution topology: the backend drives Chromium through a swappable
-*launcher*. :class:`InProcessPlaywrightLauncher` runs Chromium in-process
-(host dev / legacy ``sandbox.enabled: false`` opt-out). Contained runs use
-``SandboxPlaywrightLauncher`` (``tools/browser/sandbox_launcher.py``), which
-executes one Chromium op per ``docker exec`` inside the sandbox worker netns —
-no host fallback, ever. The backend NEVER touches the target allowlist itself;
-the MCP layer + netns firewall own policy (see ``BrowserBackend`` contract).
+*launcher*. MCP target-touching tools always use ``SandboxPlaywrightLauncher``
+(``tools/browser/sandbox_launcher.py``), which executes one Chromium op per
+``docker exec`` inside the sandbox worker netns. The in-process adapter is
+retained for isolated local adapter tests and non-MCP embedding only. The
+backend NEVER touches the target allowlist itself; the MCP layer + netns
+firewall own policy (see ``BrowserBackend`` contract).
 """
 
 from __future__ import annotations

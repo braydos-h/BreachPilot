@@ -96,7 +96,7 @@ Single `Input` validated by `isValidTarget` (`lib/targetValidation.ts:80`): stri
 
 ## Review and launch (`RunReview.tsx`)
 
-Review rows (Target / Mode / Goal / Model / Execution / Skills / Observer / Recon first) each carry an `Edit` link jumping back via `onEdit(step)`. The launch button label follows the mode (`Launch Fast Run` / `Launch Attack` / `Start Recon`); attack and fast runs show their respective notice banners. `launchDisabled = isCreating || !!startup`; duplicate clicks are locked out by `submitLockRef` (released only on failure).
+Review rows (Target / Mode / Goal / Model / Execution / Skills / Observer / Recon first) each carry an `Edit` link jumping back via `onEdit(step)`. The launch button label follows the mode (`Launch Fast Run` / `Launch Attack` / `Start Recon`); attack and fast runs show their respective notice banners. Launch stays disabled while the request is in flight, startup is active, or any required preflight check is not ready. Duplicate clicks are also locked out by `submitLockRef` (released only on failure).
 
 ```ts
 // webui/src/components/run-create/RunWizard.tsx:179-200 — request shape
@@ -124,7 +124,7 @@ const buildRequest = (): RunCreateRequest => ({
 });
 ```
 
-`createTheRun` (`RunWizard.tsx:202`) posts via `useCreateRun` (`POST /runs`). If the response is already `queued` / `running` (e.g. `yes: true`), `onCreated` navigates immediately. Otherwise the wizard holds the run: `useRun(createdRunId)` polls the transition (`preparing` at 1s) and `useRunEvents` feeds the latest `preparing`-type payload into `RunStartupProgress` (`sending` → `preparing` with backend stage + message). A `failed` transition releases the lock and surfaces `runError` with retry; `queued` / `running` navigates once via `navigatedRef`.
+`createTheRun` (`RunWizard.tsx:202`) posts via `useCreateRun` (`POST /runs`). If the response is already `queued` / `running` (e.g. `yes: true`), `onCreated` navigates immediately. Otherwise the wizard holds the run: `useRun(createdRunId)` polls the transition (`preparing` at 1s) and `useRunEvents` feeds the latest `preparing`-type payload into `RunStartupProgress` (`sending` → `preparing` with backend stage + message). A status-query error displays an alert and a manual retry even when a previous `preparing` response remains cached, so the visible progress is identified as potentially stale. A `failed` transition releases the lock and surfaces `runError` with retry; `queued` / `running` navigates once via `navigatedRef`.
 
 ### Destructive confirm gate
 

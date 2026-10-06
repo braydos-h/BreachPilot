@@ -68,6 +68,16 @@ def _ok_run(*args, **kwargs):
     return subprocess.CompletedProcess(args=args, returncode=0, stdout="ok output", stderr="")
 
 
+@pytest.fixture(autouse=True)
+def _sandbox_tool_runner(monkeypatch):
+    from tests.helpers.fake_sandbox import install_fake_sandbox_tool_runner
+
+    install_fake_sandbox_tool_runner(
+        monkeypatch,
+        ("tools.mcp_tools.ad", "tools.mcp_tools.credentials", "tools.mcp_tools.payloads"),
+    )
+
+
 # ── lateral_exec ────────────────────────────────────────────────────────────
 
 
@@ -186,8 +196,8 @@ async def test_dump_credentials_sam_local_valid(monkeypatch, tmp_path: Path) -> 
     monkeypatch.setattr(subprocess, "run", _ok_run)
     mcp = _make_server(tmp_path, require_allowlist=False)
     text = _text(await mcp.call_tool("dump_credentials", {"target_ip": "10.0.0.1", "method": "sam_local"}))
-    assert "CRED_DUMP_RESULT: completed" in text
-    assert "METHOD: sam_local" in text
+    assert text.startswith("BLOCKED:")
+    assert "Host-local credential extraction is disabled" in text
 
 
 # ── dump_credentials: dcsync (DCSync via DRSUAPI) ──────────────────────────

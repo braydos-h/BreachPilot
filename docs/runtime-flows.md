@@ -1,6 +1,6 @@
 # Runtime Flows
 
-## Mission Creation Flow
+## Flow B (legacy): Mission Creation Flow
 
 ```text
 mission.yaml or CLI configuration
@@ -12,11 +12,14 @@ mission.yaml or CLI configuration
   -> workspace/evidence/report directories initialized
 ```
 
-Use this flow when changing mission schema, risk profiles, scope behavior, or CLI mission creation.
+This is the frozen Flow B workflow. Use it only when changing legacy mission
+schema or behavior; the active Flow A engine has a separate run lifecycle.
 
-## Database-Backed Research Loop
+## Flow B (legacy): Database-Backed Research Loop
 
-`agent_loop.py` is the clearest description of the original agent workflow:
+`legacy/agent_loop.py` is the canonical implementation of the frozen original
+agent workflow. Root `agent_loop.py` is a compatibility shim that delegates to
+it:
 
 ```text
 MissionController
@@ -111,8 +114,12 @@ opencode.ai (`OPENCODE_GO_API_KEY`); `provider: chatgpt` injects a `ChatGptProxy
 (`tools/providers/chatgpt_provider.py`) that POSTs to the vendored
 openai-oauth loopback proxy at `127.0.0.1:10531/v1`. All wrap into the same
 `ModelClient`/`ModelRouter` surface, so the rest of the flow is provider-agnostic.
-Embeddings stay on Ollama under either provider. See
-[docs/providers.md](providers.md).
+Embedding selection is independent of chat. The code/schema fallback is
+Ollama, but the checked-in config sets `embeddings.provider: none`; provider-
+aware Flow A memory and skill consumers then make no embedding requests and
+use their keyword/tag fallbacks. Frozen Flow B's `legacy/agent_loop.py` still
+uses the legacy Ollama semantic-memory provider when enabled, so this setting
+does not disable that path. See [docs/providers.md](providers.md).
 
 The session boot is wrapped by `tools/mcp_session.py:open_exploit_mcp_session` (async context manager emitting `[BOOT]`/`[OK]` markers); single-target orchestration is `tools/exploit_session.py:run_exploit_session`; `tools/swarm_bridge.py:SwarmMcpBridge` bridges the sync swarm `tool_executor` onto the live MCP `ClientSession`.
 

@@ -24,6 +24,7 @@ operator-authorized set).
 from __future__ import annotations
 
 import hashlib
+import ipaddress
 import json
 import re
 import shutil
@@ -31,18 +32,32 @@ import socket
 import subprocess
 import threading
 import time
-import urllib.request
 from typing import Any
 
 from tools.exceptions import _EXC_GROUP_CATCH, _log_nested_exceptions
-from tools.mcp_shared import _attempt_dir, _check_allowlist, add_discovered_target
+from tools.kernel.allowlist import _explicit_ip_allowlist_targets
+from tools.kernel.target_network import embedded_ipv4_address, is_metadata_destination, is_public_destination
+from tools.kernel.workspace import write_workspace_file
+from tools.mcp_shared import _attempt_dir, _check_allowlist, add_discovered_target, check_targets_allowlist
 from tools.mcp_tools.registry import ToolContext, _run_with_pgrp_timeout
 from tools.validation_utils import (
     is_fqdn,
     is_subdomain_of,
+    is_target_in_allowlist,
     resolve_target_bounded,
     validate_target_or_ip,
 )
+
+
+class _AxfrScopeDenied(Exception):
+    """Raised before AXFR when the resolved nameserver is outside scope."""
+
+
+def _axfr_scope_error(nameserver_ip: str, config: dict[str, Any] | None) -> str | None:
+    """Return an allowlist error for an AXFR destination, if any."""
+    allowed, reason = check_targets_allowlist([nameserver_ip], config)
+    return None if allowed else reason
+
 
 # Built-in subdomain wordlist for DNS bruteforce (reused from
 # recon_pipeline._enumerate_vhosts + common additions). ~200 prefixes.
@@ -509,8 +524,13 @@ def _stdlib_fetch(
     headers: dict[str, str] | None = None,
     data: bytes | None = None,
     max_bytes: int = 4000,
+    allowed_domains: tuple[str, ...] = (),
+    allow_local_fetch: bool = False,
 ) -> tuple[int, dict[str, str], str]:
-    """HTTP GET/POST via urllib. Returns (status, headers, body). Never raises.
+    """Fetch one DNS-pinned HTTP response without following redirects.
+
+    Returns (status, headers, body). Private destinations are blocked unless
+    the caller explicitly supplies an already allowlisted target host.
 
     ``max_bytes`` caps the response body read (default 4000 -- fine for most
     probe responses). Callers fetching large JSON payloads (e.g. crt.sh CT
@@ -518,19 +538,18 @@ def _stdlib_fetch(
     or the body is truncated mid-stream and JSON parsing silently fails.
     """
     try:
-        hdrs = {"User-Agent": "BreachPilot-DomainRecon/1.0"}
-        if headers:
-            hdrs.update(headers)
-        req = urllib.request.Request(url, headers=hdrs, data=data)
-        with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310 - passive recon
-            body = resp.read(max_bytes).decode(errors="replace")
-            return resp.status, dict(resp.headers.items()), body
-    except urllib.error.HTTPError as e:
-        try:
-            body = e.read(min(2000, max_bytes)).decode(errors="replace")
-        except Exception:  # ponytail: bare except intentional
-            body = ""
-        return e.code, dict(e.headers.items()) if e.headers else {}, body
+        from tools.research.http_fetch import FetchPolicy, fetch_response
+
+        status, response_headers, body, _final_url = fetch_response(
+            url,
+            policy=FetchPolicy(allow_local_fetch=allow_local_fetch, allowed_domains=allowed_domains),
+            timeout=float(timeout),
+            user_agent="BreachPilot-DomainRecon/1.0",
+            max_bytes=max_bytes,
+            headers=headers,
+            data=data,
+        )
+        return status, response_headers, body.decode(errors="replace")
     except Exception:  # ponytail: bare except intentional
         return 0, {}, ""
 
@@ -708,6 +727,7 @@ def register_domain_tools(mcp: Any, *, ctx: ToolContext) -> None:
                 f"https://crt.sh/?q=%25.{dom}&output=json",
                 timeout=20,
                 max_bytes=5_000_000,
+                allowed_domains=("crt.sh",),
             )
             if status == 200 and body:
                 try:
@@ -845,6 +865,7 @@ def register_domain_tools(mcp: Any, *, ctx: ToolContext) -> None:
                                     _status, _hdr, body = _stdlib_fetch(
                                         f"{probe_scheme}://{sub}/",
                                         timeout=8,
+                                        allowed_domains=(dom,),
                                     )
                                     if _status and body:
                                         body_lower = body.lower()
@@ -1011,6 +1032,9 @@ def register_domain_tools(mcp: Any, *, ctx: ToolContext) -> None:
                 try:
                     ns_a = resolver.resolve(ns_name, "A")
                     ns_ip = str(ns_a[0].to_text())
+                    scope_error = _axfr_scope_error(ns_ip, config)
+                    if scope_error:
+                        raise _AxfrScopeDenied(scope_error)
                     # dnspython 2.x moved xfr() to dns.xfr.xfr(); 1.x had it on
                     # dns.query.xfr. Resolve the callable defensively.
                     xfr_fn = getattr(dns.xfr, "xfr", None) or dns.query.xfr
@@ -1023,6 +1047,8 @@ def register_domain_tools(mcp: Any, *, ctx: ToolContext) -> None:
                                 zone_records.append(f"{name}.{dom} {rdtype} {rdata.to_text()}")
                     axfr_result = f"AXFR_SUCCESS: {len(zone_records)} records from {ns_ip}"
                     records["AXFR"] = zone_records[:200]  # cap for display
+                except _AxfrScopeDenied as exc:
+                    axfr_result = f"AXFR_BLOCKED: nameserver {ns_name} is outside the explicit allowlist ({exc})"
                 except dns.exception.FormError:
                     axfr_result = "AXFR_REFUSED: server refused zone transfer"
                 except Exception as e:  # ponytail: bare except intentional
@@ -1070,9 +1096,13 @@ def register_domain_tools(mcp: Any, *, ctx: ToolContext) -> None:
                 lines.append(f"  {r}")
 
         # Persist the full result for the audit trail.
-        attempt_dir, attempt_id = _attempt_dir(workspace)
+        _, attempt_id = _attempt_dir(workspace)
         try:
-            (attempt_dir / "dns_recon.json").write_text(json.dumps(records, indent=2, default=str), encoding="utf-8")
+            write_workspace_file(
+                workspace,
+                f"{attempt_id}/dns_recon.json",
+                json.dumps(records, indent=2, default=str).encode("utf-8"),
+            )
         except OSError:
             pass
 
@@ -1140,7 +1170,22 @@ def register_domain_tools(mcp: Any, *, ctx: ToolContext) -> None:
             return f"ERROR: {dom!r} is not a valid domain."
 
         scheme = "https" if port in (443, 8443) else "http"
-        base_url = f"{scheme}://{target_ip}:{port}/"
+        target_host = target_ip.strip().strip("[]")
+        try:
+            parsed_target_ip = ipaddress.ip_address(target_host)
+        except ValueError:
+            parsed_target_ip = None
+        allow_local_fetch = False
+        if parsed_target_ip is not None:
+            policy_address = embedded_ipv4_address(parsed_target_ip) or parsed_target_ip
+            if is_metadata_destination(parsed_target_ip):
+                return "BLOCKED: metadata and link-local destinations are not allowed."
+            if not is_public_destination(parsed_target_ip):
+                if not is_target_in_allowlist(str(policy_address), _explicit_ip_allowlist_targets(config)):
+                    return "BLOCKED: a non-public virtual-host target requires an explicit IP or CIDR allowlist entry."
+                allow_local_fetch = True
+        url_host = f"[{target_host}]" if isinstance(parsed_target_ip, ipaddress.IPv6Address) else target_host
+        base_url = f"{scheme}://{url_host}:{port}/"
 
         words = [
             "www",
@@ -1197,14 +1242,27 @@ def register_domain_tools(mcp: Any, *, ctx: ToolContext) -> None:
         per_probe = 10
 
         # Baseline request with the default Host (the target_ip itself).
-        _b_status, _b_hdr, base_body = _stdlib_fetch(base_url, timeout=per_probe)
+        _b_status, _b_hdr, base_body = _stdlib_fetch(
+            base_url,
+            timeout=per_probe,
+            allowed_domains=(target_ip,),
+            # Private literals are allowed only after their own explicit
+            # IP/CIDR grant; hostname lookups remain public-only and pinned.
+            allow_local_fetch=allow_local_fetch,
+        )
         base_len = len(base_body)
         base_hash = hashlib.sha256(base_body.encode(errors="replace")).hexdigest()[:12]
 
         found: list[dict[str, Any]] = []
         for w in words:
             host = f"{w}.{dom}"
-            s, _h, body = _stdlib_fetch(base_url, timeout=per_probe, headers={"Host": host})
+            s, _h, body = _stdlib_fetch(
+                base_url,
+                timeout=per_probe,
+                headers={"Host": host},
+                allowed_domains=(target_ip,),
+                allow_local_fetch=allow_local_fetch,
+            )
             if s and s not in (404,):
                 body_hash = hashlib.sha256(body.encode(errors="replace")).hexdigest()[:12]
                 # Flag a vhost if the body differs from baseline by length OR

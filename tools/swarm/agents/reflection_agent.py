@@ -21,7 +21,7 @@ from tools.swarm.base import Agent, AgentResult, AgentStatus
 from tools.swarm.bb_compat import bb_extend, bb_remove, bb_set
 
 # Structured failure taxonomy -> reflection prompt label. The reflection
-# system prompt already names the nine root-cause categories (TOOL_MISMATCH,
+# system prompt already names the root-cause categories (TOOL_MISMATCH,
 # PROTOCOL_ERROR, ...); this maps a known ``FailureClass`` from a battle-log
 # entry onto the prompt's vocabulary so the LLM reflection can name a
 # structured class when one is already known instead of re-deriving it from
@@ -42,6 +42,7 @@ _FAILURE_CLASS_TO_REFLECTION_LABEL: dict[FailureClass, str] = {
     FailureClass.SCHEMA_ERROR: "PROTOCOL_ERROR",
     FailureClass.FALSE_POSITIVE: "PATCHED",
     FailureClass.INSUFFICIENT_EVIDENCE: "TOOL_MISMATCH",
+    FailureClass.OUTCOME_UNKNOWN: "OPERATOR_REVIEW",
 }
 
 
@@ -115,6 +116,7 @@ DEEP REFLECTION METHODOLOGY:
      NETWORK_ISSUE: Timeout, DNS failure, routing problem
      TOOL_MISSING: Required tool not installed in environment
      RATE_LIMITED: Target is throttling or blocking our requests
+     OPERATOR_REVIEW: An action may have completed after timeout; inspect its state before retrying
    - Count failures by category to identify systemic issues
 3. PATTERN RECOGNITION:
    - Time-based: Are failures increasing over time? (target may be adapting/blocking)
@@ -451,7 +453,7 @@ CURRENT STATE:
 
 Analyze:
 1. What patterns do you see in successes and failures?
-2. What is the ROOT CAUSE of failures (not just symptoms)? Categorize: TOOL_MISMATCH, PROTOCOL_ERROR, FIREWALL_BLOCK, PATCHED, WRONG_VERSION, AUTH_REQUIRED, NETWORK_ISSUE, TOOL_MISSING, RATE_LIMITED.
+2. What is the ROOT CAUSE of failures (not just symptoms)? Categorize: TOOL_MISMATCH, PROTOCOL_ERROR, FIREWALL_BLOCK, PATCHED, WRONG_VERSION, AUTH_REQUIRED, NETWORK_ISSUE, TOOL_MISSING, RATE_LIMITED, OPERATOR_REVIEW.
 3. What should we do DIFFERENTLY? (reference the strategy thresholds: ACCELERATE >70% success, CONTINUE 30-70%, PIVOT_SERVICE <30%, EXPAND_RECON <10%)
 4. What is the single highest-impact next action? Keep the remaining budget in mind.
 

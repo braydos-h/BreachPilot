@@ -1,20 +1,28 @@
 name: Release
 
-# 0.69 beta gate (#80): runs on tags. The gate script decides GO/NO-GO;
-# NOTHING publishes on NO-GO. SBOMs + attestations cover #42/#43; digest
-# recording covers #44; the image build feeds #55.
+# 0.69 beta gate (#80): versioned release assets publish only after GO.
+# Scheduled sandbox-image refreshes are an independent nightly channel.
 
 on:
   push:
     tags:
       - "v*"
   workflow_dispatch:
+    inputs:
+      eval_run_id:
+        description: Successful scheduled Eval workflow run ID (defaults to latest scheduled run on main)
+        required: false
+        type: string
+      sandbox_run_id:
+        description: Successful scheduled Sandbox image workflow run ID (defaults to latest scheduled run on main)
+        required: false
+        type: string
 
 permissions:
-  contents: write
-  id-token: write
-  attestations: write
-  packages: write
+  contents: read
+  actions: read
+  checks: read
+  packages: read
 
 jobs:
   gate:
@@ -23,8 +31,40 @@ jobs:
     timeout-minutes: 25
     outputs:
       verdict: ${{ steps.gate.outputs.verdict }}
+      sandbox_base_image_ref: ${{ steps.verify-images.outputs.base_image_ref }}
+      sandbox_browser_image_ref: ${{ steps.verify-images.outputs.browser_image_ref }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 0
+      - name: Require main ancestry and CI success for release SHA
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git fetch --no-tags origin refs/heads/main
+          git merge-base --is-ancestor "$GITHUB_SHA" FETCH_HEAD || {
+            echo "Release commit is not reachable from protected main." >&2
+            exit 1
+          }
+          gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/check-runs?per_page=100" > ci-checks.json
+          python - "$GITHUB_SHA" ci-checks.json <<'PY'
+          import json
+          import sys
+          from pathlib import Path
+
+          expected_sha = sys.argv[1].lower()
+          payload = json.loads(Path(sys.argv[2]).read_text(encoding="utf-8"))
+          checks = payload.get("check_runs", [])
+          passed = any(
+              check.get("name") == "CI success"
+              and check.get("conclusion") == "success"
+              and check.get("check_suite", {}).get("head_sha", "").lower() == expected_sha
+              for check in checks
+          )
+          if not passed:
+              raise SystemExit(f"No successful CI success check is attached to release SHA {expected_sha}.")
+          print(f"Protected-main ancestry and CI success verified for {expected_sha}.")
+          PY
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: "3.12"
@@ -37,25 +77,96 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -c constraints-dev.txt -e ".[dev]"
-      - name: Download eval artifacts (if published by eval workflow)
-        uses: actions/download-artifact@9bc31d15879fc494a8df7709958926c1703ff3c2 # v4
-        continue-on-error: true
-        with:
-          name: eval-artifacts
-          path: eval-artifacts
-      - name: Download sandbox digests (if published by sandbox-image workflow)
-        uses: actions/download-artifact@9bc31d15879fc494a8df7709958926c1703ff3c2 # v4
-        continue-on-error: true
-        with:
-          name: sandbox-digests
-          path: .
+      - name: Download evidence from source workflow runs
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          EVAL_RUN_ID_INPUT: ${{ inputs.eval_run_id }}
+          SANDBOX_RUN_ID_INPUT: ${{ inputs.sandbox_run_id }}
+        run: |
+          validate_source_run() {
+            local run_id="$1"
+            local workflow_path="$2"
+            [[ "$run_id" =~ ^[0-9]+$ ]] || { echo "Invalid workflow run ID: $run_id" >&2; return 1; }
+            local metadata
+            metadata="$(mktemp)"
+            gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_id" > "$metadata"
+            python scripts/validate_source_run.py "$metadata" "$workflow_path" "$GITHUB_SHA"
+            rm -f "$metadata"
+          }
+
+          eval_run_id="$EVAL_RUN_ID_INPUT"
+          if [[ -z "$eval_run_id" ]]; then
+            eval_run_id="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow eval.yml --branch main --event schedule --status success --limit 1 --json databaseId --jq '.[0].databaseId // empty')"
+          fi
+          if [[ -n "$eval_run_id" ]]; then
+            validate_source_run "$eval_run_id" ".github/workflows/eval.yml"
+            echo "Using scheduled Eval workflow run $eval_run_id"
+            gh run download "$eval_run_id" --repo "$GITHUB_REPOSITORY" --name eval-reports --dir eval-artifacts || true
+            gh run download "$eval_run_id" --repo "$GITHUB_REPOSITORY" --name benchmark-reports --dir benchmark-artifacts || true
+          else
+            echo "No successful scheduled Eval run found; live-eval gates remain external."
+          fi
+
+          sandbox_run_id="$SANDBOX_RUN_ID_INPUT"
+          if [[ -z "$sandbox_run_id" ]]; then
+            sandbox_run_id="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow sandbox-image.yml --branch main --event schedule --status success --limit 1 --json databaseId --jq '.[0].databaseId // empty')"
+          fi
+          if [[ -n "$sandbox_run_id" ]]; then
+            validate_source_run "$sandbox_run_id" ".github/workflows/sandbox-image.yml"
+            echo "Using scheduled sandbox-image workflow run $sandbox_run_id"
+            gh run download "$sandbox_run_id" --repo "$GITHUB_REPOSITORY" --name sandbox-digests --dir sandbox-artifacts || true
+          else
+            echo "No successful scheduled sandbox-image run found; image gate remains external."
+          fi
+      - name: Install cosign verifier
+        if: hashFiles('sandbox-artifacts/DIGESTS.md') != ''
+        uses: sigstore/cosign-installer@f713795cb21599bc4e5c4b58cbad1da852d7eeb9 # v3
+      - name: Verify published sandbox image signatures
+        id: verify-images
+        if: hashFiles('sandbox-artifacts/DIGESTS.md') != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          owner="${GITHUB_REPOSITORY_OWNER,,}"
+          export GHCR_OWNER="$owner"
+          python - <<'PY'
+          import os
+          import re
+          from pathlib import Path
+
+          owner = re.escape(os.environ["GHCR_OWNER"])
+          text = Path("sandbox-artifacts/DIGESTS.md").read_text(encoding="utf-8").lower()
+          pattern = re.compile(
+              rf"(?m)^\s*-\s*(base|browser):\s*`?(ghcr\.io/{owner}/breachpilot-sandbox@sha256:[0-9a-f]{{64}})`?\s*$"
+          )
+          refs: dict[str, str] = {}
+          for label, image_ref in pattern.findall(text):
+              if label in refs:
+                  raise SystemExit(f"DIGESTS.md contains duplicate {label} image refs")
+              refs[label] = image_ref
+          if set(refs) != {"base", "browser"} or len(set(refs.values())) != 2:
+              raise SystemExit("Expected unique base and browser image digests from the sandbox workflow.")
+          with Path(os.environ["GITHUB_OUTPUT"]).open("a", encoding="utf-8") as output:
+              output.write(f"base_image_ref={refs['base']}\n")
+              output.write(f"browser_image_ref={refs['browser']}\n")
+          print(f"Verified digest refs: base={refs['base']} browser={refs['browser']}")
+          PY
+          base_ref="$(sed -n 's/^base_image_ref=//p' "$GITHUB_OUTPUT")"
+          browser_ref="$(sed -n 's/^browser_image_ref=//p' "$GITHUB_OUTPUT")"
+          identity="https://github.com/${GITHUB_REPOSITORY}/.github/workflows/sandbox-image.yml@refs/heads/main"
+          for image_ref in "$base_ref" "$browser_ref"; do
+            cosign verify "$image_ref" \
+              --certificate-identity "$identity" \
+              --certificate-oidc-issuer https://token.actions.githubusercontent.com
+          done
       - name: Fetch branch ruleset (admin-applied; EXTERNAL when absent)
         continue-on-error: true
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh api repos/${{ github.repository }}/rulesets > branch-rules.json || rm -f branch-rules.json
-          ls -la branch-rules.json worker-digests.txt eval-artifacts 2>&1 || true
+          ls -la branch-rules.json eval-artifacts benchmark-artifacts sandbox-artifacts 2>&1 || true
       - name: Version truth (bump --check + tag == tree)
         run: |
           python scripts/bump-version.py --check
@@ -70,7 +181,8 @@ jobs:
         run: |
           FLAGS=""
           [ -d eval-artifacts ] && FLAGS="$FLAGS --eval-dir eval-artifacts"
-          [ -f worker-digests.txt ] && FLAGS="$FLAGS --sandbox-digest-file worker-digests.txt"
+          [ -d benchmark-artifacts ] && FLAGS="$FLAGS --benchmark-dir benchmark-artifacts"
+          [ -f sandbox-artifacts/DIGESTS.md ] && FLAGS="$FLAGS --sandbox-digest-file sandbox-artifacts/DIGESTS.md"
           [ -f branch-rules.json ] && FLAGS="$FLAGS --branch-rules-file branch-rules.json"
           echo "gate flags:$FLAGS"
           python scripts/release_gate.py $FLAGS | tee gate.txt
@@ -90,6 +202,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     needs: [gate]
+    permissions:
+      contents: write
+      packages: read
+      id-token: write
+      attestations: write
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
@@ -100,53 +217,115 @@ jobs:
             pyproject.toml
             requirements.txt
             constraints-dev.txt
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: webui/package-lock.json
       - name: Install build tools
         run: |
           python -m pip install --upgrade pip
           python -m pip install build twine cyclonedx-bom
+      - name: Build WebUI + npm SBOM
+        working-directory: webui
+        run: npm ci && npm run build && npm sbom --omit=dev --sbom-format=cyclonedx > ../sbom-webui.json
       - name: Build sdist + wheel
         run: python -m build
+      - name: Verify distributions
+        run: python -m twine check dist/*
       - name: SHA256SUMS
-        run: (cd dist && sha256sum * > SHA256SUMS && cat SHA256SUMS)
+        run: (cd dist && sha256sum * > ../SHA256SUMS) && cat SHA256SUMS
       - name: SBOM (Python, CycloneDX)
-        run: python -m cyclonedx_py environment --output-format JSON --output-file sbom-python.json
-      - name: SBOM (WebUI, npm)
-        working-directory: webui
-        run: npm ci && npm sbom --omit=dev --sbom-format=cyclonedx > ../sbom-webui.json
-      - name: Resolve sandbox base digest (#44)
-        run: docker buildx imagetools inspect debian:12-slim --format '{{json .Manifest}}' | python -c "import json,sys; print(json.load(sys.stdin).get('digest','unknown'))" | tee base-digest.txt
-      - name: Build sandbox worker image
-        run: docker build -t breachpilot-sandbox:${{ github.ref_name }} docker/sandbox
-      - name: Record worker image digest
-        run: docker image inspect --format '{{json .RepoDigests}}' breachpilot-sandbox:${{ github.ref_name }} | tee worker-digests.txt
-      - name: SBOM (sandbox image, syft)
+        run: |
+          # Inventory the installed core wheel and runtime dependencies,
+          # not the build/twine/CycloneDX tools in this runner environment.
+          python -m venv "$RUNNER_TEMP/breachpilot-runtime"
+          "$RUNNER_TEMP/breachpilot-runtime/bin/python" -m pip install -c constraints-dev.txt dist/*.whl
+          python -m cyclonedx_py environment "$RUNNER_TEMP/breachpilot-runtime/bin/python" --output-format JSON --output-file sbom-python.json
+      - name: Log in to GHCR for verified sandbox image scans
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Pull cosign-verified sandbox image digests
+        env:
+          BASE_IMAGE_REF: ${{ needs.gate.outputs.sandbox_base_image_ref }}
+          BROWSER_IMAGE_REF: ${{ needs.gate.outputs.sandbox_browser_image_ref }}
+        run: |
+          [[ "$BASE_IMAGE_REF" =~ ^ghcr\.io/[a-z0-9_.-]+/breachpilot-sandbox@sha256:[0-9a-f]{64}$ ]]
+          [[ "$BROWSER_IMAGE_REF" =~ ^ghcr\.io/[a-z0-9_.-]+/breachpilot-sandbox@sha256:[0-9a-f]{64}$ ]]
+          test "$BASE_IMAGE_REF" != "$BROWSER_IMAGE_REF"
+          docker pull "$BASE_IMAGE_REF"
+          docker pull "$BROWSER_IMAGE_REF"
+          {
+            echo "base: $BASE_IMAGE_REF"
+            echo "browser: $BROWSER_IMAGE_REF"
+          } > sandbox-image-refs.txt
+      - name: SBOM (sandbox base image, Syft)
         uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0
         with:
-          image: breachpilot-sandbox:${{ github.ref_name }}
+          image: ${{ needs.gate.outputs.sandbox_base_image_ref }}
           format: cyclonedx-json
           output-file: sbom-sandbox.json
-      - name: Scan image (Trivy, HIGH/CRITICAL fail gate)
+      - name: SBOM (sandbox browser image, Syft)
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0
+        with:
+          image: ${{ needs.gate.outputs.sandbox_browser_image_ref }}
+          format: cyclonedx-json
+          output-file: sbom-sandbox-browser.json
+      - name: Scan sandbox base image (Trivy, HIGH/CRITICAL fail gate)
         uses: aquasecurity/trivy-action@915b19bbe73b92a6cf82a1bc12b087c9a19a5fe2 # v0.28.0
         with:
-          image-ref: breachpilot-sandbox:${{ github.ref_name }}
+          image-ref: ${{ needs.gate.outputs.sandbox_base_image_ref }}
           format: sarif
-          output: trivy.sarif
+          output: trivy-sandbox-base.sarif
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+      - name: Scan sandbox browser image (Trivy, HIGH/CRITICAL fail gate)
+        uses: aquasecurity/trivy-action@915b19bbe73b92a6cf82a1bc12b087c9a19a5fe2 # v0.28.0
+        with:
+          image-ref: ${{ needs.gate.outputs.sandbox_browser_image_ref }}
+          format: sarif
+          output: trivy-sandbox-browser.sarif
           severity: HIGH,CRITICAL
           exit-code: "1"
       - name: Attest build provenance (#42)
         uses: actions/attest-build-provenance@96b4a1ef7235a096b17240c259729fdd70c83d45 # v2
         with:
-          subject-path: dist/*, sbom-python.json, sbom-webui.json, sbom-sandbox.json
+          subject-path: dist/*, sbom-python.json, sbom-webui.json, sbom-sandbox.json, sbom-sandbox-browser.json, sandbox-image-refs.txt
       - name: Freeze versioned installer (TODO 013)
+        id: freeze-installer
+        env:
+          RELEASE_REF_NAME: ${{ github.ref_name }}
         run: |
-          cp install.sh install-${{ github.ref_name }}.sh
-          cp install.ps1 install-${{ github.ref_name }}.ps1 2>/dev/null || true
-          sha256sum install-${{ github.ref_name }}.sh > install-${{ github.ref_name }}.sh.sha256
-          cat install-${{ github.ref_name }}.sh.sha256
+          set -euo pipefail
+          release_tag="$RELEASE_REF_NAME"
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            if [[ ! "$release_tag" =~ ^v[0-9]+(\.[0-9]+){2}([A-Za-z0-9.+!-]*)?$ ]]; then
+              echo "Refusing unsafe release tag: $release_tag" >&2
+              exit 1
+            fi
+          else
+            version="$(python -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')"
+            if [[ ! "$version" =~ ^[0-9]+(\.[0-9]+){2}([A-Za-z0-9.+!-]*)?$ ]]; then
+              echo "Refusing unsafe project version: $version" >&2
+              exit 1
+            fi
+            release_tag="v$version"
+          fi
+          installer_prefix="install-$release_tag"
+          cp install.sh "$installer_prefix.sh"
+          cp install.ps1 "$installer_prefix.ps1"
+          sha256sum "$installer_prefix.sh" > "$installer_prefix.sh.sha256"
+          sha256sum "$installer_prefix.ps1" > "$installer_prefix.ps1.sha256"
+          cat "$installer_prefix.sh.sha256"
+          cat "$installer_prefix.ps1.sha256"
+          echo "installer_prefix=$installer_prefix" >> "$GITHUB_OUTPUT"
       - name: Attest installer provenance (TODO 013)
         uses: actions/attest-build-provenance@96b4a1ef7235a096b17240c259729fdd70c83d45 # v2
         with:
-          subject-path: install-${{ github.ref_name }}.sh
+          subject-path: ${{ steps.freeze-installer.outputs.installer_prefix }}.sh, ${{ steps.freeze-installer.outputs.installer_prefix }}.ps1
       - name: Upload release assets
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
@@ -157,9 +336,22 @@ jobs:
             sbom-python.json
             sbom-webui.json
             sbom-sandbox.json
-            base-digest.txt
-            worker-digests.txt
-            trivy.sarif
+            sbom-sandbox-browser.json
+            sandbox-image-refs.txt
+            trivy-sandbox-base.sarif
+            trivy-sandbox-browser.sarif
             install-*.sh
             install-*.sh.sha256
+            install-*.ps1
+            install-*.ps1.sha256
           retention-days: 90
+      - name: Publish GitHub Release assets
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          tag="$GITHUB_REF_NAME"
+          gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 || \
+            gh release create "$tag" --repo "$GITHUB_REPOSITORY" --verify-tag --title "$tag" --generate-notes
+          assets=(dist/* SHA256SUMS sbom-python.json sbom-webui.json sbom-sandbox.json sbom-sandbox-browser.json sandbox-image-refs.txt trivy-sandbox-base.sarif trivy-sandbox-browser.sarif install-*.sh install-*.sh.sha256 install-*.ps1 install-*.ps1.sha256)
+          gh release upload "$tag" --repo "$GITHUB_REPOSITORY" "${assets[@]}"

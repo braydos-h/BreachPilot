@@ -152,6 +152,43 @@ def test_get_run_after_create(tmp_path, monkeypatch):
     assert run["state"] == "awaiting_confirmation"
 
 
+def test_get_run_persistence_reads_use_database_actor(tmp_path, monkeypatch):
+    from tools.api.persistence import ApiPersistence
+
+    observed = []
+    original_get_run = ApiPersistence.get_run
+    original_list_decisions = ApiPersistence.list_decisions
+
+    def guarded(method):
+        def call_on_actor(self, *args, **kwargs):
+            try:
+                asyncio.get_running_loop()
+            except RuntimeError:
+                observed.append(True)
+            else:
+                raise AssertionError("SQLite reads must not run on the API event loop")
+            return method(self, *args, **kwargs)
+
+        return call_on_actor
+
+    monkeypatch.setattr(ApiPersistence, "get_run", guarded(original_get_run))
+    monkeypatch.setattr(ApiPersistence, "list_decisions", guarded(original_list_decisions))
+    client = _make_client(tmp_path, monkeypatch)
+    created = client.post(
+        "/api/v1/runs",
+        json={"target": "10.0.0.50", "mode": "attack", "goal": "recon_only"},
+        headers=_auth_headers(),
+    )
+    run_id = created.json()["run_id"]
+
+    response = client.get(f"/api/v1/runs/{run_id}", headers=_auth_headers())
+    _wait_state(client, run_id, {"awaiting_confirmation"})
+
+    assert response.status_code == 200
+    assert response.json()["id"] == run_id
+    assert observed
+
+
 def test_get_artifact_enhanced_missing_returns_404_not_500(tmp_path, monkeypatch):
     """A run that never produced an enhanced report has no ``enhanced/`` dir.
     GET /artifacts/enhanced/<file> must return a clean 404, not a 500 from

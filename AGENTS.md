@@ -21,7 +21,7 @@ Compact guide for AI coding agents working in this repo. Read this first, then
 # Linux (primary dev platform)
 python3 -m venv .venv; source .venv/bin/activate
 python3 -m pip install -r requirements.txt
-bp --doctor          # env check (Python/nmap/Ollama/config)
+bp --doctor          # env check (Python/nmap/active provider/config)
 bp --self-test       # safe localhost smoke test
 bp                   # WebUI daemon + browser (default no-args); --menu for the terminal menu
 
@@ -41,8 +41,14 @@ ruff format --check .                # must pass (0 diffs)
 mypy --follow-imports=skip tools     # must pass (disables documented in pyproject.toml [tool.mypy])
 ```
 
-`./install.sh` is the full bootstrap (OS prereqs + Ollama + venv + WebUI +
-models + `--doctor` + `breachpilot`/`bp` launchers on `~/.local/bin`).
+`./install.sh` is the full bootstrap (OS prereqs + provider-aware optional
+Ollama/model setup + venv + WebUI + `--doctor` + `breachpilot`/`bp` launchers
+on `~/.local/bin`). The Linux installer keys Ollama setup and model pulls to
+`models.provider`; the Windows `install.ps1` also checks `embeddings.provider`.
+The checked-in config selects OpenCode Go and disables provider-aware Flow A
+embeddings, so installer Ollama/model setup is skipped. Research is separate
+and currently selects Ollama with SerpAPI fallback; Flow B also retains its
+legacy Ollama semantic-memory path when enabled.
 `make install|test|test-one F=…|run|doctor|mcp-exploit` are thin wrappers.
 `scripts/setup-linux.sh` is the lightweight alternative (venv + deps + doctor).
 
@@ -56,8 +62,10 @@ python main.py --doctor
 python main.py --self-test
 ```
 
-`install.bat` / `START.bat` remain for Windows-only setups. Makefile
-targets don't run there — use the `python`/`python -m` equivalents above.
+`install.bat` wraps the provider-aware `install.ps1`; with the checked-in
+OpenCode Go + `embeddings.provider: none` config it skips Ollama setup for
+chat and embeddings. Research still selects Ollama with SerpAPI fallback.
+Makefile targets don't run there — use the `python`/`python -m` equivalents above.
 
 </details>
 
@@ -80,14 +88,16 @@ targets don't run there — use the `python`/`python -m` equivalents above.
    - **Flow B** (legacy, frozen `legacy/`): `legacy/cli.py` + `legacy/agent_loop.py` /
      `legacy/mission.py` / `db.py` / `scope_gate.py` / etc. Shares `db.py`/`mission.py` schemas only.
 
-3. **The one attack-mode safety is the target-IP allowlist lock**, enforced in
-   the MCP tool layer (`tools/mcp_shared._allowed_target_list` +
-   `tools/mcp_tools/terminal._target_lock_block`), not in
-   `tools/exploit_agent/policy.py`. `full_access` auto-approves everything with
-   no command/scope/pivot inspection. Do not re-add the removed command-content
-   / scope / pivot gates without first ensuring the allowlist covers the path
-   you're de-restricting — the allowlist IS the lock. Recon stays `read_only`
-   via `_resolve_exploit_permission`'s missing-key fallback.
+3. **Flow A attack execution has independent mission-scope and destination
+   gates.** On the `full_access` path, `ExploitPolicy` consults its threaded
+   `ScopeGate` for forbidden action categories and disallowed assets; a missing
+   gate fails closed. The target-touching MCP tool layer separately enforces
+   the target allowlist lock (`tools/mcp_shared._allowed_target_list` and the
+   registered allowlist checks). Do not remove, bypass, or weaken either gate.
+   `full_access` does not inspect command content or impose a pivot-depth gate;
+   do not reintroduce those policies as a substitute for either existing
+   boundary. Recon stays `read_only` via `_resolve_exploit_permission`'s
+   missing-key fallback.
 
 4. **New exploit MCP tools: single-source registration** — add `@audit_tool` (or `@require_allowlist()` for target-touching) in `tools/mcp_tools/<family>.py` only; `mcp_exploit_server.py` auto-discovers every `register_*_tools` via `tools/mcp_tools/registry.py:collect_tools()` (pkgutil + AST validation, fails CI if decorator missing). No manual list edit in `mcp_exploit_server.py`. `tools/mcp_tools/registry.py` is central wiring. Target-touching = `@require_allowlist()` + `validate_target_or_ip`.
 
@@ -123,24 +133,36 @@ targets don't run there — use the `python`/`python -m` equivalents above.
    `tools.config.loader.get_provider_config`). The ollama Python package is
    an EXTRA (`pip install -e ".[ollama]"`) and its SDK import is isolated to
    `tools/providers/ollama_provider.py` (source-scan guard:
-   `tests/test_no_ollama_regression.py`) — a zero-Ollama install runs the
-   engine on another provider (`models.provider: opencode_go`,
-   `embeddings.provider: none`). Embeddings are a separate abstraction
-   (`tools/providers/embeddings.py`: `ollama` | `none`). `--doctor` probes
+   `tests/test_no_ollama_regression.py`) — Flow A chat can run on another
+   provider (`models.provider: opencode_go`, `embeddings.provider: none`);
+   checked-in research still selects Ollama with SerpAPI fallback, and frozen
+   Flow B's legacy agent loop still uses direct Ollama semantic memory when
+   enabled. Embeddings are a separate abstraction
+   (`tools/providers/embeddings.py`: `ollama` | `none`); Ollama is the schema
+   fallback when omitted, while the checked-in config selects `none` (no
+   requests from provider-aware Flow A consumers). `--doctor` probes
    ONLY the active provider (no Ollama endpoints for non-ollama
    selections). Adding provider #4 = adapter + registration + config
    metadata + tests — NO edits to agent/swarm/run-service/doctor/WebUI
    (see [docs/provider-development.md](docs/provider-development.md)).
 
-   **Ollama Cloud remains the default model path.** `ollama.host` defaults
-   to `https://api.ollama.com` (`config.yaml:3`); the ollama Python client
-   auto-attaches `Authorization: Bearer $OLLAMA_API_KEY` to every
-   chat/generate request, so a host swap is the whole wiring (no probe, no
-   local→cloud fallback). Override `ollama.host` in config.yaml to point at
-   a local daemon and the same code path runs against it. Embeddings stay
-   local by default via the `embeddings:` block (`ollama.embed_host` falls
-   back to `ollama.host` when absent). `OLLAMA_API_KEY` env is required for
-   the cloud path; missing key surfaces as auth failure on the first chat.
+   **Ollama Cloud is the chat-provider code fallback, not the checked-in
+   selection.** If `models.provider` is omitted, the provider fallback is
+   Ollama; the checked-in `config.yaml` selects OpenCode Go. When Ollama is
+   selected, `ollama.host` defaults to `https://api.ollama.com` (`config.yaml:3`)
+   and the Ollama client attaches `Authorization: Bearer $OLLAMA_API_KEY` to
+   chat/generate requests. Point `ollama.host` at a local daemon to use that
+   endpoint; there is no local-to-cloud probe or fallback.
+
+   Embeddings are selected independently. The schema fallback is Ollama, but
+   checked-in config selects `embeddings.provider: none`. Provider-aware Flow A
+   memory and skill paths then make no embedding requests and use their
+   documented keyword/tag fallbacks. Frozen Flow B's `legacy/agent_loop.py`
+   still constructs the legacy Ollama semantic-memory provider when semantic
+   memory is enabled; `embeddings.provider: none` does not disable that path.
+   Explicit Ollama embeddings use `ollama.embed_host` (falling back to
+   `ollama.host` when absent). `OLLAMA_API_KEY` is required for cloud chat;
+   missing credentials surface as an auth failure on the first request.
 
    **ChatGPT is an opt-in provider** (`models.provider: chatgpt`, vendored
    `oauth/` loopback proxy at `127.0.0.1:10531/v1`, adapter

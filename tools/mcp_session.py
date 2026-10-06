@@ -10,6 +10,7 @@ import signal
 import socket
 import subprocess
 import sys
+import tempfile
 import time
 from collections import deque
 from pathlib import Path
@@ -17,7 +18,8 @@ from typing import TYPE_CHECKING, Any, AsyncIterator, Callable
 from urllib.parse import urlsplit
 
 from tools.attack_ui import get_ui
-from tools.exceptions import _EXC_GROUP_CATCH, _is_exception_group, _log_nested_exceptions
+from tools.exceptions import _EXC_GROUP_CATCH, _contains_cancellation, _is_exception_group, _log_nested_exceptions
+from tools.kernel.audit_paths import external_audit_path, validate_external_audit_path
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from tools.runtime_context import RuntimeContext
@@ -127,7 +129,7 @@ def _sensitive_env_values(env: dict[str, str]) -> tuple[str, ...]:
 
 
 @contextlib.asynccontextmanager
-async def open_exploit_mcp_session(
+async def _open_exploit_mcp_session_configured(
     *,
     transport: str,
     config_path: Path,
@@ -140,6 +142,8 @@ async def open_exploit_mcp_session(
     fallback_to_stdio: bool = True,
     original_target: str | None = None,
     resolved_ip: str | None = None,
+    network_telemetry_path: Path | None = None,
+    audit_path: Path | None = None,
     boot_cb: Callable[[str, bool, bool], None] | None = None,
     ctx: "RuntimeContext | None" = None,
 ) -> AsyncIterator[Any]:
@@ -165,6 +169,8 @@ async def open_exploit_mcp_session(
         "soft_fail": soft_fail,
         "original_target": original_target,
         "resolved_ip": resolved_ip,
+        "network_telemetry_path": network_telemetry_path,
+        "audit_path": audit_path,
         "boot_cb": boot_cb,
         "ctx": ctx,
     }
@@ -206,12 +212,104 @@ async def open_exploit_mcp_session(
                 stdio_session_started = True
             yield session
     except _EXC_GROUP_CATCH as exc:
+        if _contains_cancellation(exc):
+            raise
         if stdio_session_started or not http_startup_errors:
             raise
         http_detail = _concise_startup_error(http_startup_errors[-1])
         raise RuntimeError(
             f"MCP HTTP startup failed ({http_detail}); stdio fallback also failed ({_concise_startup_error(exc)})."
         ) from exc
+
+
+def _write_config_snapshot(
+    workspace: Path,
+    config: dict[str, Any],
+    audit_path: Path | None,
+) -> tuple[tempfile.TemporaryDirectory[str], Path]:
+    """Write private MCP config outside the sandbox worker's writable bind."""
+    audit_file = validate_external_audit_path(workspace, audit_path) if audit_path else external_audit_path(workspace)
+    parent = audit_file.parent
+    validate_external_audit_path(workspace, parent / "config.snapshot.yaml")
+    parent.mkdir(parents=True, exist_ok=True)
+    temporary_directory = tempfile.TemporaryDirectory(prefix=".breachpilot-config-", dir=parent)
+    snapshot_path = Path(temporary_directory.name) / "config.yaml"
+    try:
+        import yaml
+
+        descriptor = os.open(snapshot_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+        with os.fdopen(descriptor, "w", encoding="utf-8") as config_file:
+            yaml.safe_dump(config, config_file, default_flow_style=False, sort_keys=False, allow_unicode=True)
+    except BaseException:
+        temporary_directory.cleanup()
+        raise
+    return temporary_directory, snapshot_path
+
+
+@contextlib.asynccontextmanager
+async def open_exploit_mcp_session(
+    *,
+    transport: str,
+    config_path: Path,
+    target_ip: str,
+    exploit_port: int,
+    workspace: Path,
+    multi_model_enabled: bool | None = None,
+    active_model_alias: str = "",
+    soft_fail: bool = False,
+    fallback_to_stdio: bool = True,
+    original_target: str | None = None,
+    resolved_ip: str | None = None,
+    network_telemetry_path: Path | None = None,
+    audit_path: Path | None = None,
+    config_override: dict[str, Any] | None = None,
+    boot_cb: Callable[[str, bool, bool], None] | None = None,
+    ctx: "RuntimeContext | None" = None,
+) -> AsyncIterator[Any]:
+    """Open an MCP session using the run's frozen config when supplied."""
+    if config_override is None:
+        async with _open_exploit_mcp_session_configured(
+            transport=transport,
+            config_path=config_path,
+            target_ip=target_ip,
+            exploit_port=exploit_port,
+            workspace=workspace,
+            multi_model_enabled=multi_model_enabled,
+            active_model_alias=active_model_alias,
+            soft_fail=soft_fail,
+            fallback_to_stdio=fallback_to_stdio,
+            original_target=original_target,
+            resolved_ip=resolved_ip,
+            network_telemetry_path=network_telemetry_path,
+            audit_path=audit_path,
+            boot_cb=boot_cb,
+            ctx=ctx,
+        ) as session:
+            yield session
+        return
+
+    snapshot_dir, snapshot_path = _write_config_snapshot(workspace, config_override, audit_path)
+    try:
+        async with _open_exploit_mcp_session_configured(
+            transport=transport,
+            config_path=snapshot_path,
+            target_ip=target_ip,
+            exploit_port=exploit_port,
+            workspace=workspace,
+            multi_model_enabled=multi_model_enabled,
+            active_model_alias=active_model_alias,
+            soft_fail=soft_fail,
+            fallback_to_stdio=fallback_to_stdio,
+            original_target=original_target,
+            resolved_ip=resolved_ip,
+            network_telemetry_path=network_telemetry_path,
+            audit_path=audit_path,
+            boot_cb=boot_cb,
+            ctx=ctx,
+        ) as session:
+            yield session
+    finally:
+        snapshot_dir.cleanup()
 
 
 @contextlib.asynccontextmanager
@@ -229,6 +327,8 @@ async def _open_exploit_mcp_session_once(
     startup_errors: list[BaseException] | None = None,
     original_target: str | None = None,
     resolved_ip: str | None = None,
+    network_telemetry_path: Path | None = None,
+    audit_path: Path | None = None,
     boot_cb: Callable[[str, bool, bool], None] | None = None,
     ctx: "RuntimeContext | None" = None,
 ) -> AsyncIterator[Any]:
@@ -281,6 +381,7 @@ async def _open_exploit_mcp_session_once(
     env = os.environ.copy()
     env["EXPLOIT_TARGET"] = target_ip
     env["EXPLOIT_WORKSPACE"] = str(workspace.resolve())
+    env["EXPLOIT_AUDIT_PATH"] = str(external_audit_path(workspace, audit_path))
     # Domain targeting: when the operator gave a domain, set the resolved IP
     # and the domain string as extra env vars so the allowlist union
     # (``_allowed_target_list``) authorizes both forms. ``EXPLOIT_TARGET``
@@ -335,6 +436,11 @@ async def _open_exploit_mcp_session_once(
                 str(config_path.resolve()),
                 "--workspace",
                 str(workspace.resolve()),
+                *(
+                    ["--network-telemetry-path", str(network_telemetry_path.resolve())]
+                    if network_telemetry_path is not None
+                    else []
+                ),
             ],
             env=env,
         )
@@ -399,6 +505,8 @@ async def _open_exploit_mcp_session_once(
                             stdio_yielded = True
                             yield session
                         except _EXC_GROUP_CATCH as exc:
+                            if _contains_cancellation(exc):
+                                raise
                             if soft_fail:
                                 _ui.warning(f"MCP session closed mid-recon: {exc}")
                                 if _is_exception_group(exc):
@@ -408,6 +516,8 @@ async def _open_exploit_mcp_session_once(
                             raise RuntimeError(f"MCP session closed due to error: {exc}") from exc
             except _EXC_GROUP_CATCH as exc:
                 startup_errors.append(exc)
+                if _contains_cancellation(exc):
+                    raise
                 # Log the exact error before re-raising so the user always sees it.
                 # anyio's task groups (used by ``stdio_client``) raise
                 # ``BaseExceptionGroup`` on subprocess failure — that is *not* an
@@ -452,6 +562,7 @@ async def _open_exploit_mcp_session_once(
                 port=exploit_port,
                 workspace=workspace,
                 env=env,
+                network_telemetry_path=network_telemetry_path,
             )
         except (OSError, RuntimeError) as exc:
             startup_errors.append(exc)
@@ -564,6 +675,8 @@ async def _open_exploit_mcp_session_once(
                         )
                     except _EXC_GROUP_CATCH as exc:
                         startup_errors.append(exc)
+                        if _contains_cancellation(exc):
+                            raise
                         # The server died mid-handshake. anyio's task group
                         # raises ``BaseExceptionGroup`` — which is NOT an
                         # ``Exception`` subclass and NOT a ``TimeoutError`` —
@@ -602,6 +715,8 @@ async def _open_exploit_mcp_session_once(
                     try:
                         yield session
                     except _EXC_GROUP_CATCH as exc:
+                        if _contains_cancellation(exc):
+                            raise
                         if soft_fail:
                             _ui.warning(f"MCP session closed mid-recon: {exc}")
                             if _is_exception_group(exc):
@@ -610,6 +725,8 @@ async def _open_exploit_mcp_session_once(
                             return
                         raise RuntimeError(f"MCP session closed due to error: {exc}") from exc
     except _EXC_GROUP_CATCH as exc:
+        if _contains_cancellation(exc):
+            raise
         # Transport-level failure: ``streamable_http_client`` or
         # ``ClientSession`` entry raised ``BaseExceptionGroup`` (anyio's task
         # group on a dead/reset connection. Even after a successful MCP
@@ -654,6 +771,7 @@ def start_exploit_http_server(
     port: int,
     workspace: Path,
     env: dict[str, str],
+    network_telemetry_path: Path | None = None,
 ) -> tuple[subprocess.Popen[str], Any]:
     if port_is_open("127.0.0.1", port):
         raise RuntimeError(f"Exploit MCP HTTP port {port} is already in use. Stop the process using it.")
@@ -671,21 +789,24 @@ def start_exploit_http_server(
             # Gives POSIX shutdown a process group to terminate, including any
             # tool subprocesses that are still alive when the session closes.
             popen_kwargs["start_new_session"] = True
+        args = [
+            sys.executable,
+            str(server_path),
+            "--transport",
+            "http",
+            "--host",
+            "127.0.0.1",
+            "--port",
+            str(port),
+            "--config",
+            str(config_path.resolve()),
+            "--workspace",
+            str(workspace.resolve()),
+        ]
+        if network_telemetry_path is not None:
+            args.extend(["--network-telemetry-path", str(network_telemetry_path.resolve())])
         process = subprocess.Popen(
-            [
-                sys.executable,
-                str(server_path),
-                "--transport",
-                "http",
-                "--host",
-                "127.0.0.1",
-                "--port",
-                str(port),
-                "--config",
-                str(config_path.resolve()),
-                "--workspace",
-                str(workspace.resolve()),
-            ],
+            args,
             cwd=str(server_path.parent),
             env=env,
             stdout=log_handle,

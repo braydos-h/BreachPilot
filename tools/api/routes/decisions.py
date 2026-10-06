@@ -49,16 +49,8 @@ def create_router(auth: BearerAuth, run_manager: RunManager) -> APIRouter:
     @router.get("/runs/{run_id}/decisions/{decision_id}", response_model=DecisionOut)
     async def get_decision(run_id: str, decision_id: str, auth: str = Depends(_require_auth)) -> DecisionOut:
         """Get a single decision by id (full row: prompt_text, required_text, options)."""
-        from tools.api.persistence import ApiPersistence
-
-        # Reach the persistence layer through the run manager's owned reference.
-        persistence: ApiPersistence | None = getattr(_rm(), "_persistence", None)
-        if persistence is None:
-            raise HTTPException(status_code=500, detail="Persistence not configured.")
-        decision = await persistence.actor.arun(persistence.get_decision, decision_id)
+        decision = await _rm().get_decision(run_id, decision_id)
         if decision is None:
-            raise HTTPException(status_code=404, detail="Decision not found")
-        if decision.get("run_id") != run_id:
             raise HTTPException(status_code=404, detail="Decision not found")
         return DecisionOut(
             id=decision["id"],

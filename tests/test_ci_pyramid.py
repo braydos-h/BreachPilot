@@ -44,5 +44,26 @@ def test_nightly_skip_is_explicit_not_silent():
     assert "graceful skip" not in text.lower() or "SKIPPED" in text
 
 
+def test_nightly_eval_uses_configured_provider_and_contained_lab_config():
+    workflow = yaml.load(
+        (REPO / ".github/workflows/eval.yml").read_text(encoding="utf-8"),
+        Loader=yaml.BaseLoader,
+    )
+    job = workflow["jobs"]["nightly-eval"]
+    steps = job["steps"]
+    assert job["env"]["OPENCODE_GO_API_KEY"] == "${{ secrets.OPENCODE_GO_API_KEY }}"
+    assert "OLLAMA_API_KEY" not in str(job)
+    prepare = next(step for step in steps if step.get("name") == "Prepare contained local-lab config")
+    assert prepare["if"] == "env.OPENCODE_GO_API_KEY != ''"
+    assert "prepare_ci_lab_config.py" in prepare["run"]
+    for name in (
+        "Run graded eval suite",
+        "Hermetic benchmark repeats (min n=5 per target)",
+        "Regression gate (fail on hard regressions vs baseline)",
+    ):
+        step = next(candidate for candidate in steps if candidate.get("name") == name)
+        assert "--config reports/ci-local-lab.yaml" in step["run"]
+
+
 def test_pyramid_doc_exists():
     assert (REPO / "docs/ci-pyramid.md").exists()

@@ -20,9 +20,6 @@ import json
 import os
 import re
 import shlex
-import shutil
-import subprocess
-import time
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
@@ -31,15 +28,16 @@ import yaml
 
 from tools.enhanced_reporting import CVSSScore, TechnicalFinding
 from tools.kernel.allowlist import _scanner_token_is_host
+from tools.kernel.workspace import read_workspace_bytes, write_workspace_file
 from tools.mcp_shared import _attempt_dir, check_targets_allowlist
 from tools.mcp_tools.registry import (
     ToolContext,
     _positive_int,
-    _run_with_pgrp_timeout,
     parse_extra_options,
-    run_argv_captured,
     tool_slug,
 )
+from tools.mcp_tools.sandbox_exec import sandbox_error_block
+from tools.sandbox.exceptions import SandboxUnsupportedError
 from tools.validation_utils import validate_target_or_ip
 
 _NUCLEI_JSONL_NAME = "nuclei.jsonl"
@@ -254,7 +252,7 @@ def _check_nuclei_template_schema(parsed: Any) -> str:
 
 
 def _validate_nuclei_template(path: Path, text: str) -> tuple[str, str]:
-    """Validate template YAML (parse-back + schema, plus ``nuclei -validate`` when on PATH)."""
+    """Validate template YAML without launching a process on the MCP host."""
     try:
         parsed = yaml.safe_load(text)
     except Exception as exc:  # ponytail: bare except intentional — invalid YAML is a finding, not a crash
@@ -262,24 +260,7 @@ def _validate_nuclei_template(path: Path, text: str) -> tuple[str, str]:
     schema_err = _check_nuclei_template_schema(parsed)
     if schema_err:
         return "INVALID", schema_err
-    if not shutil.which("nuclei"):
-        return "VALID", "schema check only (nuclei not on PATH)"
-    try:
-        returncode, out, err = _run_with_pgrp_timeout(
-            ["nuclei", "-t", str(path), "-validate"],
-            60,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-        )
-    except subprocess.TimeoutExpired:
-        return "INVALID", "nuclei -validate timed out after 60s"
-    except Exception as exc:  # ponytail: bare except intentional — validator failure is INVALID, not a crash
-        return "INVALID", f"nuclei -validate failed: {exc}"[:500]
-    combined = f"{out or ''}\n{err or ''}".strip()[-1000:]
-    if returncode == 0:
-        return "VALID", "nuclei -validate passed" if not combined else f"nuclei -validate passed: {combined[:500]}"
-    return "INVALID", combined or f"nuclei -validate exited {returncode}"
+    return "VALID", "schema check passed"
 
 
 def register_web_scan_tools(mcp: Any, *, ctx: ToolContext) -> None:
@@ -341,6 +322,8 @@ def register_web_scan_tools(mcp: Any, *, ctx: ToolContext) -> None:
         timeout: int = 300,
     ) -> str:
         """Run a web scanner (nikto/nuclei/sqlmap/gobuster/feroxbuster/whatweb/wpscan/dirb/dirbuster) against the target. Returns the scanner's parsed output. The target must be in the explicit allowlist. ``options`` are extra scanner flags (space-separated, no shell metacharacters)."""
+        if getattr(ctx, "sandbox", None) is None:
+            return f"WEB_SCAN_RESULT: blocked\n{sandbox_error_block(SandboxUnsupportedError('web scanners require an active sandbox worker'), tool_name='run_web_scan')}"
         if not scanner or not scanner.strip():
             return "BLOCKED: scanner is required."
         sc = scanner.strip().lower()
@@ -371,12 +354,6 @@ def register_web_scan_tools(mcp: Any, *, ctx: ToolContext) -> None:
             except ValueError:
                 return "BLOCKED: options string could not be parsed (unbalanced quotes)."
 
-        if not shutil.which(sc) and getattr(ctx, "sandbox", None) is None:
-            return (
-                f"SCANNER_NOT_INSTALLED: {sc} is not on PATH. "
-                f"Install it (e.g. apt install {sc}) on the operator box and retry."
-            )
-
         argv = _build_argv(sc, target_ip, port, path.strip())
         argv.extend(extra_argv)
         cmd = " ".join(argv)  # reported for operator visibility
@@ -401,13 +378,10 @@ def register_web_scan_tools(mcp: Any, *, ctx: ToolContext) -> None:
         # (no host PATH requirement; only the scanners baked into the worker
         # image are available -- the base image is minimal by design).
         if getattr(ctx, "sandbox", None) is not None:
-            from tools.mcp_tools.sandbox_exec import run_argv_in_sandbox, sandbox_error_block
+            from tools.mcp_tools.sandbox_exec import run_argv_in_sandbox
             from tools.sandbox.exceptions import SandboxError
 
             attempt_dir, attempt_id = nuclei_attempt if nuclei_attempt is not None else _attempt_dir(workspace)
-            log_path = attempt_dir / f"{sc}.log"
-            start = time.monotonic()
-            _elapsed = 0.0
             try:
                 _ran, result = run_argv_in_sandbox(
                     ctx,
@@ -418,7 +392,8 @@ def register_web_scan_tools(mcp: Any, *, ctx: ToolContext) -> None:
                     cwd_host=attempt_dir,
                     tool_name=f"run_web_scan:{sc}",
                 )
-                _elapsed = result.duration_seconds
+                if not _ran or result is None:
+                    raise SandboxUnsupportedError("web scanners require an active sandbox worker")
                 output = (result.stdout or "") + ("\n" + result.stderr if result.stderr else "")
                 output = output[-4000:]
                 returncode = result.exit_code
@@ -430,15 +405,14 @@ def register_web_scan_tools(mcp: Any, *, ctx: ToolContext) -> None:
                     # scanner instead of retrying the same missing binary.
                     output += (
                         f"\nHINT: scanner {sc!r} is not installed in the sandbox worker image "
-                        "(breachpilot-sandbox:latest). Do not retry it; use a Python stdlib probe "
-                        "via write_python_file + run_python_file, or extend a derived image "
+                        "(breachpilot-sandbox:latest). Do not retry it; extend a derived image "
                         "(FROM breachpilot-sandbox:latest) with the scanner."
                     )
             except SandboxError as exc:
                 return f"WEB_SCAN_RESULT: blocked\n{sandbox_error_block(exc, tool_name='run_web_scan')}"
             try:
-                log_path.write_text(str(output), encoding="utf-8")
-            except OSError:
+                write_workspace_file(workspace, f"{attempt_id}/{sc}.log", str(output).encode("utf-8"))
+            except (OSError, ValueError):
                 pass
             return (
                 f"WEB_SCAN_RESULT: {status}\n"
@@ -447,51 +421,10 @@ def register_web_scan_tools(mcp: Any, *, ctx: ToolContext) -> None:
                 f"TARGET: {target_ip}:{port}\n"
                 f"COMMAND: {cmd}\n"
                 f"EXIT_CODE: {returncode}\n"
-                f"DURATION: {_elapsed:.1f}s (sandbox)\n"
+                f"DURATION: {result.duration_seconds:.1f}s (sandbox)\n"
                 f"OUTPUT:\n{output}"
             )
-
-        attempt_dir, attempt_id = nuclei_attempt if nuclei_attempt is not None else _attempt_dir(workspace)
-        log_path = attempt_dir / f"{sc}.log"
-        start = time.monotonic()
-        try:
-            returncode, out, err = _run_with_pgrp_timeout(
-                argv,
-                timeout,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                cwd=str(attempt_dir) if is_nuclei else None,
-            )
-            output = (out + "\n" + err)[-4000:]
-            status = "completed" if returncode == 0 else "failed"
-        except subprocess.TimeoutExpired:
-            status = "timed_out"
-            output = f"{sc} timed out after {timeout}s"
-            returncode = None
-        except Exception as exc:  # ponytail: bare except intentional
-            status = "error"
-            output = str(exc)
-            returncode = None
-
-        elapsed = time.monotonic() - start
-
-        # Persist the raw scan log for the audit trail / later read_workspace_file.
-        try:
-            log_path.write_text(str(output), encoding="utf-8")
-        except OSError:
-            pass
-
-        return (
-            f"WEB_SCAN_RESULT: {status}\n"
-            f"ATTEMPT_ID: {attempt_id}\n"
-            f"SCANNER: {sc}\n"
-            f"TARGET: {target_ip}:{port}\n"
-            f"COMMAND: {cmd}\n"
-            f"EXIT_CODE: {returncode}\n"
-            f"DURATION: {elapsed:.1f}s\n"
-            f"OUTPUT:\n{output}"
-        )
+        return f"WEB_SCAN_RESULT: blocked\n{sandbox_error_block(SandboxUnsupportedError('web scanners require an active sandbox worker'), tool_name='run_web_scan')}"
 
     @mcp.tool()
     @audit_tool
@@ -506,15 +439,16 @@ def register_web_scan_tools(mcp: Any, *, ctx: ToolContext) -> None:
         if err or attempt_dir is None:
             return err
         jsonl_path = attempt_dir / _NUCLEI_JSONL_NAME
-        if not attempt_dir.is_dir() or not jsonl_path.is_file():
+        if not attempt_dir.is_dir() or not jsonl_path.exists():
             return (
                 f"NUCLEI_FINDINGS: 0 confirmed-candidate\n"
                 f"ATTEMPT_ID: {aid}\n"
                 f"NOTE: no {_NUCLEI_JSONL_NAME} in this attempt (run run_web_scan with scanner nuclei first)."
             )
         try:
-            text = jsonl_path.read_text(encoding="utf-8", errors="replace")
-        except OSError as exc:
+            _resolved, jsonl_bytes = read_workspace_bytes(workspace, str(jsonl_path), limit=10_000_000)
+            text = jsonl_bytes.decode("utf-8", errors="replace")
+        except (OSError, ValueError, PermissionError) as exc:
             return (
                 f"NUCLEI_FINDINGS: 0 confirmed-candidate\nATTEMPT_ID: {aid}\nNOTE: could not read nuclei.jsonl: {exc}"
             )
@@ -546,10 +480,12 @@ def register_web_scan_tools(mcp: Any, *, ctx: ToolContext) -> None:
             by_id[fid] = finding
         records = [f.to_dict() for f in by_id.values()]
         try:
-            (attempt_dir / _NUCLEI_FINDINGS_NAME).write_text(
-                json.dumps(records, indent=2, default=str), encoding="utf-8"
+            write_workspace_file(
+                workspace,
+                f"{aid}/{_NUCLEI_FINDINGS_NAME}",
+                json.dumps(records, indent=2, default=str).encode("utf-8"),
             )
-        except OSError:
+        except (OSError, ValueError):
             pass
         lines = [f"NUCLEI_FINDINGS: {len(records)} confirmed-candidate", f"ATTEMPT_ID: {aid}"]
         for finding in list(by_id.values())[:20]:
@@ -567,7 +503,7 @@ def register_web_scan_tools(mcp: Any, *, ctx: ToolContext) -> None:
     @mcp.tool()
     @audit_tool
     def generate_nuclei_template(finding_id: str = "") -> str:
-        """Generate a reusable Nuclei template YAML from a confirmed finding (local only: no target arg, no network). Validates by parsing the YAML back plus nuclei -validate when on PATH; reports VALID/INVALID."""
+        """Generate a reusable Nuclei template YAML from a confirmed finding (local only: no target arg, no network). Validates the generated YAML schema without launching a host scanner; reports VALID/INVALID."""
         if not finding_id or not str(finding_id).strip():
             return "BLOCKED: finding_id is required."
         fid = str(finding_id).strip()
@@ -582,8 +518,9 @@ def register_web_scan_tools(mcp: Any, *, ctx: ToolContext) -> None:
             candidates = []
         for path in candidates:
             try:
-                data = json.loads(path.read_text(encoding="utf-8", errors="replace"))
-            except (OSError, ValueError):
+                _resolved, finding_bytes = read_workspace_bytes(workspace, str(path), limit=10_000_000)
+                data = json.loads(finding_bytes.decode("utf-8", errors="replace"))
+            except (OSError, ValueError, PermissionError):
                 continue  # ponytail: skip unreadable findings files, don't crash
             if not isinstance(data, list):
                 continue
@@ -599,8 +536,12 @@ def register_web_scan_tools(mcp: Any, *, ctx: ToolContext) -> None:
         template_text, template_slug = _render_nuclei_template(record)
         out_path = source_dir / f"{_NUCLEI_TEMPLATE_PREFIX}{fid}.yaml"
         try:
-            out_path.write_text(template_text, encoding="utf-8")
-        except OSError as exc:
+            write_workspace_file(
+                workspace,
+                f"{source_dir.name}/{out_path.name}",
+                template_text.encode("utf-8"),
+            )
+        except (OSError, ValueError) as exc:
             return f"NUCLEI_TEMPLATE: INVALID\nFINDING: {fid}\nDETAIL: could not write template: {exc}"
         verdict, detail = _validate_nuclei_template(out_path, template_text)
         try:

@@ -22,7 +22,6 @@ tests/test_sandbox_integration.py; the cases here must hold everywhere.
 
 from __future__ import annotations
 
-import logging
 from pathlib import Path
 from typing import Any
 
@@ -102,7 +101,8 @@ def test_empty_allowlist_denies_egress(no_research_hosts):
     rules = build_ipv4_rules(policy, gateway="172.29.0.1")
     accepts = [r for r in rules if "-j ACCEPT" in r and "ESTABLISHED" not in r and "-o lo" not in r]
     assert accepts == [], f"empty allowlist must not produce ACCEPT rules: {accepts}"
-    assert rules[-2] == "-A NAI-OUTPUT -j DROP"
+    assert rules[-3] == "-A NAI-OUTPUT -j NAI-DROP"
+    assert rules[-2] == "-A NAI-DROP -j DROP"
 
 
 def test_unauthorized_ipv4_target_denied(no_research_hosts):
@@ -137,7 +137,7 @@ def test_authorized_destination_allowed(no_research_hosts):
     policy = build_network_policy(_base_config(["10.0.0.50"]))
     rules = build_ipv4_rules(policy, gateway="172.29.0.1")
     accept_idx = rules.index("-A NAI-OUTPUT -d 10.0.0.50/32 -j ACCEPT")
-    drop_idx = rules.index("-A NAI-OUTPUT -j DROP")
+    drop_idx = rules.index("-A NAI-OUTPUT -j NAI-DROP")
     assert accept_idx < drop_idx
 
 
@@ -149,7 +149,7 @@ def test_host_loopback_not_reachable(no_research_hosts):
     policy = build_network_policy(cfg)
     rules = build_ipv4_rules(policy, gateway="172.29.0.1")
     joined = "\n".join(rules)
-    assert "-A NAI-OUTPUT -d 172.29.0.1 -j DROP" in joined
+    assert "-A NAI-OUTPUT -d 172.29.0.1 -j NAI-DROP" in joined
     assert "-d 172.29.0.1 -j ACCEPT" not in joined
 
     # Explicit opt-in maps the gateway (only when a gateway is known).
@@ -247,7 +247,7 @@ def test_sandbox_error_block_is_fail_closed_marker():
 # ---------------------------------------------------------------------------
 
 
-def _manager_with_enforcement_failure(tmp_path: Path, backend: Any, monkeypatch, *, fail_closed: bool) -> Any:
+def _manager_with_enforcement_failure(tmp_path: Path, backend: Any, monkeypatch) -> Any:
     """Manager whose netns-firewall install always fails (sidecar rc=1)."""
     from tools.sandbox.manager import SandboxManager
     from tools.sandbox.models import SandboxConfig
@@ -256,12 +256,12 @@ def _manager_with_enforcement_failure(tmp_path: Path, backend: Any, monkeypatch,
         "exploit": {"require_explicit_allowlist": True, "allowed_targets": ["10.0.0.50"]},
         "sandbox": {
             "enabled": True,
-            "network": {"allow_research_hosts": False, "fail_closed": fail_closed},
+            "network": {"allow_research_hosts": False},
         },
     }
     cfg = SandboxConfig.from_config(config)
     assert cfg.network_enforce is True
-    assert cfg.network_fail_closed is fail_closed
+    assert cfg.network_fail_closed is True
     mgr = SandboxManager(cfg, tmp_path / "ws", config_dict=config, backend=backend)
     mgr.workspace.mkdir(parents=True, exist_ok=True)
 
@@ -277,25 +277,11 @@ def _audit_text(mgr: Any) -> str:
     return path.read_text(encoding="utf-8") if path.exists() else ""
 
 
-def test_enforcement_failure_blocks_when_fail_closed_true(tmp_path, fake_backend, monkeypatch):
-    """fail_closed=true (default): a firewall-install failure blocks execution
-    (SandboxError -> SANDBOX_POLICY_FAILED), writes a blocked audit row, and
-    never runs the command anywhere."""
-    mgr = _manager_with_enforcement_failure(tmp_path, fake_backend, monkeypatch, fail_closed=True)
+def test_enforcement_failure_always_blocks(tmp_path, fake_backend, monkeypatch):
+    """A firewall-install failure blocks and is audited; there is no
+    degraded-allow mode."""
+    mgr = _manager_with_enforcement_failure(tmp_path, fake_backend, monkeypatch)
     with pytest.raises(SandboxError):
         mgr.ensure_sandbox()
     assert fake_backend.exec_calls == [], "blocked execution must never reach the worker"
     assert '"status": "blocked"' in _audit_text(mgr)
-
-
-def test_enforcement_failure_degrades_when_fail_closed_false(tmp_path, fake_backend, monkeypatch, caplog):
-    """fail_closed=false: the same failure degrades to Docker-bridge isolation
-    only (NOT containment) with an explicit WARNING plus a degraded audit row,
-    and execution proceeds unfirewalled."""
-    mgr = _manager_with_enforcement_failure(tmp_path, fake_backend, monkeypatch, fail_closed=False)
-    with caplog.at_level(logging.WARNING, logger="tools.sandbox.manager"):
-        result = mgr.execute("id", timeout=10, target_ip="10.0.0.50")
-    assert result.status == "completed"
-    assert "network.fail_closed=false" in caplog.text
-    assert "WITHOUT netns firewall" in caplog.text
-    assert '"status": "degraded"' in _audit_text(mgr)

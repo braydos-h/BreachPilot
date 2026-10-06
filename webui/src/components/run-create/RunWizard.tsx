@@ -4,7 +4,7 @@ import { ArrowLeft, ArrowRight, ChevronDown, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { isValidTarget } from "@/lib/targetValidation";
 import { Button } from "@/components/ui/button";
-import { useCapabilities, useConfig, useCreateRun, useGoals, useRun, useSkills } from "@/api/hooks";
+import { useCapabilities, useConfig, useCreateRun, useGoals, useRun, useSandboxStatus, useSkills } from "@/api/hooks";
 import { useRunEvents } from "@/api/ws";
 import { ProviderPrivacyNotice, useDefaultModel, useProviderStatus } from "@/components/ProviderSetup";
 import { ApiError } from "@/api/client";
@@ -116,6 +116,7 @@ export function RunWizard({ onCreated }: RunWizardProps) {
   const goals = useGoals();
   const skills = useSkills();
   const createRun = useCreateRun();
+  const sandboxStatus = useSandboxStatus();
   const defaultModel = useDefaultModel();
   const providerStatus = useProviderStatus();
   const config = useConfig();
@@ -319,6 +320,10 @@ export function RunWizard({ onCreated }: RunWizardProps) {
 
   const prepared =
     !!runDetail.data && runDetail.data.state !== "preparing" && runDetail.data.state !== "failed";
+  // A failed background refetch can retain the last successful query data.
+  // Surface that error too, so a still-preparing snapshot is not presented as
+  // current without giving the operator a way to refresh it.
+  const startupStatusError = Boolean(createdRunId && runDetail.isError);
   const startup: RunStartupState | null =
     launching || (createdRunId && !prepared)
       ? {
@@ -377,6 +382,20 @@ export function RunWizard({ onCreated }: RunWizardProps) {
   const resolvedModel = modelAlias || defaultModel || "Default model";
   const opsec = (config.data as unknown as { opsec?: Record<string, unknown> } | undefined)?.opsec;
   const opsecSummary = opsec ? `OPSEC ${opsec.enabled === false ? "relaxed" : "standard"} posture` : "OPSEC standard posture";
+  const sandboxReady =
+    !sandboxStatus.isFetching &&
+    !sandboxStatus.error &&
+    sandboxStatus.data?.mode === "contained" &&
+    sandboxStatus.data.docker_available &&
+    sandboxStatus.data.image_present === true;
+  const sandboxDetail = sandboxStatus.isLoading
+    ? "Checking Docker and the worker image"
+    : sandboxStatus.error
+      ? "Sandbox status could not be verified"
+      : sandboxReady
+        ? "Contained worker and image available"
+        : sandboxStatus.data?.fallback_reason ||
+          (sandboxStatus.data?.image_present === false ? "Worker image is missing" : "Contained worker unavailable");
 
   const preflightChecks: PreflightCheck[] = [
     {
@@ -389,18 +408,21 @@ export function RunWizard({ onCreated }: RunWizardProps) {
     },
     { id: "model", label: "Model", ok: resolvedModel ? true : false, detail: resolvedModel, fixTo: "/system", fixLabel: "Choose model" },
     {
-      id: "scope",
-      label: "Target scope",
+      id: "target-format",
+      label: "Target format",
       ok: targetValid,
-      detail: targetValid ? `Authorized and in scope ✓ (${target.trim()})` : "Enter a valid target",
+      detail: targetValid
+        ? `Syntax valid (${target.trim()}); the server enforces allowlist and scope at launch`
+        : "Enter a valid target",
       fixTo: "/runs/new",
       fixLabel: "Edit target",
     },
-    { id: "sandbox", label: "Sandbox", ok: true, detail: "Disposable worker ready" },
+    { id: "sandbox", label: "Sandbox", ok: sandboxReady ? true : sandboxStatus.isLoading ? null : false, detail: sandboxDetail, fixTo: "/system", fixLabel: "Open sandbox status" },
     { id: "approval", label: "Approval policy", ok: true, detail: approvalPolicy === "read_only" ? "Manual approvals" : approvalPolicy === "approve" ? "Auto-safe approvals" : "Autonomous within scope" },
     { id: "opsec", label: "OPSEC posture", ok: true, detail: opsecSummary, fixTo: "/system", fixLabel: "Edit in Settings" },
   ];
-  const blocked = preflightChecks.some((c) => c.ok === false);
+  const launchReady = preflightChecks.every((check) => check.ok === true);
+  const blocked = preflightChecks.some((check) => check.ok === false);
 
   return (
     <div className="mx-auto flex w-full max-w-[1200px] flex-col gap-4 px-4 py-4 md:px-6 md:py-5">
@@ -507,7 +529,7 @@ export function RunWizard({ onCreated }: RunWizardProps) {
 
           {step === "review" && (
             <div className="space-y-4">
-              <PreflightCard checks={preflightChecks} canLaunch={!blocked} />
+              <PreflightCard checks={preflightChecks} canLaunch={launchReady} />
               <div className="rounded-lg border bg-card/40 px-4 py-3 text-[13px]">
                 <span className="font-medium">Effective OPSEC posture: </span>
                 <span className="text-muted-foreground">{opsecSummary} (advisory, not a run gate). </span>
@@ -528,8 +550,12 @@ export function RunWizard({ onCreated }: RunWizardProps) {
                 observerMode={observerMode}
                 reconFirst={reconFirst}
                 yes={backend.yes}
+                launchBlocked={!launchReady}
                 isCreating={launching && !createdRunId}
                 startup={startup}
+                startupStatusError={startupStatusError}
+                startupStatusRetrying={runDetail.isFetching}
+                onRetryStatus={() => void runDetail.refetch()}
                 runDetail={prepared ? runDetail.data ?? null : null}
                 createError={createError}
                 onCreate={createTheRun}

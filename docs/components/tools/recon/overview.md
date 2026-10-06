@@ -8,6 +8,12 @@ symbols: [ReconPipeline, PrimaryReconScanner, SecondaryEnumerator, ReconConfig, 
 
 Adaptive, fallback-enabled scanning. Canonical pipeline: `tools/recon_pipeline.py` (2385 LOC god file, now shimmed by `tools/recon/*`).
 
+The direct in-process `ReconPipeline` below remains a separate library API.
+Agent-facing MCP recon, autonomous campaigns, campaign steps, and the opt-in
+swarm ReconAgent use `sandbox_recon_host` with a DNS-pinned address; they do
+not invoke this pipeline or fall back to it when the worker fails. MCP UDP
+recon is unsupported while the worker drops `NET_RAW`.
+
 ## Package map
 
 | File | Export | Line | Role |
@@ -82,7 +88,7 @@ Adaptive, fallback-enabled scanning. Canonical pipeline: `tools/recon_pipeline.p
 
 `FastReconConfig.from_config` (`:58`): `enabled, max_concurrency(8), service_concurrency(6), cve_concurrency(8), per_task_timeout(60), overall_timeout(180), tcp_discovery, udp_top_ports(50), passive_osint, service_enumeration, cve_lookup, cache_ttl(300)`.
 
-Stage A parallel: `check_os | quick_scan | run_osint_recon | run_udp_recon` → parse `open_ports/services/os`; short-circuit on empty. Stage B: bounded `get_service_fingerprint` per port + deduped `search_cve_intel` per `product version` (cache per-run). Writes `fast_recon.json` + `recon_assessment.json` (`build_assessment_from_mcp_results`) + `.fast_recon_cache/{sha16}.json`. `FastReconCoordinator.run` handles per-task `asyncio.wait_for`, `_EXC_GROUP_CATCH`, `return_exceptions=True`, global `asyncio.wait_for(overall_timeout)` partial on timeout.
+Stage A parallel: `check_os | quick_scan | run_osint_recon | run_udp_recon`; the TCP scans use the MCP sandbox worker, OSINT is passive and bounded, and UDP returns `SANDBOX_UNSUPPORTED` (therefore it yields no UDP findings). The coordinator parses the available `open_ports/services/os` and short-circuits on empty. Stage B: bounded `get_service_fingerprint` per port + deduped `search_cve_intel` per `product version` (cache per-run). Writes `fast_recon.json` + `recon_assessment.json` (`build_assessment_from_mcp_results`) + `.fast_recon_cache/{sha16}.json`. `FastReconCoordinator.run` handles per-task `asyncio.wait_for`, `_EXC_GROUP_CATCH`, `return_exceptions=True`, global `asyncio.wait_for(overall_timeout)` partial on timeout.
 
 `FastReconResult` carries `open/udp_ports, services, os, cves, web, osint, warnings/errors, coverage, task_timings, cache_hit, assessment, summary_text` (`:99`).
 

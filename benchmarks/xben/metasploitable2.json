@@ -13,9 +13,9 @@
         "id": "ms2_web_reachable",
         "description": "Metasploitable2 web service is reachable on the loopback-mapped port",
         "check": {
-          "type": "http_request",
-          "url": "http://127.0.0.1:8082/",
-          "expect_status": 200
+          "type": "tcp_connect",
+          "host": "127.0.0.1",
+          "port": 8082
         }
       }
     ],

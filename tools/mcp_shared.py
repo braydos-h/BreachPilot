@@ -62,18 +62,12 @@ from tools.kernel.workspace import (
 )
 from tools.reliability import RateLimiter
 
-# Canonical homes (not the tools.web_researcher compat shim): the shim's
-# re-exports resolve at runtime, but mypy's full-build pass does not see
-# through the second re-export hop for SerpAPIResearchSettings.
+# Runtime builders import their construction dependencies lazily below; only
+# return-annotation types belong in this typing-only block.
 if TYPE_CHECKING:  # pragma: no cover - typing only, keeps cold import light
-    from tools.cve_lookup import CVESearchSettings, NVDClient
+    from tools.cve_lookup import NVDClient
     from tools.exploit_search import ExploitSearch
     from tools.research.facade import WebResearcher
-    from tools.research.models import (
-        OllamaResearchSettings,
-        SerpAPIResearchSettings,
-        WebResearcherSettings,
-    )
 
 __all__ = [  # re-exports for backwards compat (F401 suppression via __all__)
     "_MSF_LHOST_RE",
@@ -224,6 +218,10 @@ def build_cve_search(config: Mapping[str, object]) -> NVDClient:
     NVDClient hammering at its own per-instance gap. ``rate_limit_seconds``
     remains the per-instance FALLBACK used only when no shared limiter is
     passed (e.g. vuln_agent constructing NVDClient directly)."""
+    # Keep this heavier module lazy at MCP import time, but import the runtime
+    # classes here; the module-level TYPE_CHECKING imports do not bind names.
+    from tools.cve_lookup import CVESearchSettings, NVDClient
+
     cve_cfg_raw = config.get("cve_lookup", {})
     cve_cfg: Mapping[str, object] = cve_cfg_raw if isinstance(cve_cfg_raw, Mapping) else {}
     settings = CVESearchSettings(
@@ -248,6 +246,15 @@ def build_cve_search(config: Mapping[str, object]) -> NVDClient:
 
 def build_researcher(config: Mapping[str, object]) -> WebResearcher:
     """Build a web researcher from the ``research`` config block."""
+    # These classes are type-only at module scope to keep the shared MCP
+    # helpers cheap to import. Resolve them when a researcher is actually built.
+    from tools.research.facade import WebResearcher
+    from tools.research.models import (
+        OllamaResearchSettings,
+        SerpAPIResearchSettings,
+        WebResearcherSettings,
+    )
+
     research_cfg_raw = config.get("research", {})
     research_cfg: Mapping[str, object] = research_cfg_raw if isinstance(research_cfg_raw, Mapping) else {}
     ollama_cfg_raw = research_cfg.get("ollama", {})
@@ -410,7 +417,7 @@ def _run_with_pgrp_timeout(
     return returncode, out, err
 
 
-# ── HTTP transport hardening (loopback gate + optional shared-secret auth) ──
+# ── HTTP transport hardening (loopback gate + public-bind authentication) ──
 #
 # CLAUDE.md documents that the MCP HTTP transport "refuses to bind to non-
 # loopback interfaces unless ``--allow-public-bind`` AND
@@ -418,8 +425,8 @@ def _run_with_pgrp_timeout(
 # streamable-http endpoint. The loopback gate previously existed only in
 # mcp_exploit_server.py (and the documented override flag did not exist at
 # all); mcp_server.py (defensive) had no gate. These helpers give both servers
-# the same gate + an optional ``MCP_HTTP_TOKEN`` bearer-token check so a
-# public bind is not unauthenticated.
+# the same gate and require ``MCP_HTTP_TOKEN`` bearer authentication whenever
+# an explicitly authorized public bind is used.
 
 _LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1"}
 
@@ -447,8 +454,8 @@ def _wrap_http_auth(app: Callable[..., Awaitable[None]], token: str) -> Callable
     """Wrap an ASGI app to require ``Authorization: Bearer <token>``.
 
     Pure-ASGI (no Starlette import) so it works with the streamable-http app
-    from FastMCP. When the ``MCP_HTTP_TOKEN`` env var is unset, callers should
-    not wrap -- the server is loopback-only by default. Comparison uses
+    from FastMCP. Loopback binds may omit the token; a public bind is rejected
+    before serving unless this middleware can enforce it. Comparison uses
     ``hmac.compare_digest`` to avoid timing side channels.
     """
     import hmac
@@ -494,6 +501,9 @@ def run_mcp_http_server(mcp: object, host: str, port: int, *, allow_public_bind:
     (the current SDK path) instead of the legacy ``server.run(transport="http")``.
     """
     assert_loopback_bind(host, allow_public_bind=allow_public_bind)
+    token = os.environ.get("MCP_HTTP_TOKEN", "").strip()
+    if host.strip().lower() not in _LOOPBACK_HOSTS and not token:
+        raise ValueError("MCP_HTTP_TOKEN is required when binding MCP HTTP to a non-loopback host")
     try:
         import uvicorn
 
@@ -502,7 +512,6 @@ def run_mcp_http_server(mcp: object, host: str, port: int, *, allow_public_bind:
         raise RuntimeError(
             "HTTP MCP transport needs uvicorn and starlette. Run: python -m pip install -r requirements.txt"
         ) from exc
-    token = os.environ.get("MCP_HTTP_TOKEN", "").strip()
     if token:
         app = _wrap_http_auth(app, token)
     uvicorn.run(app, host=host, port=port, log_level="info")

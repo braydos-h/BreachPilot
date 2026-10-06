@@ -61,7 +61,7 @@ Re-wrapped helpers (module-level re-exports for test patch points):
 | `run_safety_review` | `main.py:207` `async (client, model, result, target_ip, goal)` | Recon safety review |
 | `run_recon_assessment` | `main.py:315` `async (*, session, target_ip, reports_dir)` | Recon pipeline assessment |
 | `parse_args` | `main.py:334` `(argv) -> Namespace` | Full CLI parser (see arg groups) |
-| `_ensure_webui_build` | `main.py:464` `(ui) -> int` | `npm install && npm run build` if `webui/dist/index.html` missing |
+| `_ensure_webui_build` | `main.py:464` `(ui) -> int` | Reuse the packaged SPA resolved by `tools.paths.get_webui_dist_dir()`; otherwise build the checkout's `webui/dist/` if missing |
 | `_install_bun` | `main.py:502` `(ui) -> bool` | Best-effort bun install via npm / PowerShell / curl |
 | `_ensure_chatgpt_runtime` | `main.py:551` `(args) -> int` | Bun + oauth checkout + workspace build gate for `models.provider: chatgpt` |
 | `_open_browser_when_ready` | `main.py:673` `(host, port, ui)` | Loopback health-poll then `webbrowser.open` (daemon thread) |

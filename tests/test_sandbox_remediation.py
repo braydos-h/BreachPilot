@@ -22,8 +22,8 @@ def _clear_remediation_jobs():
     _rem._JOBS.clear()
 
 
-def _cfg(enabled=True, **overrides):
-    sec = {"enabled": enabled, "image": "breachpilot-sandbox:latest"}
+def _cfg(**overrides):
+    sec = {"enabled": True, "image": "breachpilot-sandbox:latest"}
     sec.update(overrides)
     return {"sandbox": sec}
 
@@ -174,11 +174,16 @@ def test_plan_macos_brew(monkeypatch):
     assert "brew" in (install["command_preview"] or "")
 
 
-def test_plan_disabled_returns_no_steps(monkeypatch):
-    monkeypatch.setattr(_rem, "_which", lambda cmd: "/usr/bin/docker")
-    plan = _rem.build_plan({"sandbox": {"enabled": False}})
-    assert plan["mode"] == "disabled"
-    assert plan["steps"] == []
+@pytest.mark.parametrize(
+    ("config", "message"),
+    [
+        ({"sandbox": {"enabled": False}}, "sandbox.enabled=false is unsafe"),
+        ({"sandbox": {"enabled": True, "fallback_native": True}}, "sandbox.fallback_native is unsupported"),
+    ],
+)
+def test_plan_rejects_unsafe_legacy_modes(config, message):
+    with pytest.raises(ValueError, match=message):
+        _rem.build_plan(config)
 
 
 def test_plan_never_uses_shell_true(monkeypatch):
@@ -371,9 +376,9 @@ def test_api_plan_returns_steps(tmp_path, monkeypatch):
     assert data["docker_cli_present"] is True
 
 
-def test_api_plan_disabled(tmp_path, monkeypatch):
+def test_api_plan_rejects_disabled_sandbox_config(tmp_path, monkeypatch):
     client, _ = _make_client(tmp_path, monkeypatch)
-    # rewrite config to disabled
+    # An old opt-out value must not produce a successful empty remediation plan.
     import yaml
 
     path = tmp_path / "config.yaml"
@@ -402,9 +407,9 @@ def test_api_plan_disabled(tmp_path, monkeypatch):
     from fastapi.testclient import TestClient
 
     client2 = TestClient(app)
-    resp = client2.get("/api/v1/system/sandbox/fix/plan", headers=_auth())
-    assert resp.status_code == 200
-    assert resp.json()["steps"] == []
+    response = client2.get("/api/v1/system/sandbox/fix/plan", headers=_auth())
+    assert response.status_code == 400
+    assert response.json()["error"]["code"] == "invalid_sandbox_config"
 
 
 def test_api_fix_requires_auth(tmp_path, monkeypatch):
@@ -513,7 +518,7 @@ def test_api_fix_concurrent_conflict(tmp_path, monkeypatch):
     assert resp2.status_code == 409
 
 
-def test_api_fix_disabled_returns_400(tmp_path, monkeypatch):
+def test_api_fix_rejects_disabled_sandbox_config(tmp_path, monkeypatch):
     import yaml
 
     client, path = _make_client(tmp_path, monkeypatch)
@@ -541,6 +546,7 @@ def test_api_fix_disabled_returns_400(tmp_path, monkeypatch):
     from fastapi.testclient import TestClient
 
     client2 = TestClient(app)
-    resp = client2.post("/api/v1/system/sandbox/fix", headers=_auth(), json={})
-    assert resp.status_code == 400
-    assert "disabled" in resp.json()["error"]["message"].lower()
+    response = client2.post("/api/v1/system/sandbox/fix", headers=_auth(), json={})
+    assert response.status_code == 400
+    assert response.json()["error"]["code"] == "invalid_sandbox_config"
+    assert _rem._JOBS == {}

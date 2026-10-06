@@ -117,7 +117,8 @@ def test_registered_configured_backend_becomes_available(_clean_registry):
         backend_id = "fake"
 
         def is_configured(self, config=None):
-            return True
+            sandbox = (config or {}).get("sandbox", {})
+            return bool(sandbox.get("enabled"))
 
         async def start_session(self, **kwargs):
             raise AssertionError("no launch in this test")
@@ -150,15 +151,29 @@ def test_registered_configured_backend_becomes_available(_clean_registry):
             raise AssertionError("no launch in this test")
 
     BACKEND_REGISTRY["fake"] = _Fake()
-    cfg = {"browser": {"enabled": True, "backend": "fake"}}
+    cfg = {
+        "browser": {"enabled": True, "backend": "fake"},
+        "sandbox": {"enabled": True, "image": "breachpilot-sandbox:browser"},
+    }
+    assert browser_runtime_available({"browser": {"enabled": True, "backend": "fake"}}) is False
+    assert (
+        browser_runtime_available({"browser": {"enabled": True, "backend": "fake"}, "sandbox": {"enabled": True}})
+        is False
+    )
     assert browser_runtime_available(cfg) is True
+    mismatched_worker = {
+        "browser": {"enabled": True, "backend": "fake"},
+        "sandbox": {"enabled": True, "image": "breachpilot-sandbox:latest"},
+    }
+    assert browser_runtime_available(mismatched_worker) is False
+    assert browser_available(mismatched_worker) is False
     assert browser_available(cfg) is True
     assert all(c["available"] is True for c in browser_capabilities(cfg))
     assert unmet_requirements(["browser.navigate", "browser.teleport"], cfg) == ["browser.teleport"]
 
 
-def test_playwright_registers_and_gates_on_sdk(_clean_registry, monkeypatch):
-    """register_playwright_backend is call-time; SDK presence gates availability."""
+def test_playwright_requires_a_sandbox_worker(_clean_registry, monkeypatch):
+    """Local Playwright installation alone cannot authorize agent browser execution."""
     from tools.browser import playwright_backend as _mod
     from tools.browser.capabilities import browser_runtime_available, register_playwright_backend
 
@@ -166,7 +181,15 @@ def test_playwright_registers_and_gates_on_sdk(_clean_registry, monkeypatch):
     assert "playwright" in BACKEND_REGISTRY
     cfg = {"browser": {"enabled": True, "backend": "playwright"}}
     monkeypatch.setattr(_mod, "playwright_present", lambda: False)
-    # No host SDK and no sandbox configured: still unavailable (fail closed).
+    # No worker config: unavailable even if Playwright is installed on the host.
     assert browser_runtime_available(cfg) is False
     monkeypatch.setattr(_mod, "playwright_present", lambda: True)
-    assert browser_runtime_available(cfg) is True
+    assert browser_runtime_available(cfg) is False
+
+    worker_cfg = {**cfg, "sandbox": {"enabled": True, "image": "breachpilot-sandbox:browser"}}
+    monkeypatch.setattr(_mod, "playwright_present", lambda: False)
+    assert browser_runtime_available(worker_cfg) is True
+    assert browser_runtime_available({**cfg, "sandbox": {"enabled": True}}) is False
+    assert (
+        browser_runtime_available({**cfg, "sandbox": {"enabled": True, "image": "breachpilot-sandbox:latest"}}) is False
+    )

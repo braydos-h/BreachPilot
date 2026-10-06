@@ -72,6 +72,7 @@ class EvalMetrics:
     total_actions: int = 0
     compromise_count: int = 0
     cred_dump_count: int = 0
+    unverified_claim_count: int = 0
     partial_count: int = 0
     failure_count: int = 0
     success_rate: float = 0.0
@@ -110,6 +111,7 @@ def compute_metrics(
     outcome_summary = str(final_result.get("outcome_summary", "") or "")
     compromise_count = _count_outcome(outcome_summary, "compromises")
     cred_dump_count = _count_outcome(outcome_summary, "cred dumps")
+    unverified_claim_count = _count_outcome(outcome_summary, "unverified claims")
     partial_count = _count_outcome(outcome_summary, "partials")
 
     total_actions = int(final_result.get("total_actions", 0) or 0)
@@ -143,6 +145,8 @@ def compute_metrics(
         verdict = "compromised"
     elif cred_dump_count > 0:
         verdict = "cred_dump"
+    elif unverified_claim_count > 0:
+        verdict = "unverified_claim"
     elif partial_count > 0:
         verdict = "partial"
     elif total_actions > 0:
@@ -157,6 +161,7 @@ def compute_metrics(
         total_actions=total_actions,
         compromise_count=compromise_count,
         cred_dump_count=cred_dump_count,
+        unverified_claim_count=unverified_claim_count,
         partial_count=partial_count,
         failure_count=failure_count,
         success_rate=success_rate,
@@ -197,6 +202,7 @@ def render_markdown(metrics: EvalMetrics) -> str:
         f"| Total actions | {metrics.total_actions} |",
         f"| Compromises | {metrics.compromise_count} |",
         f"| Credential dumps | {metrics.cred_dump_count} |",
+        f"| Unverified claims | {metrics.unverified_claim_count} |",
         f"| Partials | {metrics.partial_count} |",
         f"| Failures | {metrics.failure_count} |",
         f"| Success rate | {success_pct} |",
@@ -230,6 +236,7 @@ def render_html(metrics: EvalMetrics) -> str:
         ("Total actions", str(metrics.total_actions)),
         ("Compromises", str(metrics.compromise_count)),
         ("Credential dumps", str(metrics.cred_dump_count)),
+        ("Unverified claims", str(metrics.unverified_claim_count)),
         ("Partials", str(metrics.partial_count)),
         ("Failures", str(metrics.failure_count)),
         ("Success rate", success_pct),

@@ -125,22 +125,23 @@ def _call(mcp: FakeMCP, **kwargs: Any) -> str:
 # ── oracle verdicts ──────────────────────────────────────────────────────
 
 
-def test_verified_on_n_over_n_proof() -> None:
+def test_repeated_worker_shell_text_is_not_target_bound_proof() -> None:
     oracle = VerifyOracle(lambda _cmd: GOOD)
     outcome = oracle.verify_sync({"exec": "id"}, repeats=2)
-    assert outcome.verdict == VERIFIED
+    assert outcome.verdict == INCONCLUSIVE
+    assert "unverified_claim" in outcome.detail
     assert outcome.proof_capsule.n == 2
     assert outcome.proof_capsule.outputs == [GOOD, GOOD]
     assert outcome.proof_capsule.sha256 == proof_sha256("id", [GOOD, GOOD])
 
 
-def test_cred_dump_counts_as_proof() -> None:
-    assert judge_outputs([CRED, CRED])[0] == VERIFIED
-    assert judge_outputs([GOOD, CRED])[0] == VERIFIED
+def test_credential_text_is_not_target_bound_proof() -> None:
+    assert judge_outputs([CRED, CRED])[0] == INCONCLUSIVE
+    assert judge_outputs([GOOD, CRED])[0] == INCONCLUSIVE
 
 
-def test_flaky_proof_holds() -> None:
-    assert judge_outputs([GOOD, BAD])[0] == HOLDING
+def test_unverified_output_keeps_repeated_probe_inconclusive() -> None:
+    assert judge_outputs([GOOD, BAD])[0] == INCONCLUSIVE
     assert judge_outputs([GOOD, AMBIGUOUS])[0] == INCONCLUSIVE  # ambiguous poisons the capsule
     calls = [GOOD, BAD]
 
@@ -148,8 +149,7 @@ def test_flaky_proof_holds() -> None:
         return calls.pop(0)
 
     outcome = VerifyOracle(_flaky).verify_sync({"exec": "id"}, repeats=2)
-    assert outcome.verdict == HOLDING
-    assert "1/2" in outcome.detail
+    assert outcome.verdict == INCONCLUSIVE
 
 
 def test_all_failure_holds() -> None:
@@ -183,8 +183,8 @@ def test_missing_probe_or_executor_is_inconclusive() -> None:
 
 
 def test_classify_verify_output_matrix() -> None:
-    assert classify_verify_output(GOOD)[:2] == (True, False)
-    assert classify_verify_output(CRED)[:2] == (True, False)
+    assert classify_verify_output(GOOD)[:2] == (False, True)
+    assert classify_verify_output(CRED)[:2] == (False, True)
     assert classify_verify_output(BAD)[:2] == (False, False)
     assert classify_verify_output(AMBIGUOUS)[:2] == (False, True)
     assert classify_verify_output("")[:2] == (False, True)
@@ -202,27 +202,27 @@ def test_capsule_sha_replays() -> None:
 # ── MCP tool ─────────────────────────────────────────────────────────────
 
 
-def test_verify_finding_verified_on_n_over_n(tmp_path: Path) -> None:
+def test_verify_finding_does_not_verify_worker_output(tmp_path: Path) -> None:
     path = _write_report(tmp_path, "run1", [_finding()])
     mcp, _ctx, calls = _register(tmp_path, [GOOD, GOOD])
     out = _call(mcp, target_ip=TARGET, finding_id=FINDING_ID)
     assert "VERIFY_VERDICT:" in out
-    assert f"VERDICT: {VERIFIED}" in out
+    assert f"VERDICT: {INCONCLUSIVE}" in out
     assert len(calls) == 2  # the stored probe ran N times, nothing else
     saved = json.loads(path.read_text(encoding="utf-8"))["technical_findings"][0]
-    assert saved["verify_status"] == VERIFIED
+    assert saved["verify_status"] == INCONCLUSIVE
     assert saved["verify_history"][-1]["proof_capsule"]["n"] == 2
     assert saved["verify_history"][-1]["proof_capsule"]["sha256"]
 
 
-def test_verify_finding_holding_when_flaky(tmp_path: Path) -> None:
+def test_verify_finding_does_not_promote_flaky_worker_output(tmp_path: Path) -> None:
     path = _write_report(tmp_path, "run1", [_finding()])
     mcp, _ctx, calls = _register(tmp_path, [GOOD, BAD])
     out = _call(mcp, target_ip=TARGET, finding_id=FINDING_ID)
-    assert f"VERDICT: {HOLDING}" in out
+    assert f"VERDICT: {INCONCLUSIVE}" in out
     assert len(calls) == 2
     saved = json.loads(path.read_text(encoding="utf-8"))["technical_findings"][0]
-    assert saved["verify_status"] == HOLDING
+    assert saved["verify_status"] == INCONCLUSIVE
 
 
 def test_verify_finding_inconclusive_on_sandbox(tmp_path: Path) -> None:
@@ -255,7 +255,7 @@ def test_verify_finding_repeats_honored(tmp_path: Path) -> None:
     _write_report(tmp_path, "run1", [_finding()])
     mcp, _ctx, calls = _register(tmp_path, [GOOD, GOOD, GOOD])
     out = _call(mcp, target_ip=TARGET, finding_id=FINDING_ID, repeats=3)
-    assert f"VERDICT: {VERIFIED}" in out
+    assert f"VERDICT: {INCONCLUSIVE}" in out
     assert len(calls) == 3
 
 

@@ -11,6 +11,7 @@ never silently drift to uncontained host execution.
 from __future__ import annotations
 
 import copy
+import ipaddress
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -61,10 +62,8 @@ class SandboxConfig:
     image: str
     user: str
     read_only_rootfs: bool
-    # When the boot-time Docker probe fails (CLI/daemon/image missing), a
-    # server with fallback_native=true (explicit opt-in only) degrades to the
-    # documented legacy host-execution mode for the whole session instead of
-    # failing every execution closed. The default is false: fail closed.
+    # Retained only to reject legacy configuration that requested an unsafe
+    # host-execution fallback. A sandbox failure must always fail closed.
     fallback_native: bool = False
     auto_manage_docker: bool = False
     env_passthrough: list[str] = field(default_factory=list)
@@ -83,18 +82,39 @@ class SandboxConfig:
     allow_research_hosts: bool = False  # pinned exploit-research egress (github/gitlab), opt-in only
     remove_on_exit: bool = True
     remove_stale_on_startup: bool = True
-    multi_net_raw: bool = True  # NET_RAW for raw packet scanning (nmap -sS)
+    multi_net_raw: bool = False  # retained config field; raw packet sockets bypass the IP firewall
+
+    def __post_init__(self) -> None:
+        """Reject any configuration that disables a sandbox boundary.
+
+        These checks also protect callers that construct the dataclass
+        directly instead of using :meth:`from_config`.
+        """
+        if not self.enabled:
+            raise ValueError("sandbox.enabled=false is unsafe; agent execution requires the sandbox")
+        if self.fallback_native:
+            raise ValueError("sandbox.fallback_native is unsupported; sandbox failures must fail closed")
+        if not self.network_enforce:
+            raise ValueError("sandbox network enforcement is mandatory")
+        if not self.network_fail_closed:
+            raise ValueError("sandbox network policy failures must fail closed")
+        if self.multi_net_raw:
+            raise ValueError("sandbox NET_RAW is disabled because packet sockets bypass the IP firewall")
+        for cidr in self.extra_allow_cidrs:
+            try:
+                network = ipaddress.ip_network(cidr, strict=False)
+            except ValueError:
+                continue  # Invalid entries are ignored by the policy builder.
+            if network.prefixlen == 0:
+                raise ValueError(f"sandbox extra_allow_cidrs entry {cidr!r} authorizes all destinations")
 
     @classmethod
     def from_config(cls, config: dict[str, Any] | None) -> "SandboxConfig":
         """Parse the ``sandbox`` config section defensively.
 
         A missing ``sandbox`` section (or missing ``enabled`` key) means
-        CONTAINED defaults (``enabled: True``) -- partial config dicts
-        (tests, legacy callers) must never silently drift to uncontained
-        host execution. Only an explicit ``enabled: false`` disables the
-        sandbox (the documented legacy host-execution opt-out, additionally
-        gated by the native-execution consent env var).
+        CONTAINED defaults. Host execution opt-outs and fallback flags are
+        rejected; sandbox startup or policy failures must fail closed.
         """
         sec = _as_dict((config or {}).get("sandbox"))
         if not sec:
@@ -105,9 +125,19 @@ class SandboxConfig:
                 user="sandbox",
                 read_only_rootfs=True,
             )
+        if sec.get("enabled") is False:
+            raise ValueError("sandbox.enabled=false is unsafe; agent execution requires the sandbox")
+        if sec.get("fallback_native") is True:
+            raise ValueError("sandbox.fallback_native is unsupported; sandbox failures must fail closed")
         resources = _as_dict(sec.get("resources"))
         network = _as_dict(sec.get("network"))
         cleanup = _as_dict(sec.get("cleanup"))
+        if network.get("enforce") is False:
+            raise ValueError("sandbox network.enforce=false is unsafe; network enforcement is mandatory")
+        if network.get("fail_closed") is False:
+            raise ValueError("sandbox network.fail_closed=false is unsafe; policy failures must block execution")
+        if sec.get("multi_net_raw") is True:
+            raise ValueError("sandbox multi_net_raw=true is unsafe; packet sockets bypass the IP firewall")
         allow_dns = str(network.get("allow_dns", "controlled") or "controlled").strip().lower()
         if allow_dns not in ("controlled", "none"):
             allow_dns = "controlled"
@@ -117,9 +147,8 @@ class SandboxConfig:
         passthrough = [
             str(k).strip() for k in (sec.get("env_passthrough") or []) if isinstance(k, str) and str(k).strip()
         ]
-        # Missing key => contained (True); explicit non-bool garbage =>
-        # fail-closed ENABLED too (a typo must never silently opt out to
-        # host execution). Only explicit False disables.
+        # Missing key => contained (True); explicit non-bool garbage also
+        # defaults to contained. Explicit False is rejected by __post_init__.
         raw_enabled = sec.get("enabled", True)
         enabled = raw_enabled if isinstance(raw_enabled, bool) else True
         return cls(
@@ -137,8 +166,8 @@ class SandboxConfig:
             exec_timeout_seconds=_as_int(resources.get("timeout_seconds"), 300, minimum=5),
             output_max_bytes=_as_int(resources.get("output_max_bytes"), 2_000_000, minimum=1024),
             tmpfs_size_mb=_as_int(resources.get("tmpfs_size_mb"), 256, minimum=64),
-            network_enforce=_as_bool(network.get("enforce"), True),
-            network_fail_closed=_as_bool(network.get("fail_closed"), True),
+            network_enforce=True,
+            network_fail_closed=True,
             allow_dns=allow_dns,
             map_host_loopback=_as_bool(network.get("map_host_loopback"), False),
             extra_allow_cidrs=extra_cidrs,
@@ -146,7 +175,7 @@ class SandboxConfig:
             allow_research_hosts=_as_bool(network.get("allow_research_hosts"), False),
             remove_on_exit=_as_bool(cleanup.get("remove_on_exit"), True),
             remove_stale_on_startup=_as_bool(cleanup.get("remove_stale_on_startup"), True),
-            multi_net_raw=_as_bool(sec.get("multi_net_raw"), True),
+            multi_net_raw=False,
         )
 
 
@@ -207,7 +236,7 @@ class NetworkPolicy:
     authorized_destinations: list[str] = field(default_factory=list)
     explicitly_blocked: list[str] = field(default_factory=list)
     allow_dns: str = "controlled"
-    dns_servers: list[str] = field(default_factory=list)
+    dns_servers: list[str] = field(default_factory=list)  # always empty: worker DNS packets are blocked
     resolved_domains: dict[str, str] = field(default_factory=dict)  # domain -> primary IP (audit)
     # domain -> ALL resolved addresses (A+AAAA) authorizing the firewall IPs.
     # The primary-IP map above is kept for backwards compat; this map is the
@@ -219,20 +248,23 @@ class NetworkPolicy:
     # the Docker daemon) is authorized. Default False: the gateway is DROPped.
     allow_gateway: bool = False
 
+    def __post_init__(self) -> None:
+        if not self.enforced:
+            raise ValueError("sandbox network policy must be enforced")
+
     @property
     def allowed_dns_names(self) -> list[str]:
-        """In-container DNS name allowlist (resolver-layer enforcement view).
+        """Host-pinned name mapping allowlist for the worker.
 
         Built from the authorized FQDN set (``resolved_domains`` keys, which
         already include pinned research hosts when
         ``allow_research_hosts`` is enabled — see ``build_network_policy``).
-        Unauthorized names resolve only to unauthorized IPs, which the
-        default-DROP ruleset denies; the ``:53`` rules additionally confine
-        DNS traffic to the embedded resolver (``127.0.0.11``) so no
-        in-worker resolver or direct external ``:53`` can serve as a bypass.
-        An empty list under ``controlled`` degrades to ``none``
-        (see ``network._effective_dns``) — fail closed, never open.
+        The manager installs these names in worker ``/etc/hosts``. It blocks
+        all worker DNS packets, including Docker's embedded resolver, in both
+        ``controlled`` and ``none`` modes.
         """
+        if self.allow_dns != "controlled":
+            return []
         return sorted(self.resolved_domains)
 
     @property
@@ -243,7 +275,7 @@ class NetworkPolicy:
     def fingerprint(self) -> str:
         """Stable fingerprint for change detection (re-apply rules only when set changes).
 
-        Includes the DNS name allowlist (resolved domains + their addresses):
+        Includes the pinned name mapping allowlist (resolved domains + their addresses):
         dynamically discovered hosts refresh the policy, and the refresh must
         re-apply rules when the name set changes — not just the IP set.
         """

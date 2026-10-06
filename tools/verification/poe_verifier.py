@@ -1,9 +1,12 @@
 """Proof-of-execution (PoE) compromise verifier.
 
 A claimed compromise is only trusted once it has been independently verified
-against the live target. This module implements the verification primitive used
-by the self-verification core (Phase 1.3): given a ``tool_executor`` wired to
-the target, it
+against the live target. This primitive requires an authenticated,
+target-bound shell session. It does not use the generic MCP
+``run_exploit_terminal`` executor: that command runs inside the sandbox worker,
+so a nonce and ``id`` output from it would prove worker execution rather than
+target access. Given a ``target_shell_executor`` whose caller enforces target
+identity and scope, it
 
 1. writes a unique canary token to a temp file on the target filesystem,
 2. reads the token back (proving real write+read on the target, not a stub),
@@ -18,14 +21,11 @@ never raises into the caller -- a verification miss must not abort a campaign.
 
 Executor contract
 -----------------
-``tool_executor`` is the sync ``Callable[[str, dict[str, Any]], str]`` shape
-already used by ``tools.swarm_bridge.SwarmMcpBridge.dispatch`` and the
-autonomous orchestrator's ``tool_executor`` callback: ``(tool_name, args) ->
-result_text``. The verifier targets the ``run_exploit_terminal`` MCP tool, and
-parses the ``OUTPUT:`` section that ``tools/mcp_tools/terminal.run_exploit_terminal``
-appends to every successful result. Other result shapes (raw command output,
-``TERMINAL_RESULT:`` framing) are tolerated -- the parser just looks for the
-canary token anywhere in the returned text.
+``target_shell_executor`` is a synchronous
+``Callable[[target_ip, command], result]`` bound to an authenticated session on
+that exact target. The legacy ``tool_executor`` argument is accepted for
+source compatibility but is never invoked; callers must not adapt
+``run_exploit_terminal`` into a target verifier.
 
 The async entry point (``verify_compromise``) offloads each sync executor call
 to ``asyncio.to_thread`` so a blocking shell call does not stall the event
@@ -47,9 +47,9 @@ __all__ = [
     "extract_output",
 ]
 
-# Executor type: sync (tool_name, args) -> result_text. Kept permissive so both
-# the swarm bridge dispatch and bare callables fit.
+# Legacy generic MCP executor type, retained for source compatibility only.
 ToolExecutor = Callable[..., Any]
+TargetShellExecutor = Callable[[str, str], Any]
 
 # Result prefixes the executor may surface. Any result starting with these is
 # treated as a verification failure (the command did not actually run on the
@@ -108,22 +108,10 @@ def extract_output(result: Any) -> str:
     return result
 
 
-def _run_executor(tool_executor: ToolExecutor, command: str, target_ip: str) -> str:
-    """Invoke the sync executor once with ``run_exploit_terminal`` semantics.
-
-    The executor contract is ``(tool_name, args_dict) -> result_text`` -- the
-    same shape as ``SwarmMcpBridge.dispatch`` and the MCP ``ClientSession``
-    surface. Callers whose tool_executor uses a different positional shape
-    (e.g. the autonomous orchestrator's raw ``(cmd, {"target": ...})``
-    callback) are expected to wrap it; the verifier is consumed by the
-    orchestrator/swarm only in Phase 2, which owns that wiring.
-
-    Never raises -- returns a ``TOOL_EXECUTION_ERROR:`` string on any failure
-    so the caller can treat it as a blocked result.
-    """
-    args: dict[str, Any] = {"command": command, "target_ip": target_ip}
+def _run_target_shell(executor: TargetShellExecutor, command: str, target_ip: str) -> str:
+    """Invoke only the caller-supplied target-bound shell session."""
     try:
-        result = tool_executor("run_exploit_terminal", args)
+        result = executor(target_ip, command)
     except Exception as exc:  # noqa: BLE001 -- defensive, never raise
         return f"TOOL_EXECUTION_ERROR: {exc}"
     if result is None:
@@ -169,7 +157,7 @@ def _detect_shell_type(raw_output: str) -> str:
     return "shell" if raw_output.strip() else "unknown"
 
 
-def _verify_sync(tool_executor: ToolExecutor, target_ip: str) -> dict[str, Any]:
+def _verify_sync(target_shell_executor: TargetShellExecutor, target_ip: str) -> dict[str, Any]:
     """Core sync verification logic shared by the async + sync entry points."""
     token, token_path = _token_for(target_ip)
     evidence: list[str] = []
@@ -181,7 +169,7 @@ def _verify_sync(tool_executor: ToolExecutor, target_ip: str) -> dict[str, Any]:
         f"echo '---ID---'; id 2>/dev/null; "
         f"whoami 2>/dev/null; hostname 2>/dev/null"
     )
-    write_result = _run_executor(tool_executor, write_cmd, target_ip)
+    write_result = _run_target_shell(target_shell_executor, write_cmd, target_ip)
     if _is_blocked(write_result):
         evidence.append(f"canary write blocked: {write_result.strip()[:300]}")
         return {
@@ -236,18 +224,21 @@ def _verify_sync(tool_executor: ToolExecutor, target_ip: str) -> dict[str, Any]:
 
 
 def verify_compromise_sync(
-    tool_executor: ToolExecutor,
+    tool_executor: ToolExecutor | None,
     target_ip: str,
     *,
+    target_shell_executor: TargetShellExecutor | None = None,
     timeout: int = _DEFAULT_TIMEOUT,
 ) -> dict[str, Any]:
     """Synchronous PoE verification.
 
     Args:
-        tool_executor: Sync ``Callable[[str, dict[str, Any]], str]`` -- the
-            same shape as ``SwarmMcpBridge.dispatch`` / the orchestrator's
-            ``tool_executor`` callback.
+        tool_executor: Legacy generic MCP executor, accepted for source
+            compatibility and deliberately never called.
         target_ip: The target IP the compromise is claimed against.
+        target_shell_executor: Explicit authenticated shell callback bound to
+            ``target_ip``. The caller is responsible for target identity and
+            scope enforcement.
         timeout: Advisory outer timeout (seconds). The sync path does not
             enforce it itself (the executor owns command timeouts); it is
             accepted for API symmetry with the async entry point.
@@ -257,17 +248,28 @@ def verify_compromise_sync(
         ``privilege`` (str), ``shell_type`` (str), ``token`` (str),
         ``target_ip`` (str). Never raises.
     """
-    if not target_ip or not callable(tool_executor):
+    if not target_ip:
         return {
             "verified": False,
-            "evidence": ["missing target_ip or tool_executor"],
+            "evidence": ["missing target_ip"],
             "privilege": "unknown",
             "shell_type": "unknown",
             "token": "",
             "target_ip": target_ip or "",
         }
+    if not callable(target_shell_executor):
+        return {
+            "verified": False,
+            "evidence": [
+                "no target-bound shell verifier is configured; the generic MCP executor runs in the sandbox worker"
+            ],
+            "privilege": "unknown",
+            "shell_type": "unknown",
+            "token": "",
+            "target_ip": target_ip,
+        }
     try:
-        return _verify_sync(tool_executor, target_ip)
+        return _verify_sync(target_shell_executor, target_ip)
     except Exception as exc:  # noqa: BLE001 -- never raise into the campaign
         return {
             "verified": False,
@@ -280,9 +282,10 @@ def verify_compromise_sync(
 
 
 async def verify_compromise(
-    tool_executor: ToolExecutor,
+    tool_executor: ToolExecutor | None,
     target_ip: str,
     *,
+    target_shell_executor: TargetShellExecutor | None = None,
     timeout: int = _DEFAULT_TIMEOUT,
 ) -> dict[str, Any]:
     """Async PoE verification.
@@ -291,18 +294,16 @@ async def verify_compromise(
     the whole probe with an asyncio timeout. Returns the same dict shape as
     ``verify_compromise_sync``; never raises.
     """
-    if not target_ip or not callable(tool_executor):
-        return {
-            "verified": False,
-            "evidence": ["missing target_ip or tool_executor"],
-            "privilege": "unknown",
-            "shell_type": "unknown",
-            "token": "",
-            "target_ip": target_ip or "",
-        }
+    if not target_ip or not callable(target_shell_executor):
+        return verify_compromise_sync(
+            tool_executor,
+            target_ip,
+            target_shell_executor=target_shell_executor,
+            timeout=timeout,
+        )
     try:
         return await asyncio.wait_for(
-            asyncio.to_thread(_verify_sync, tool_executor, target_ip),
+            asyncio.to_thread(_verify_sync, target_shell_executor, target_ip),
             timeout=float(timeout),
         )
     except asyncio.TimeoutError:

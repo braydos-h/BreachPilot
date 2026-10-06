@@ -19,6 +19,7 @@ from typing import Any
 
 from tools.attack_ui import get_ui
 from tools.config_cli import load_config
+from tools.paths import get_webui_dist_dir
 
 ui = get_ui()
 
@@ -38,7 +39,15 @@ def _ensure_webui_build(ui: Any, *, force: bool = False) -> int:
     """Build webui/dist/ if missing (or always, when ``force`` is set). Returns 0 on success, non-zero on failure."""
     webui_dir = REPO_ROOT / "webui"
     dist_index = webui_dir / "dist" / "index.html"
-    if dist_index.exists() and not force:
+    packaged_dist = get_webui_dist_dir()
+    if packaged_dist is not None and (packaged_dist / "index.html").is_file() and not force:
+        return 0
+    if force and not (webui_dir / "package.json").is_file():
+        ui.error(
+            "This installation has a prebuilt WebUI but not its source; --rebuild requires a source checkout with Node/npm."
+        )
+        return 1
+    if dist_index.is_file() and not force:
         return 0
     npm_cmd = shutil.which("npm.cmd") or shutil.which("npm")
     node_cmd = shutil.which("node") or shutil.which("nodejs")

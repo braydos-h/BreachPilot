@@ -126,6 +126,23 @@ def test_scenario_summary_infra_errors_excluded_from_rate():
     assert s.success_probability == 1.0
 
 
+def test_scenario_summary_infra_only_is_unmeasured():
+    trials = [
+        _trial(status=TrialStatus.INFRASTRUCTURE_ERROR.value),
+        _trial(status=TrialStatus.SKIPPED.value),
+    ]
+
+    summary = compute_scenario_summary(trials, "s1")
+
+    assert summary.trials == 2
+    assert summary.infra_errors == 1
+    assert summary.success_probability is None
+    assert summary.success_variance is None
+    assert summary.success_stddev is None
+    assert summary.ci95_low is None
+    assert summary.ci95_high is None
+
+
 # ---------------------------------------------------------------------------
 # Run summary
 # ---------------------------------------------------------------------------
@@ -155,8 +172,29 @@ def test_run_summary_aggregate():
 def test_run_summary_empty():
     summary = compute_run_summary([], run_id="r1", suite="xben")
     assert summary.trials_total == 0
-    assert summary.verified_success_rate == 0.0
+    assert summary.verified_success_rate is None
+    assert summary.false_positive_rate is None
+    assert summary.false_negative_rate is None
     assert summary.estimated_cost is None
+
+
+def test_run_summary_all_infrastructure_or_skipped_is_unmeasured():
+    trials = [
+        _trial("infra", status=TrialStatus.INFRASTRUCTURE_ERROR.value),
+        _trial("skipped", status=TrialStatus.SKIPPED.value),
+    ]
+
+    summary = compute_run_summary(trials, run_id="r1", suite="xben")
+
+    assert summary.trials_total == 2
+    assert summary.trials_completed == 0
+    assert summary.infra_error_count == 1
+    assert summary.verified_success_rate is None
+    assert summary.false_positive_rate is None
+    assert summary.false_negative_rate is None
+    assert summary.to_dict()["verified_success_rate"] is None
+    assert summary.scenarios[0].success_probability is None
+    assert summary.scenarios[1].success_probability is None
 
 
 def test_run_summary_from_dict_roundtrip():

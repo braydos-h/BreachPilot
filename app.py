@@ -197,7 +197,11 @@ def create_app(
         from starlette.routing import Route
         from starlette.staticfiles import StaticFiles
 
-        webui_dist = Path(__file__).resolve().parent / "webui" / "dist"
+        from tools.paths import get_webui_dist_dir
+
+        webui_dist = get_webui_dist_dir()
+        if webui_dist is None:
+            webui_dist = Path(__file__).resolve().parent / "webui" / "dist"
         index_html = webui_dist / "index.html"
         assets_dir = webui_dist / "assets"
         if index_html.exists():

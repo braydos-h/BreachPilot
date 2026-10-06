@@ -46,6 +46,13 @@ def _fmt_pct(value: Any) -> str:
         return "n/a"
 
 
+def _fmt_probability(value: Any) -> str:
+    try:
+        return f"{float(value):.2f}"
+    except (TypeError, ValueError):
+        return "n/a"
+
+
 def _fmt_duration(seconds: Any) -> str:
     try:
         s = float(seconds)
@@ -112,7 +119,7 @@ def render_report_markdown(run: dict[str, Any], summary: dict[str, Any] | None) 
         )
         lines.append(
             f"| {sc.get('scenario_id', '?')} | {sc.get('verified', 0)}/{sc.get('trials', 0)} "
-            f"| {sc.get('trials', 0)} | {sc.get('success_probability', 0):.2f} | {ci} "
+            f"| {sc.get('trials', 0)} | {_fmt_probability(sc.get('success_probability'))} | {ci} "
             f"| {sc.get('false_positives', 0)} | {_fmt_duration(sc.get('median_duration'))} |"
         )
     failures = s.get("failure_categories", {}) or {}
@@ -132,7 +139,7 @@ def render_report_html(run: dict[str, Any], summary: dict[str, Any] | None) -> s
         md_rows.append(
             f"<tr><td>{_html.escape(str(sc.get('scenario_id', '?')))}</td>"
             f"<td>{sc.get('verified', 0)}/{sc.get('trials', 0)}</td>"
-            f"<td>{sc.get('success_probability', 0):.2f}</td>"
+            f"<td>{_fmt_probability(sc.get('success_probability'))}</td>"
             f"<td>{sc.get('false_positives', 0)}</td>"
             f"<td>{_fmt_duration(sc.get('median_duration'))}</td></tr>"
         )

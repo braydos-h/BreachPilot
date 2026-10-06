@@ -1,7 +1,7 @@
 # Deployment
 
 How to stand up BreachPilot on a fresh operator box: supported platforms,
-dependency installation, Ollama wiring, nmap privileges, the WebUI build, and
+dependency installation, provider setup, nmap privileges, the WebUI build, and
 running the API daemon as a service. Ends with runtime state layout, backup
 guidance, and a production hardening checklist.
 
@@ -29,10 +29,11 @@ Python-only exploits, Linux attackers get the full Kali toolkit
 - **Python 3.11+** — `pyproject.toml:11` (`requires-python = ">=3.11"`).
   Note `main.py --doctor` rejects 3.10 and below (README.md:113).
 - **`nmap`** on `PATH` (or set `nmap.path` in `config.yaml:63`).
-- **Ollama** — cloud default, or a local daemon (see [Ollama model
-  availability](#ollama-model-availability)).
-- **Node.js + npm** — only needed for the first `--web` run (builds
-  `webui/dist/`).
+- **Chat provider credentials** — the checked-in config selects OpenCode Go
+  (`OPENCODE_GO_API_KEY`). Ollama is an optional chat provider; see
+  [Ollama model availability](#ollama-model-availability) when selecting it.
+- **Node.js + npm** — needed to build the SPA from a source checkout when
+  `webui/dist/` is absent. Published Python wheels include the prebuilt SPA.
 - Optional Linux arsenal: Metasploit, searchsploit/exploitdb, impacket, tmux.
 
 ## Install (step by step)
@@ -63,19 +64,27 @@ URL in this section so a 404 can never ship again.
 
 Dev path (`main|bash`) is dev-only with a warning — the easy path must be a
 pinned artifact (today: the `v0.49.2` tag tarball; once published: the
-versioned release asset), not mutable `main`. Windows `install.ps1` gets the
-same checksum treatment per release once assets are published.
+versioned release asset), not mutable `main`. The release workflow publishes
+both `install-<tag>.sh` and `install-<tag>.ps1` with separate checksums and
+build attestations. Before running the Windows installer, download the
+matching `.sha256` file and verify with:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\verify-installer.ps1 .\install-v0.68.4.ps1
+```
+
+The verifier requires GitHub CLI attestation support by default. Use
+`-ChecksumOnly` only when checksum-only verification is acceptable.
 
 ### Windows (one-click)
 
-This repo's primary dev platform. **New users: double-click `install.bat` in
-Explorer** — no PowerShell knowledge needed. From a terminal:
+Windows is a supported secondary platform with Python-only exploit tooling.
+**New users: double-click `install.bat` in Explorer** — no PowerShell
+knowledge needed. From a terminal:
 
 ```powershell
 # Easiest path (recommended for new users):
-.\install.bat          # one-click: checks/installs Python/Node/Nmap/Ollama via winget,
-                       # creates .venv, installs deps, builds WebUI, pulls models,
-                       # guides OLLAMA_API_KEY setup, runs --doctor, installs `breachpilot`
+.\install.bat          # provider-aware setup, dependencies, WebUI, --doctor, launcher
 .\START.bat            # after install: double-click to launch (WebUI at http://127.0.0.1:8765)
 # Options: install.bat --check  (audit only), --yes (non-interactive), --help, --uninstall
 
@@ -89,10 +98,17 @@ python main.py --doctor
 python main.py --self-test
 ```
 
-`install.bat` is idempotent and non-fatal on missing optional tools; it also
-installs a `breachpilot` command to `%USERPROFILE%\.local\bin` that always runs from
-the repo root. Uninstall with `install.bat --uninstall`. `START.bat` is a
-double-click launcher that passes args through (e.g. `START.bat --menu`).
+`install.bat` wraps `install.ps1` and is idempotent. The installer reads the
+selected chat and embedding providers before deciding whether Ollama or model
+pulls are needed. With the checked-in OpenCode Go + `embeddings.provider: none`
+configuration it skips Ollama installation and model pulls for chat/embeddings;
+research is configured separately and selects Ollama with SerpAPI fallback.
+Configure `OPENCODE_GO_API_KEY`
+through `python main.py --setup-api-keys` or the process environment before
+`--doctor`. It also installs a `breachpilot` command to
+`%USERPROFILE%\.local\bin` that always runs from the repo root. Uninstall with
+`install.bat --uninstall`. `START.bat` is a double-click launcher that passes
+args through (e.g. `START.bat --menu`).
 
 ### Linux (./install.sh one-shot)
 
@@ -128,9 +144,16 @@ source .venv/bin/activate
 python -m pip install -r requirements.txt
 ```
 
-`./install.sh` is the primary path (OS prereqs + Ollama + venv + WebUI +
-models + `--doctor` + `bp`/`breachpilot` launchers; `./install.sh --full`
-for the full Kali arsenal). `scripts/setup-linux.sh` is the lightweight
+`./install.sh` is the primary path (OS prereqs + provider-aware optional
+Ollama setup + venv + WebUI + `--doctor` + `bp`/`breachpilot` launchers;
+`./install.sh --full` for the full Kali arsenal). With the checked-in config,
+the active chat provider is OpenCode Go and provider-aware Flow A embeddings
+are disabled, so installer Ollama/model setup is skipped. Research is a
+separate surface and the checked-in config selects Ollama first with SerpAPI
+fallback. On Linux, both installers key Ollama setup to
+`models.provider`; if only `embeddings.provider` selects Ollama, install and
+configure Ollama separately. The Windows PowerShell installer checks both
+provider settings. `scripts/setup-linux.sh` is the lightweight
 alternative: it checks for `nmap`, `ollama`, `tmux`, `searchsploit`,
 `msfconsole`, `hydra`, and `impacket` and prints install hints for anything
 missing (setup-linux.sh:42-48). It never installs or runs anything against a
@@ -181,7 +204,8 @@ tree. 5. Full build inside staging (venv, pinned pip install, WebUI,
 sandbox image). 6. Full validation (tree, imports, config parse, launcher,
 WebUI bundle, `--doctor --json` core checks). 7. `cp -a` backup of the live
 install. 8. Atomic swap (live aside → staged in). 9. Post-activation
-validation (Ollama, models, launchers, fresh `.install-info`). 10. Drop the
+validation (active provider/model checks, launchers, fresh `.install-info`; an
+Ollama check runs only when the selected configuration needs it). 10. Drop the
 backup only on success.
 
 Any failure after step 7 restores the backup automatically (including on
@@ -211,8 +235,9 @@ are left alone.
 | Other Linux / other arch | Refused with a clear message (exit 3) |
 
 Requirements: Python ≥ 3.11 (`requires-python`, pyproject.toml:11), git,
-curl, tar, Node 18+ (WebUI build only), Docker (sandbox worker image only,
-default-on and fail-closed). nmap is core (doctor fails without it);
+curl, tar, Node 20.19+ (20.x), 22.12+ (22.x), or 24+ for the complete locked
+WebUI build/test toolchain (Vite and installer checks accept Node 18+), Docker
+(sandbox worker image only, default-on and fail-closed). nmap is core (doctor fails without it);
 scanners/credentials/exploit binaries are optional per-tool. The installer
 determines sudo needs upfront and never prompts mid-run after long work.
 
@@ -245,8 +270,10 @@ python -m pip install -e ".[dev]"            # packaging / lint / coverage
 
 ## Ollama model availability
 
-Default path is **Ollama Cloud**; the same code path runs against a local
-daemon after a one-line config swap.
+This section describes the optional Ollama chat provider. The checked-in
+`config.yaml` selects OpenCode Go for chat; when you select Ollama, its
+`ollama.host` setting defaults to the cloud endpoint and can point to a local
+daemon instead.
 
 | Setting | Default | Purpose |
 |---|---|---|
@@ -255,7 +282,7 @@ daemon after a one-line config swap.
 | `ollama.api_key_env` (config.yaml:4) | `OLLAMA_API_KEY` | Env var for the cloud bearer token |
 | `ollama.embed_host` (config.yaml:5) | `http://localhost:11434` | Local embeddings endpoint; falls back to `host` when absent |
 
-- **Cloud (default):** export `OLLAMA_API_KEY` (or store via
+- **Ollama Cloud:** when Ollama is the selected chat provider, export `OLLAMA_API_KEY` (or store via
   `python main.py --setup-api-keys` → `secr.json`, gitignored). Missing key
   surfaces as a 401 on the first chat. The ollama Python client auto-attaches
   `Authorization: Bearer $OLLAMA_API_KEY` to every request, so the host swap
@@ -266,9 +293,13 @@ daemon after a one-line config swap.
   1-token generation to verify; local models report an `ollama pull <spec>`
   hint if missing (README.md:170-172). Cloud specs are verified with
   `ollama run <spec>` instead.
-- **Embeddings stay local by default:** `nomic-embed-text` via `embed_host`
-  (config.yaml:5, config.yaml:504-505). Required for semantic memory/skills;
-  `install.bat`/`install.ps1` pulls it when Ollama is available.
+- **Embeddings are independent of chat.** The checked-in `config.yaml` sets
+  `embeddings.provider: none`, which makes provider-aware Flow A memory/skill
+  consumers issue no embedding requests and use keyword/tag fallbacks. Frozen
+  Flow B still uses legacy Ollama semantic memory when enabled. The schema
+  fallback when this key is omitted is `ollama`; if selected, `nomic-embed-text` uses
+  `ollama.embed_host` (local by default), and the provider-aware installer can
+  offer the model setup.
 
 There is no `.env` auto-load — keys come from process environment variables or
 `secr.json` (README.md:143-160).
@@ -297,14 +328,19 @@ There is no `.env` auto-load — keys come from process environment variables or
 ## WebUI build
 
 The SPA is a Vite + React + TypeScript app under `webui/`. It is **not**
-pre-built in the repo — `webui/dist/` is gitignored and created on demand.
+pre-built in the source repository — `webui/dist/` is gitignored and created
+on demand. Release wheels install that build under the Python environment's
+data prefix at `webui/dist`; `tools.paths.get_webui_dist_dir()` resolves it
+when the app is launched outside a checkout.
 
-- First `python main.py --web` run runs `npm install && npm run build` in
-  `webui/` (`_ensure_webui_build`, main.py:436-462; build = `tsc -b && vite
-  build`, webui/package.json:8), then serves `webui/dist/` at `/` and opens
-  `http://127.0.0.1:8765` (main.py:537-558).
-- Node/npm must be on `PATH` (main.py:442-446). Build manually with
-  `cd webui && npm install && npm run build`.
+- In a source checkout, the first `python main.py --web` run executes
+  `npm ci && npm run build` in `webui/` when `webui/dist/index.html` is
+  missing, then serves the SPA at `/` and opens `http://127.0.0.1:8765`.
+- Release wheels contain the SPA under the install data prefix; both the
+  `breachpilot --web` bootstrap and `create_app` resolve that copy through
+  `tools.paths.get_webui_dist_dir()`, so an installed wheel serves it without
+  Node.js or a repository checkout. `--rebuild` still needs the source tree
+  and Node/npm. Build manually with `cd webui && npm install && npm run build`.
 - Manual rebuild: `npm install`, `npm run dev` (port 5173, strictPort), `npm
   run build`, `npm run preview` (webui/package.json:6-10; webui.md:81-95).
 - The built UI talks to `/api/v1` REST + WebSocket with bearer-token auth; see
@@ -371,7 +407,8 @@ All runtime state is gitignored (`.gitignore:22-26,37`):
 |---|---|---|
 | `reports/<run_id>/` | Per-run reports, logs, eval trees (`reports/eval/<run_id>/`) | CLI/daemon runs, `--eval` |
 | `reports/api_runtime.db` | WebUI daemon run/decision state (SQLite) | `--demon`/`--daemon` |
-| `exploit_workspace/<ip>/<attempt_id>/` | Exploit attempts + `exploit_audit.jsonl` (SHA256-chained audit) | Attack runs |
+| `reports/<run_id>/exploit_audit.jsonl` | Host-owned SHA256-chained audit trail, outside the worker mount | Attack runs |
+| `exploit_workspace/<ip>/<attempt_id>/` | Per-attempt exploit files and outputs | Attack runs |
 | `exploit_workspace/loot/` | Loot workspace (`exploit.loot_workspace`, config.yaml:89) | Attack runs |
 | `research_workspace/<mission_id>/` | Flow B mission data (SQLite) | `cli.py` missions |
 | `swarm_workspace/` | Swarm artifacts | Swarm runs |
@@ -475,7 +512,8 @@ Deployment-time verification for a box you intend to run for a while:
 |---|---|
 | Windows operator, no Kali tools | `install.bat` (or venv + `requirements.txt`); Python-only exploits; embed host `http://localhost:11434` |
 | Linux operator, full Kali arsenal | `./install.sh` (primary; `INSTALL_KALI_TOOLS=1 ./install.sh` for searchsploit/Metasploit/hydra/impacket; `scripts/setup-linux.sh` is the lightweight alternative); decide `nmap.sudo` |
-| Cloud-first LLM (default) | `ollama.host: https://api.ollama.com` + `OLLAMA_API_KEY`; embeddings stay local via `embed_host` |
+| OpenCode Go chat (checked-in default) | Configure `OPENCODE_GO_API_KEY`; checked-in embeddings are disabled (`none`), while the schema fallback is Ollama |
+| Ollama Cloud chat | Select `models.provider: ollama`, then configure `ollama.host: https://api.ollama.com` + `OLLAMA_API_KEY` |
 | Air-gapped / local LLM | `ollama.host: http://localhost:11434`, pull local-weight models (e.g. `ollama pull gemma3:27b`) + `nomic-embed-text`; never a `:cloud` spec (cloud pulls only register a pointer); no API key needed |
 | Headless service (API only) | `--daemon` (optionally `--api-port`), daemonized via systemd/NSSM; skip the SPA |
 | SPA served locally | `--web` (builds `webui/dist/` once; requires Node/npm at build time only) |

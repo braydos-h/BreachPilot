@@ -85,6 +85,38 @@ async def test_dispatch_call_tool_error_returns_tool_execution_error(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_timed_out_call_blocks_retries_and_drains_before_session_close():
+    """An unknown remote outcome must not trigger a duplicate tool action."""
+    bridge = SwarmMcpBridge()
+    bridge._tool_call_timeout_seconds = 0.01
+    policy = MagicMock()
+    policy.approve_action = AsyncMock(return_value=True)
+    call_started = asyncio.Event()
+
+    async def _slow_call(*_args: Any, **_kwargs: Any) -> Any:
+        call_started.set()
+        await asyncio.Event().wait()
+
+    session = MagicMock()
+    session.call_tool = AsyncMock(side_effect=_slow_call)
+    bridge.attach(session, [], policy, loop=asyncio.get_running_loop())
+
+    timed_out = await asyncio.to_thread(bridge.dispatch, "run_exploit_terminal", {"command": "echo first"})
+    assert timed_out.startswith("TOOL_EXECUTION_ERROR:")
+    assert "outcome is unknown" in timed_out
+    assert call_started.is_set()
+
+    blocked = await asyncio.to_thread(bridge.dispatch, "run_exploit_terminal", {"command": "echo retry"})
+    assert blocked.startswith("BLOCKED:")
+    assert "unknown" in blocked
+    session.call_tool.assert_awaited_once()
+
+    bridge.stop()
+    await asyncio.wait_for(bridge.wait_until_idle(), timeout=1)
+    assert not bridge._inflight
+
+
+@pytest.mark.asyncio
 async def test_dispatch_approve_error_returns_tool_execution_error(tmp_path):
     bridge = SwarmMcpBridge()
     policy = MagicMock()

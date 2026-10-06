@@ -38,6 +38,13 @@ Three distinct provider surfaces (from `docs/providers.md`):
 | Embeddings | `tools/providers/embeddings.py` → `EmbeddingProvider` | `ollama` (default), `none` |
 | Research (web search/fetch) | `tools/web_researcher.py` → `ResearchProvider` | `ollama`, `serpapi` |
 
+The embedding table's default is the schema fallback. The checked-in
+`config.yaml` selects `embeddings.provider: none`; provider-aware Flow A memory
+and skill consumers then use deterministic fallback ranking/storage without
+requests. Frozen Flow B's `legacy/agent_loop.py` still builds the legacy
+Ollama semantic-memory provider when semantic memory is enabled, so this
+setting does not disable that frozen path.
+
 ## `types.py` — the canonical contract
 
 `ModelClient` (dataclass) is the provider interface — a thin wrapper holding the chat/stream callables, the model id, and the provider id used for telemetry attribution (`types.py:143-166`):
@@ -230,7 +237,7 @@ Exactly four steps, all in new code — if a new backend needs edits to the agen
 | `tests/test_provider_registry.py` | yes | Lazy built-in registration, duplicate-id rejection |
 | `tests/test_provider_contract.py` | yes | Shared interface contract over `PROVIDERS.all()` |
 | `tests/test_embeddings_provider.py` | yes | `none` vs `ollama` selection, config application |
-| `tests/test_no_ollama_regression.py` | yes | Engine runs Ollama-free; ollama SDK import isolated to its adapter |
+| `tests/test_no_ollama_regression.py` | yes | Blocks the Ollama SDK while checking selected chat-provider imports/router, doctor, and titler paths; it does not cover independent research or frozen Flow B |
 | `tests/test_opencode_go_provider.py` | yes | Present; Responses-API adapter behavior |
 | `tests/test_chatgpt_provider.py` | yes | Present; proxy adapter behavior |
 | `tests/test_provider_switching.py` | yes | Present; active-provider switching |

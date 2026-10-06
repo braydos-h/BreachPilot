@@ -10,10 +10,12 @@ from typing import Any
 import pytest
 
 from tools.web_researcher import (
+    RESEARCH_PROVIDER_UNAVAILABLE,
     FetchResult,
     OllamaResearchProvider,
     OllamaResearchSettings,
     ResearchProvider,
+    ResearchProviderError,
     SearchResult,
     WebResearcher,
     WebResearcherSettings,
@@ -46,6 +48,14 @@ class FakeSerpAPIProvider(FakeProvider):
     name = "serpapi"
 
 
+def test_build_researcher_imports_runtime_settings_lazily() -> None:
+    from tools.mcp_shared import build_researcher
+
+    researcher = build_researcher({"research": {"enabled": False}})
+
+    assert researcher.settings.enabled is False
+
+
 def test_validate_url_blocks_private_and_internal_hosts() -> None:
     blocked = [
         "http://127.0.0.1/",
@@ -66,7 +76,9 @@ def test_validate_url_blocks_private_and_internal_hosts() -> None:
 
 
 @pytest.mark.asyncio
-async def test_ollama_provider_uses_mocked_web_search_and_fetch(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_ollama_provider_searches_but_never_fetches_urls(monkeypatch: pytest.MonkeyPatch) -> None:
+    web_fetch_calls: list[str] = []
+
     class FakeOllamaModule:
         @staticmethod
         def web_search(query: str, max_results: int = 8) -> dict[str, Any]:
@@ -84,11 +96,8 @@ async def test_ollama_provider_uses_mocked_web_search_and_fetch(monkeypatch: pyt
 
         @staticmethod
         def web_fetch(url: str) -> dict[str, Any]:
-            return {
-                "title": "Fetched source",
-                "content": "CVE-2024-12345 affects test product versions before 1.2.3.",
-                "links": ["https://cve.org/CVERecord?id=CVE-2024-12345"],
-            }
+            web_fetch_calls.append(url)
+            raise AssertionError("URL fetches must stay on the validated local transport")
 
     monkeypatch.setitem(sys.modules, "ollama", FakeOllamaModule)
     monkeypatch.setenv("OLLAMA_API_KEY", "test-key")
@@ -100,13 +109,38 @@ async def test_ollama_provider_uses_mocked_web_search_and_fetch(monkeypatch: pyt
     )
 
     results = await provider.search("CVE-2024-12345", max_results=2)
-    fetched = await provider.fetch(results[0].url)
 
     assert results[0].provider == "ollama"
     assert results[0].url == "https://nvd.nist.gov/vuln/detail/CVE-2024-12345"
-    assert fetched.provider == "ollama"
-    assert "CVE-2024-12345" in fetched.content
-    assert fetched.links == ["https://cve.org/CVERecord?id=CVE-2024-12345"]
+    with pytest.raises(ResearchProviderError) as exc_info:
+        await provider.fetch(results[0].url)
+    assert exc_info.value.code == RESEARCH_PROVIDER_UNAVAILABLE
+    assert web_fetch_calls == []
+
+
+@pytest.mark.asyncio
+async def test_research_falls_back_to_scope_checked_fetcher(monkeypatch: pytest.MonkeyPatch) -> None:
+    class FakeStdlibProvider(FakeProvider):
+        name = "stdlib"
+
+    class FakeOllamaModule:
+        @staticmethod
+        def web_fetch(_url: str) -> dict[str, Any]:
+            raise AssertionError("unvalidated Ollama URL fetch must not be called")
+
+    monkeypatch.setitem(sys.modules, "ollama", FakeOllamaModule)
+    researcher = WebResearcher(
+        WebResearcherSettings(provider="ollama", fallback_provider="", min_source_quality="low"),
+        providers={
+            "ollama": OllamaResearchProvider(OllamaResearchSettings(), timeout_seconds=1, max_content_chars=1000),
+            "stdlib": FakeStdlibProvider(fetch_content="safe local transport"),
+        },
+    )
+
+    fetched = await researcher.fetch_result_async("https://example.com/advisory")
+
+    assert fetched.provider == "stdlib"
+    assert "safe local transport" in fetched.content
 
 
 @pytest.mark.asyncio

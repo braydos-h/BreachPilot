@@ -10,15 +10,17 @@ i.e. one per attack run):
 FAIL CLOSED contract: any creation, policy, scope, or workspace failure raises
 a ``SandboxError`` subclass with a structured ``code``; the MCP tools convert
 it into a ``SANDBOX_*`` result block and never fall back to host execution.
-``resolve_manager`` returns None ONLY for the explicit native opt-out
-(``sandbox.enabled: false`` + consent env); an absent section resolves to
-contained defaults, never to silent host execution.
+An absent configuration section resolves to contained defaults; invalid
+legacy settings that disable containment or request host fallback are rejected.
 
 Audit: every execution writes sandbox-context rows (container id, image,
 network-authorization decision, authorized set, exit code, duration, cleanup
-result) into ``exploit_audit.jsonl`` through the shared kernel auditor
-(secret redaction reused from ``tools/kernel/audit.py``; the sandbox payload
-is secret-free by construction -- see ``policy.audit_policy_payload``).
+result) into the selected audit file through the shared kernel auditor. The
+production MCP server selects a host-owned path outside the worker's writable
+workspace bind; direct compatibility callers may retain the workspace-local
+default. Secret redaction is reused from ``tools/kernel/audit.py``; the
+sandbox payload is secret-free by construction (see
+``policy.audit_policy_payload``).
 """
 
 from __future__ import annotations
@@ -27,6 +29,7 @@ import atexit
 import json
 import logging
 import secrets
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -35,12 +38,14 @@ from tools.sandbox import docker_backend as _db
 from tools.sandbox import policy as _policy
 from tools.sandbox.exceptions import (
     SandboxError,
+    SandboxPolicyError,
     SandboxScopeError,
     SandboxUnavailableError,
     SandboxWorkspaceError,
 )
 from tools.sandbox.models import NetworkPolicy, SandboxConfig, SandboxResult, SandboxSpec
-from tools.sandbox.network import apply_network_policy
+from tools.sandbox.network import apply_network_policy, read_drop_packet_count
+from tools.sandbox.telemetry import write_network_scope_measurement
 
 logger = logging.getLogger(__name__)
 
@@ -48,59 +53,11 @@ __all__ = [
     "SandboxManager",
     "resolve_manager",
     "status_report",
-    "NATIVE_CONSENT_ENV",
-    "NATIVE_CONSENT_VALUE",
-    "native_execution_consent",
     "CONTAINER_WORKSPACE",
     "BOOT_STATE_FILE",
     "boot_state_path",
     "read_boot_state",
 ]
-
-#: Env gate that keeps native (host) execution developer-only (#07). Normal
-#: product UX is sandbox-required: setting ``sandbox.enabled: false`` or
-#: ``sandbox.fallback_native: true`` additionally requires this exact value,
-#: so the operator can never silently drift toward host execution via config
-#: alone. CI/tests set it explicitly when they intend native mode.
-NATIVE_CONSENT_ENV = "BREACHPILOT_ALLOW_NATIVE_EXECUTION"
-NATIVE_CONSENT_VALUE = "I_UNDERSTAND_THIS_RUNS_ON_THE_HOST"
-
-
-def native_execution_consent(config: dict[str, Any] | None = None) -> tuple[bool, str]:
-    """Check whether host (native) execution is explicitly consented.
-
-    Returns ``(True, "")`` when the effective config does not request native
-    execution (sandbox enabled with ``fallback_native: false`` — the normal
-    contained path needs no consent), or when the consent env var carries the
-    exact acknowledgement value. Returns ``(False, reason)`` when the config
-    requests native execution (``sandbox.enabled: false`` or
-    ``sandbox.fallback_native: true``) without that env consent, with a
-    remediation message naming the env var. Never raises; never logs secrets.
-    """
-    import os
-
-    cfg = config if isinstance(config, dict) else {}
-    sandbox = cfg.get("sandbox", {}) if isinstance(cfg.get("sandbox"), dict) else {}
-    enabled = sandbox.get("enabled", True)
-    # A missing sandbox section (or missing enabled key) means contained
-    # defaults — no consent needed.
-    if isinstance(enabled, bool) and enabled is False:
-        wants_native = True
-        why = "sandbox.enabled: false"
-    elif bool(sandbox.get("fallback_native", False)):
-        wants_native = True
-        why = "sandbox.fallback_native: true"
-    else:
-        return True, ""
-    if os.environ.get(NATIVE_CONSENT_ENV, "") == NATIVE_CONSENT_VALUE:
-        return True, ""
-    return False, (
-        f"native execution requested ({why}) but {NATIVE_CONSENT_ENV} is not set to "
-        f"the acknowledgement value; host execution is developer-only. To proceed "
-        f"explicitly, export {NATIVE_CONSENT_ENV}={NATIVE_CONSENT_VALUE} — otherwise "
-        f"keep the sandbox contained (sandbox.enabled: true, fallback_native: false)."
-    )
-
 
 CONTAINER_WORKSPACE = "/workspace"
 
@@ -148,59 +105,45 @@ def _scope_command_from_argv(argv: list[str]) -> str:
         return ""
 
 
-def _build_manager(cfg: SandboxConfig, workspace: Path, config: dict[str, Any] | None) -> SandboxManager:
-    # cap_raw honors sandbox.multi_net_raw: NET_RAW is the ONLY capability the
-    # worker may receive (raw packet scanning); NET_ADMIN is never granted.
-    return SandboxManager(cfg, workspace, config_dict=config, backend=_db.DockerBackend(cap_raw=cfg.multi_net_raw))
-
-
-def _sandbox_explicitly_disabled(config: dict[str, Any] | None) -> bool:
-    """True ONLY when the operator explicitly opted out (``enabled: false``).
-
-    An absent ``sandbox`` section (or absent ``enabled`` key) means contained
-    defaults -- never the legacy host-execution mode. This is the single
-    predicate both resolvers use so a partial config can never silently
-    resolve to ``None`` (uncontained host execution).
-    """
-    if not isinstance(config, dict):
-        return False
-    sec = config.get("sandbox")
-    return isinstance(sec, dict) and sec.get("enabled") is False
-
-
-def resolve_manager(workspace: Path, config: dict[str, Any] | None) -> SandboxManager | None:
-    """Build a SandboxManager from config; None ONLY for the explicit opt-out.
-
-    ``sandbox.enabled: false`` (+ native-execution consent, checked by the
-    caller) means the documented legacy host-execution mode. An ABSENT
-    section resolves to contained defaults (a fail-closed manager), never
-    ``None``. A PRESENT-but-broken section returns a manager that
-    fail-closes at execution time -- it never silently upgrades to host
-    execution.
-    """
-    cfg = SandboxConfig.from_config(config)
-    if not cfg.enabled:
-        if not _sandbox_explicitly_disabled(config):
-            # Absent section with contained defaults cannot reach here today
-            # (from_config defaults absent to enabled); fail closed anyway so
-            # a future parse change can never silently resolve to None.
-            return _build_manager(cfg, workspace, config)
-        return None
-    return _build_manager(cfg, workspace, config)
-
-
-def native_fallback_notice(reason: str) -> str:
-    """Canonical one-line native-fallback notice (boot log, ctx, tool result)."""
-    return (
-        f"Docker sandbox unavailable ({reason}) -- falling back to NATIVE "
-        f"(uncontained) legacy host execution for this session "
-        f"(sandbox.fallback_native=true). Start Docker and build the sandbox "
-        f"image to contain execution; set sandbox.fallback_native: false to "
-        f"fail closed instead."
+def _build_manager(
+    cfg: SandboxConfig,
+    workspace: Path,
+    config: dict[str, Any] | None,
+    *,
+    network_telemetry_path: Path | None = None,
+    audit_path: Path | None = None,
+) -> SandboxManager:
+    # Workers never receive NET_RAW: packet sockets bypass the IP-layer
+    # destination firewall. Raw-packet scans therefore remain unavailable.
+    return SandboxManager(
+        cfg,
+        workspace,
+        config_dict=config,
+        backend=_db.DockerBackend(),
+        network_telemetry_path=network_telemetry_path,
+        audit_path=audit_path,
     )
 
 
-# Boot-state plumbing: the fallback decision happens once per MCP server
+def resolve_manager(
+    workspace: Path,
+    config: dict[str, Any] | None,
+    *,
+    network_telemetry_path: Path | None = None,
+    audit_path: Path | None = None,
+) -> SandboxManager:
+    """Build a fail-closed SandboxManager; unsafe native opt-outs are rejected."""
+    cfg = SandboxConfig.from_config(config)
+    return _build_manager(
+        cfg,
+        workspace,
+        config,
+        network_telemetry_path=network_telemetry_path,
+        audit_path=audit_path,
+    )
+
+
+# Boot-state plumbing: the containment decision happens once per MCP server
 # process, at boot, inside that subprocess. The API daemon cannot re-derive
 # it, so it is recorded to a config-derived shared file that both the server
 # and the daemon resolve identically (both run from the same repo root CWD).
@@ -208,7 +151,7 @@ def native_fallback_notice(reason: str) -> str:
 # drift from the session after the fact -- e.g. the operator starts Docker
 # mid-run; the running session stays native/blocked regardless).
 BOOT_STATE_FILE = "sandbox_boot_state.json"
-_VALID_BOOT_MODES = ("disabled", "contained", "native_fallback", "blocked")
+_VALID_BOOT_MODES = ("contained", "blocked")
 
 
 def boot_state_path(config: dict[str, Any] | None) -> Path:
@@ -248,39 +191,16 @@ def resolve_manager_with_fallback(
     config: dict[str, Any] | None,
     *,
     probe: Any = None,
-) -> tuple[SandboxManager | None, str]:
-    """Boot-time sandbox resolution WITH the documented native fallback.
+    network_telemetry_path: Path | None = None,
+    audit_path: Path | None = None,
+) -> tuple[SandboxManager, str]:
+    """Resolve the worker at boot and always fail closed when it is unavailable.
 
-    Same contract as :func:`resolve_manager` plus the one sanctioned fallback
-    decision: when the sandbox is enabled but the Docker stack is unusable
-    (CLI / daemon / worker image missing) and ``sandbox.fallback_native`` is
-    true, return ``(None, notice)`` so the caller runs the documented legacy
-    host-execution mode for the whole session and can warn loudly. With
-    ``fallback_native: false`` the manager is returned either way -- it then
-    fail-closes at execution time exactly as before.
-
-    The resolved boot posture is ALSO recorded to a shared boot-state file
-    (:func:`boot_state_path`) so the WebUI home banner reports the effective
-    session decision (decided ONCE, here) instead of a live Docker probe that
-    can drift from the session after the fact.
-
-    Probes are injected (``probe``: ``(ok, reason)`` callable) so tests never
-    need a real Docker daemon. The image probe only runs when Docker answers;
-    its failure is treated as "sandboxing doesn't work" for the fallback
-    decision (a missing first-run image is the common broken-lab case).
+    The historical function name remains for import compatibility. It never
+    returns ``None`` and never selects native execution. The resolved boot
+    posture is recorded so status surfaces the same decision as the worker.
     """
     cfg = SandboxConfig.from_config(config)
-    if not cfg.enabled:
-        if not _sandbox_explicitly_disabled(config):
-            # Absent section: contained defaults, never the native opt-out.
-            _record_boot_state(config, "blocked", "sandbox section absent; contained defaults apply")
-            return _build_manager(cfg, workspace, config), ""
-        allowed, reason = native_execution_consent(config if isinstance(config, dict) else {})
-        if not allowed:
-            _record_boot_state(config, "blocked", reason)
-            return _build_manager(cfg, workspace, config), ""
-        _record_boot_state(config, "disabled", "explicit native-execution opt-out with env consent")
-        return None, ""
     from tools.sandbox.docker_lifecycle import DockerLifecycle
 
     lifecycle = DockerLifecycle.from_config(config, probe=probe)
@@ -296,27 +216,38 @@ def resolve_manager_with_fallback(
             image_ok, reason = False, f"sandbox image probe failed: {exc}"
         if image_ok:
             _record_boot_state(config, "contained")
-            return _build_manager(cfg, workspace, config), ""
-        if not cfg.fallback_native:
-            _record_boot_state(config, "blocked", reason)
-            return _build_manager(cfg, workspace, config), ""
-        allowed, consent_reason = native_execution_consent(config if isinstance(config, dict) else {})
-        if not allowed:
-            _record_boot_state(config, "blocked", f"{reason}; {consent_reason}")
-            return _build_manager(cfg, workspace, config), ""
-        reason = native_fallback_notice(reason)
-        _record_boot_state(config, "native_fallback", reason)
-        return None, reason
-    if not cfg.fallback_native:
+            return (
+                _build_manager(
+                    cfg,
+                    workspace,
+                    config,
+                    network_telemetry_path=network_telemetry_path,
+                    audit_path=audit_path,
+                ),
+                "",
+            )
         _record_boot_state(config, "blocked", reason)
-        return _build_manager(cfg, workspace, config), ""
-    allowed, consent_reason = native_execution_consent(config if isinstance(config, dict) else {})
-    if not allowed:
-        _record_boot_state(config, "blocked", f"{reason}; {consent_reason}")
-        return _build_manager(cfg, workspace, config), ""
-    reason = native_fallback_notice(reason)
-    _record_boot_state(config, "native_fallback", reason)
-    return None, reason
+        return (
+            _build_manager(
+                cfg,
+                workspace,
+                config,
+                network_telemetry_path=network_telemetry_path,
+                audit_path=audit_path,
+            ),
+            "",
+        )
+    _record_boot_state(config, "blocked", reason)
+    return (
+        _build_manager(
+            cfg,
+            workspace,
+            config,
+            network_telemetry_path=network_telemetry_path,
+            audit_path=audit_path,
+        ),
+        "",
+    )
 
 
 class SandboxManager:
@@ -330,9 +261,17 @@ class SandboxManager:
         config_dict: dict[str, Any] | None = None,
         backend: Any = None,
         run_id: str = "",
+        network_telemetry_path: Path | None = None,
+        audit_path: Path | None = None,
     ) -> None:
         self.cfg = config
         self.workspace = Path(workspace)
+        if audit_path is None:
+            self.audit_path = self.workspace / "exploit_audit.jsonl"
+        else:
+            from tools.kernel.audit_paths import validate_external_audit_path
+
+            self.audit_path = validate_external_audit_path(self.workspace, audit_path)
         self.config_dict = config_dict
         self.backend = backend if backend is not None else _db.DockerBackend()
         self.run_id = run_id or secrets.token_hex(6)
@@ -340,6 +279,16 @@ class SandboxManager:
         self.network_name: str = ""
         self.gateway: str = ""
         self._policy: NetworkPolicy | None = None
+        self.network_telemetry_path = Path(network_telemetry_path) if network_telemetry_path is not None else None
+        self._network_scope_count: int | None = None
+        self._network_scope_complete = False
+        self._network_scope_started = False
+        self._network_scope_finalized = False
+        self._active_exec_lock = threading.RLock()
+        self._active_execs = 0
+        self._lifecycle_lock = threading.RLock()
+        self._policy_lock = threading.RLock()
+        self._host_mappings: dict[str, list[str]] = {}
         self._ensure_valid_until: float = 0.0
         self._policy_valid_until: float = 0.0
         self._destroyed = False
@@ -357,6 +306,13 @@ class SandboxManager:
         Hot path: a recently verified worker is returned from a time-bound
         cache instead of re-probing docker-inspect on every command.
         """
+        with self._lifecycle_lock:
+            if self._destroyed:
+                raise SandboxUnavailableError("sandbox manager has been destroyed")
+            return self._ensure_sandbox_locked()
+
+    def _ensure_sandbox_locked(self) -> str:
+        """Create or verify the worker while holding the lifecycle lock."""
         if self.container_id and time.monotonic() < self._ensure_valid_until:
             return self.container_id
         if self.container_id:
@@ -366,6 +322,10 @@ class SandboxManager:
                 self._ensure_valid_until = time.monotonic() + _HOT_PATH_TTL_S
                 return self.container_id
             logger.warning("sandbox worker %s vanished (state=%r); recreating", self.container_id, state)
+            # The old namespace and its counters are already gone. A later
+            # worker cannot make this run's measurement complete again.
+            self._network_scope_complete = False
+            self._network_scope_count = None
             self._destroy_resources()
         try:
             self.backend.ensure_docker()
@@ -424,6 +384,11 @@ class SandboxManager:
     # ------------------------------------------------------- network policy
 
     def _apply_policy(self, *, force: bool = False) -> NetworkPolicy:
+        """Serialize policy and pinned-host updates before command execution."""
+        with self._policy_lock:
+            return self._apply_policy_locked(force=force)
+
+    def _apply_policy_locked(self, *, force: bool = False) -> NetworkPolicy:
         """Derive the egress policy; install firewall rules when it changed.
 
         Re-derivation happens per command boundary so dynamically authorized
@@ -440,56 +405,57 @@ class SandboxManager:
         if not force and self._policy is not None and pol.fingerprint() == self._policy.fingerprint():
             self._policy_valid_until = now + _HOT_PATH_TTL_S
             return pol
-        if self.cfg.network_enforce:
-            try:
-                apply_network_policy(pol, container_id=self.container_id, image=self.cfg.image, gateway=self.gateway)
-            except SandboxError as exc:
-                # Wired `sandbox.network.fail_closed` (default true):
-                # - true  -> fail-closed block: audit row, then raise (the
-                #   caller destroys partial resources; the MCP layer renders
-                #   SANDBOX_POLICY_FAILED; execution never proceeds unfirewalled).
-                # - false -> degraded-allow: explicit WARNING + audit row, and
-                #   the worker runs WITHOUT the netns firewall (Docker bridge
-                #   isolation only -- explicitly NOT containment).
-                # Worker-creation/setup failures (no worker exists) always fail
-                # closed regardless of this flag -- there is no worker to
-                # degrade to. Only the firewall-install step honors it.
-                payload = _policy.audit_policy_payload(pol)
-                payload["enforcement_error"] = str(exc)[:300]
-                if self.cfg.network_fail_closed:
-                    self._audit(
-                        target_ip="",
-                        tool_name="network_policy",
-                        status="blocked",
-                        command="",
-                        extra_env={},
-                        policy_payload=payload,
-                        exit_code=None,
-                        duration=None,
-                    )
-                    raise
-                logger.warning(
-                    "sandbox network.fail_closed=false: netns firewall install failed (%s); "
-                    "worker %s runs WITHOUT netns firewall "
-                    "(Docker bridge isolation only -- this is NOT containment)",
-                    exc,
-                    self.container_id,
-                )
-                self._audit(
-                    target_ip="",
-                    tool_name="network_policy",
-                    status="degraded",
-                    command="",
-                    extra_env={},
-                    policy_payload=payload,
-                    exit_code=None,
-                    duration=None,
-                )
-        else:
-            logger.warning(
-                "sandbox network.enforce=false: worker runs WITHOUT netns firewall "
-                "(Docker bridge isolation only -- this is NOT containment)"
+        try:
+            preserve_counters = self._policy is not None
+            apply_network_policy(
+                pol,
+                container_id=self.container_id,
+                image=self.cfg.image,
+                gateway=self.gateway,
+                preserve_drop_counters=preserve_counters,
             )
+        except SandboxError as exc:
+            self._network_scope_complete = False
+            payload = _policy.audit_policy_payload(pol)
+            payload["enforcement_error"] = str(exc)[:300]
+            self._audit(
+                target_ip="",
+                tool_name="network_policy",
+                status="blocked",
+                command="",
+                extra_env={},
+                policy_payload=payload,
+                exit_code=None,
+                duration=None,
+            )
+            raise
+        if self._policy is None and not self._network_scope_started:
+            # The initial default-DROP rules install a distinct NAI-DROP chain
+            # with counters at zero. Subsequent policy refreshes preserve that
+            # chain via iptables-restore --noflush.
+            self._network_scope_complete = True
+            self._network_scope_started = True
+        mappings: dict[str, list[str]] = {}
+        if pol.allow_dns == "controlled":
+            mappings = {name: list(addresses) for name, addresses in pol.resolved_domain_addresses.items()}
+            # Compatibility for policies constructed with only the primary-IP map.
+            for name, address in pol.resolved_domains.items():
+                mappings.setdefault(name, [address])
+        if mappings != self._host_mappings or (force and mappings):
+            try:
+                rc, _out, _err = self.backend.exec(
+                    self.container_id,
+                    _db.host_mapping_argv(mappings),
+                    timeout=_db.DOCKER_TIMEOUT,
+                    user="root",
+                )
+            except Exception as exc:
+                # Host mapping failures never grant a command permission to
+                # proceed, even when firewall degradation was explicitly opted in.
+                raise SandboxPolicyError("failed to install pinned worker host mappings") from exc
+            if rc != 0:
+                raise SandboxPolicyError("failed to install pinned worker host mappings")
+            self._host_mappings = mappings
         self._policy = pol
         self._policy_valid_until = time.monotonic() + _HOT_PATH_TTL_S
         return pol
@@ -536,6 +502,7 @@ class SandboxManager:
         timeout: int | None = None,
         cwd: str | None = None,
         env: dict[str, str] | None = None,
+        input_text: str = "",
         user: str = "",
         target_ip: str = "",
         tool_name: str = "",
@@ -549,6 +516,7 @@ class SandboxManager:
             timeout=inner + grace + 10,
             cwd=cwd,
             env=env,
+            input_text=input_text,
             user=user or self.cfg.user,
             target_ip=target_ip,
             tool_name=tool_name,
@@ -562,6 +530,41 @@ class SandboxManager:
         timeout: int,
         cwd: str | None,
         env: dict[str, str] | None,
+        input_text: str = "",
+        user: str,
+        target_ip: str,
+        tool_name: str,
+        audit_command: str,
+    ) -> SandboxResult:
+        # Count the whole operation, including scope, workspace, container,
+        # and policy setup. Final telemetry is unknown if teardown overlaps a
+        # command even before Docker exec begins.
+        with self._active_exec_lock:
+            self._active_execs += 1
+        try:
+            return self._execute_argv_impl(
+                argv,
+                timeout=timeout,
+                cwd=cwd,
+                env=env,
+                input_text=input_text,
+                user=user,
+                target_ip=target_ip,
+                tool_name=tool_name,
+                audit_command=audit_command,
+            )
+        finally:
+            with self._active_exec_lock:
+                self._active_execs -= 1
+
+    def _execute_argv_impl(
+        self,
+        argv: list[str],
+        *,
+        timeout: int,
+        cwd: str | None,
+        env: dict[str, str] | None,
+        input_text: str = "",
         user: str,
         target_ip: str,
         tool_name: str,
@@ -578,14 +581,15 @@ class SandboxManager:
         # hot path). The timed_out/terminal rows below carry the duration, so
         # no execution is ever unaccounted for.
         try:
-            rc, out, err = self.backend.exec(
-                container,
-                argv,
-                timeout=timeout,
-                user=user,
-                env=extra_env,
-                workdir=cwd or "",
-            )
+            exec_kwargs: dict[str, Any] = {
+                "timeout": timeout,
+                "user": user,
+                "env": extra_env,
+                "workdir": cwd or "",
+            }
+            if input_text:
+                exec_kwargs["input_text"] = input_text
+            rc, out, err = self.backend.exec(container, argv, **exec_kwargs)
         except TimeoutError:
             elapsed = time.monotonic() - start
             self._audit(
@@ -735,7 +739,7 @@ class SandboxManager:
                 }
             }
             _audit_log(
-                self.workspace / "exploit_audit.jsonl",
+                self.audit_path,
                 target_ip=target_ip,
                 tool_name=f"sandbox.{tool_name}" if tool_name else "sandbox.execute",
                 approved=True,
@@ -763,12 +767,15 @@ class SandboxManager:
 
     def destroy(self) -> dict[str, bool]:
         """Terminate + remove the worker and its network. Idempotent; audited."""
-        if self._destroyed:
-            return {"container_removed": False, "network_removed": False}
-        results = self._destroy_resources()
-        self._destroyed = True
-        self.audit_cleanup(results)
-        return results
+        with self._lifecycle_lock:
+            if self._destroyed:
+                return {"container_removed": False, "network_removed": False}
+            self._destroyed = True
+            if self.network_telemetry_path is not None:
+                self._finalize_network_scope_measurement()
+            results = self._destroy_resources()
+            self.audit_cleanup(results)
+            return results
 
     def _destroy_resources(self) -> dict[str, bool]:
         # Single network-delete owner: backend.destroy() already removes the
@@ -777,22 +784,84 @@ class SandboxManager:
         # a "No such network" False -- the network-lifecycle false-negative.
         # Only networks without a container (worker never started) delete
         # directly; every other path trusts the single backend answer.
-        results = {"container_removed": False, "network_removed": False}
-        if self.container_id:
-            try:
-                self.backend.stop(self.container_id)
-            except SandboxError:
-                logger.warning("sandbox stop %s failed", self.container_id)
-            backend_results = self.backend.destroy(self.container_id, self.network_name)
-            results["container_removed"] = bool(backend_results.get("container_removed", False))
-            results["network_removed"] = bool(backend_results.get("network_removed", False))
-        elif self.network_name:
-            results["network_removed"] = bool(_db.docker_network_rm(self.network_name))
-        self.container_id = ""
-        self.network_name = ""
-        self._ensure_valid_until = 0.0
-        self._policy_valid_until = 0.0
-        return results
+        with self._lifecycle_lock:
+            results = {"container_removed": False, "network_removed": False}
+            if self.container_id:
+                try:
+                    self.backend.stop(self.container_id)
+                except SandboxError:
+                    logger.warning("sandbox stop %s failed", self.container_id)
+                backend_results = self.backend.destroy(self.container_id, self.network_name)
+                results["container_removed"] = bool(backend_results.get("container_removed", False))
+                results["network_removed"] = bool(backend_results.get("network_removed", False))
+            elif self.network_name:
+                results["network_removed"] = bool(_db.docker_network_rm(self.network_name))
+            self.container_id = ""
+            self.network_name = ""
+            self._policy = None
+            self._ensure_valid_until = 0.0
+            self._policy_valid_until = 0.0
+            return results
+
+    def _finalize_network_scope_measurement(self) -> None:
+        """Stop the worker, then read the stable DROP counter through a keeper.
+
+        The keeper is a short-lived NET_ADMIN sidecar. It pins the netns while
+        Docker stops the worker, which terminates detached/background commands
+        before the final snapshot. This gives one per-run counter reading
+        without sampling races at command boundaries.
+        """
+        if self._network_scope_finalized:
+            return
+        self._network_scope_finalized = True
+        complete = self._network_scope_complete and self._policy is not None and bool(self.container_id)
+        with self._active_exec_lock:
+            if self._active_execs:
+                complete = False
+        keeper_id = ""
+        try:
+            if not self.container_id or not self._policy:
+                complete = False
+                return
+            keeper_id = _db.start_netns_counter_keeper(self.container_id, self.cfg.image)
+            self.backend.stop(self.container_id)
+            if _db.docker_inspect_state(self.container_id) not in ("exited", "dead"):
+                complete = False
+            else:
+                measured = read_drop_packet_count(lambda binary: _db.read_netns_counter_keeper(keeper_id, binary))
+                self._network_scope_count = measured
+        except Exception as exc:  # telemetry failures never alter sandbox containment or command outcomes
+            complete = False
+            logger.warning("sandbox network scope telemetry unavailable: %s", exc)
+        finally:
+            if keeper_id:
+                try:
+                    if not _db.stop_netns_counter_keeper(keeper_id):
+                        complete = False
+                except Exception as exc:  # cleanup trouble invalidates measurement but cannot skip worker teardown
+                    complete = False
+                    logger.warning("sandbox network counter sidecar cleanup failed: %s", exc)
+            self._network_scope_complete = complete
+            count = self._network_scope_count if complete else None
+            if not write_network_scope_measurement(self.network_telemetry_path, count):
+                self._network_scope_count = None
+                self._network_scope_complete = False
+                logger.warning("sandbox network scope telemetry could not be persisted")
+
+    def read_network_scope_drop_count(self) -> int | None:
+        """Read current cumulative firewall DROP packets for integration checks."""
+        if not self.container_id or not self._policy:
+            return None
+        try:
+            count = read_drop_packet_count(
+                lambda binary: _db.read_netns_firewall_counter(self.container_id, self.cfg.image, binary)
+            )
+        except Exception as exc:  # diagnostics cannot weaken or block execution
+            self._network_scope_complete = False
+            logger.warning("sandbox network scope counter read failed: %s", exc)
+            return None
+        self._network_scope_count = count
+        return count
 
     def _atexit_destroy(self) -> None:
         try:
@@ -864,7 +933,7 @@ def status_report(config: dict[str, Any] | None) -> dict[str, Any]:
     any probe failure surfaces as ``docker_error`` text, never an exception.
     ``image_present`` distinguishes "Docker up but worker image not built"
     (the common first-run gap) from "Docker unreachable"; it stays ``None``
-    when the answer cannot be known (sandbox disabled / daemon down).
+    when the answer cannot be known (daemon down).
 
     ``mode`` is the effective execution posture the WebUI home screen
     banners. It comes from the recorded BOOT-TIME decision
@@ -874,18 +943,32 @@ def status_report(config: dict[str, Any] | None) -> dict[str, Any]:
     (operator starts Docker mid-run, daemon dies mid-run) must not flip the
     banner. When no boot state exists yet (fresh install / no session since
     the feature landed) the live probe decides, same as before:
-    - "disabled": explicit sandbox.enabled false + consent -- legacy host-execution mode.
     - "contained": Docker + worker image usable -- commands run contained.
-    - "native_fallback": enabled but Docker/image unusable AND
-      fallback_native=true -- the session degrades to uncontained host
-      execution (one warning, never per-command).
-    - "blocked": enabled, Docker/image unusable, fallback_native=false --
-      every execution fail-closes.
+    - "blocked": Docker/image unusable -- every execution fail-closes.
     """
-    cfg = SandboxConfig.from_config(config)
-    # "disabled" is honest ONLY for the explicit opt-out; an absent section
-    # resolves to contained defaults, so its pre-probe posture is blocked.
-    initial_mode = "disabled" if _sandbox_explicitly_disabled(config) else "blocked"
+    try:
+        cfg = SandboxConfig.from_config(config)
+    except (TypeError, ValueError) as exc:
+        # Status/doctor endpoints remain useful on an invalid legacy config,
+        # while the MCP server refuses to register attack tools.
+        return {
+            "enabled": True,
+            "backend": "docker",
+            "image": "breachpilot-sandbox:latest",
+            "user": "sandbox",
+            "read_only_rootfs": True,
+            "fallback_native": False,
+            "auto_manage_docker": False,
+            "mode": "blocked",
+            "fallback_reason": str(exc),
+            "docker_available": False,
+            "docker_error": str(exc),
+            "image_present": None,
+            "network": {"enforce": True, "fail_closed": True, "allow_dns": "controlled"},
+            "resources": {},
+            "cleanup": {},
+        }
+    initial_mode = "blocked"
     report: dict[str, Any] = {
         "enabled": cfg.enabled,
         "backend": cfg.backend,
@@ -915,15 +998,6 @@ def status_report(config: dict[str, Any] | None) -> dict[str, Any]:
         },
         "cleanup": {"remove_on_exit": cfg.remove_on_exit, "remove_stale_on_startup": cfg.remove_stale_on_startup},
     }
-    if not cfg.enabled:
-        if not _sandbox_explicitly_disabled(config):
-            # Absent section resolves to contained defaults; without Docker
-            # info yet the honest posture is blocked, never disabled.
-            report["mode"] = "blocked"
-            report["fallback_reason"] = "sandbox section absent; contained defaults apply"
-            return report
-        report["note"] = "sandbox disabled -- documented legacy host-execution mode"
-        return report
     boot = read_boot_state(config)
     if boot:
         report["mode"] = boot["mode"]
@@ -936,7 +1010,7 @@ def status_report(config: dict[str, Any] | None) -> dict[str, Any]:
         if not ok:
             report["docker_error"] = reason
             if not boot:
-                report["mode"] = "native_fallback" if cfg.fallback_native else "blocked"
+                report["mode"] = "blocked"
                 report["fallback_reason"] = reason
         else:
             image_ok = bool(_db.docker_image_exists(cfg.image))
@@ -945,11 +1019,11 @@ def status_report(config: dict[str, Any] | None) -> dict[str, Any]:
                 if image_ok:
                     report["mode"] = "contained"
                 else:
-                    report["mode"] = "native_fallback" if cfg.fallback_native else "blocked"
+                    report["mode"] = "blocked"
                     report["fallback_reason"] = f"sandbox image '{cfg.image}' not built"
     except Exception as exc:  # noqa: BLE001 -- a status endpoint never throws
         report["docker_error"] = str(exc)
         if not boot:
-            report["mode"] = "native_fallback" if cfg.fallback_native else "blocked"
+            report["mode"] = "blocked"
             report["fallback_reason"] = str(exc)
     return report

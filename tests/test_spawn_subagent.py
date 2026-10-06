@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -126,6 +127,58 @@ async def test_await_subagent_timeout_returns_partial(tmp_path):
     assert "partial" in result
     # The partial should carry the running status from spawn time.
     assert result["partial"]["status"] == "running"
+
+
+@pytest.mark.asyncio
+async def test_await_timeout_keeps_worker_tracked_and_returns_final_result(tmp_path):
+    """A timeout only limits this wait; it must not orphan active target work."""
+    started = threading.Event()
+    release = threading.Event()
+
+    class _GatedOrch:
+        def route(self, task):
+            started.set()
+            if not release.wait(timeout=5):
+                raise TimeoutError("test worker was not released")
+            return _FakeAgentResult(task.get("task_id", ""))
+
+    mgr = _make_manager(tmp_path)
+    mgr._orchestrator = _GatedOrch()
+    spawn = await mgr.spawn("recon", "10.0.0.5", "gated scan")
+    sid = spawn["subagent_id"]
+    assert await asyncio.to_thread(started.wait, 1)
+
+    timed_out = await mgr.await_result(sid, timeout_seconds=0.01)
+    assert timed_out["status"] == "timeout"
+    assert sid in mgr._tasks
+    assert not mgr._tasks[sid].cancelled()
+
+    release.set()
+    completed = await mgr.await_result(sid, timeout_seconds=2)
+    assert completed["status"] == "complete"
+    assert completed["output"]["target"] == "10.0.0.5"
+    assert sid not in mgr._tasks
+
+
+@pytest.mark.asyncio
+async def test_base_exception_group_is_persisted_as_failed_subagent(tmp_path):
+    """An MCP-style BaseExceptionGroup must not leave a stale running result."""
+
+    class _GroupedFailureOrch:
+        def route(self, _task):
+            raise BaseExceptionGroup("subagent task group failed", [KeyboardInterrupt("worker stopped")])
+
+    mgr = _make_manager(tmp_path)
+    mgr._orchestrator = _GroupedFailureOrch()
+    spawn = await mgr.spawn("recon", "10.0.0.5", "grouped failure")
+    sid = spawn["subagent_id"]
+
+    result = await mgr.await_result(sid, timeout_seconds=2)
+    assert result["status"] == "failed"
+    assert "subagent task group failed" in result["error"]
+    assert sid not in mgr._tasks
+    saved = json.loads((mgr._workspace / "subagents" / f"{sid}.json").read_text(encoding="utf-8"))
+    assert saved["status"] == "failed"
 
 
 @pytest.mark.asyncio

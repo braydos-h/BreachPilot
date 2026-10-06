@@ -216,6 +216,7 @@ def test_blocked_steps_report_dead_dependency():
         ("invalid argument: unexpected keyword 'foo'", FailureClass.SCHEMA_ERROR),
         ("RemoteProtocolError: server disconnected", FailureClass.TRANSPORT_ERROR),
         ("unsupported target: does not apply", FailureClass.UNSUPPORTED_TARGET),
+        ("module worker timed out; execution outcome is unknown", FailureClass.OUTCOME_UNKNOWN),
         ("", FailureClass.UNKNOWN),
         ("some weird unrecognized thingamajig", FailureClass.UNEXPECTED_OUTPUT),
     ],
@@ -228,6 +229,8 @@ def test_recovery_actions_consistency():
     # STOP classes are permanent + not retryable; RETRY/REPAIR/CREATE classes are retryable-or-actionable.
     for fc in (FailureClass.SCOPE_BLOCKED, FailureClass.FALSE_POSITIVE):
         assert is_permanent(fc) and not is_retryable(fc)
+    assert is_permanent(FailureClass.OUTCOME_UNKNOWN)
+    assert recovery_for(FailureClass.OUTCOME_UNKNOWN) is RecoveryAction.ESCALATE_OPERATOR
     for fc in (FailureClass.TIMEOUT, FailureClass.TRANSPORT_ERROR, FailureClass.MALFORMED_CODE):
         assert is_retryable(fc) and not is_permanent(fc)
     # PREREQUISITE_MISSING drives composition, not a blind retry.

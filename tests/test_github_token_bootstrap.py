@@ -17,6 +17,8 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 # ── api_key_store wiring ────────────────────────────────────────────────────
 
 
@@ -91,6 +93,20 @@ def test_configured_api_key_env_names_top_level_custom_env():
     assert names.count("OLLAMA_CLOUD_KEY") == 1
 
 
+def test_research_fetch_toggle_does_not_require_provider_api_key():
+    from tools.api_key_store import research_api_key_env_names
+
+    config = {
+        "research": {
+            "provider": "ollama",
+            "fallback_provider": "stdlib",
+            "ollama": {"use_web_search": False, "use_web_fetch": True},
+        }
+    }
+
+    assert research_api_key_env_names(config) == []
+
+
 def test_load_api_keys_into_env_loads_top_level_ollama(tmp_path: Path, monkeypatch):
     """bootstrap path: a saved OLLAMA_API_KEY is loaded into env from the top-
     level ollama block, so model_router's cloud fallback can fire."""
@@ -136,6 +152,22 @@ def test_load_api_keys_into_env_top_level_only(tmp_path: Path, monkeypatch):
     loaded = load_api_keys_into_env(store, allowed_names=configured_api_key_env_names(config))
     assert "OLLAMA_API_KEY" in loaded
     assert os.environ["OLLAMA_API_KEY"] == "sk-cloud-only"
+
+
+@pytest.mark.parametrize("allowed_names", [None, []])
+def test_api_key_store_does_not_set_unlisted_environment_names(tmp_path: Path, monkeypatch, allowed_names):
+    from tools.api_key_store import load_api_keys_into_env
+
+    unexpected_name = "BREACHPILOT_TEST_UNCONFIGURED_ENV"
+    monkeypatch.delenv(unexpected_name, raising=False)
+    store = tmp_path / "secr.json"
+    store.write_text(
+        json.dumps({"api_keys": {unexpected_name: "untrusted-value"}}),
+        encoding="utf-8",
+    )
+
+    assert load_api_keys_into_env(store, allowed_names=allowed_names) == []
+    assert unexpected_name not in os.environ
 
 
 # ── config_manager schema ───────────────────────────────────────────────────

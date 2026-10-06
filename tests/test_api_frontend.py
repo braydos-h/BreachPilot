@@ -17,7 +17,11 @@ from fastapi.testclient import TestClient
 
 
 def _make_client(
-    tmp_path, monkeypatch, token="test-token-0123456789abcdef01234567", ollama_host="http://localhost:11434"
+    tmp_path,
+    monkeypatch,
+    token="test-token-0123456789abcdef01234567",
+    ollama_host="http://localhost:11434",
+    serve_webui=False,
 ):
     """Create a TestClient with a known token + minimal config (no Ollama needed).
 
@@ -32,7 +36,7 @@ def _make_client(
         f"ollama:\n  host: {ollama_host}\n"
         "models:\n  default_alias: glm\n  registry:\n    glm: glm-5.2:cloud\n"
         "exploit:\n  permission: read_only\n"
-        "api:\n  host: 127.0.0.1\n  port: 8765\n",
+        f"api:\n  host: 127.0.0.1\n  port: 8765\n  serve_webui: {str(serve_webui).lower()}\n",
         encoding="utf-8",
     )
     from tools.run_service.service import Callables
@@ -54,6 +58,25 @@ def _make_client(
 
     app = create_app(config_path=config_path, callables=callables)
     return TestClient(app)
+
+
+def test_webui_uses_resolved_packaged_dist(tmp_path, monkeypatch):
+    dist = tmp_path / "wheel-data" / "webui" / "dist"
+    assets = dist / "assets"
+    assets.mkdir(parents=True)
+    (dist / "index.html").write_text(
+        '<div id="root"></div><script type="module" src="/assets/app.js"></script>', encoding="utf-8"
+    )
+    (assets / "app.js").write_text("globalThis.appLoaded = true;", encoding="utf-8")
+    monkeypatch.setattr("tools.paths.get_webui_dist_dir", lambda: dist)
+
+    client = _make_client(tmp_path, monkeypatch, serve_webui=True)
+    index = client.get("/")
+    assert index.status_code == 200
+    assert '<div id="root"></div>' in index.text
+    asset = client.get("/assets/app.js")
+    assert asset.status_code == 200
+    assert asset.text == "globalThis.appLoaded = true;"
 
 
 def _auth(token="test-token-0123456789abcdef01234567"):
@@ -318,6 +341,27 @@ def test_audit_empty_when_no_file(tmp_path, monkeypatch):
     assert data["chain_valid"] is True
 
 
+def test_audit_endpoint_ignores_worker_writable_legacy_copy_for_new_run(tmp_path, monkeypatch):
+    from tools.kernel.audit_paths import prepare_external_audit_path
+
+    client = _make_client(tmp_path, monkeypatch)
+    created = _create_run(client)
+    run_dir = Path("reports") / created["run_id"]
+    workspace = run_dir / "exploit_workspace"
+    workspace.mkdir(parents=True)
+    canonical = prepare_external_audit_path(workspace, run_dir / "exploit_audit.jsonl")
+    (workspace / "exploit_audit.jsonl").write_text(
+        json.dumps({"tool_name": "forged_by_worker", "status": "completed"}) + "\n",
+        encoding="utf-8",
+    )
+
+    response = client.get(f"/api/v1/runs/{created['run_id']}/audit", headers=_auth())
+
+    assert canonical.is_file()
+    assert response.status_code == 200
+    assert response.json()["records"] == []
+
+
 def test_audit_reads_records_and_verifies_chain(tmp_path, monkeypatch):
     client = _make_client(tmp_path, monkeypatch)
     created = _create_run(client)
@@ -407,7 +451,7 @@ def test_log_per_attempt_requires_params(tmp_path, monkeypatch):
 # ── Credentials + loot (C3-C5) ──────────────────────────────────────────────
 
 
-def _seed_credentials(run_id: str, password="s3cr3t"):
+def _seed_credentials(run_id: str, password="s3cr3t", notes=""):
     import time
 
     from tools.credential_store import CredentialRecord, CredentialStore
@@ -424,6 +468,7 @@ def _seed_credentials(run_id: str, password="s3cr3t"):
             password=password,
             credential_type="password",
             source_action="dump_credentials",
+            notes=notes,
         )
     )
 
@@ -431,12 +476,14 @@ def _seed_credentials(run_id: str, password="s3cr3t"):
 def test_credentials_redacted(tmp_path, monkeypatch):
     client = _make_client(tmp_path, monkeypatch)
     created = _create_run(client)
-    _seed_credentials(created["run_id"], password="hunter2")
+    _seed_credentials(created["run_id"], password="hunter2", notes="secret operator context")
     resp = client.get(f"/api/v1/runs/{created['run_id']}/credentials", headers=_auth())
     assert resp.status_code == 200
     creds = resp.json()["credentials"]
     assert len(creds) == 1
     assert creds[0]["password"] == "[REDACTED]"
+    assert creds[0]["notes"] == "[REDACTED]"
+    assert "secret operator context" not in resp.text
     assert creds[0]["username"] == "admin"
 
 
@@ -635,48 +682,56 @@ def test_sse_accepts_correct_token(tmp_path, monkeypatch):
 # ── Event replay bug fix (A1) ────────────────────────────────────────────────
 
 
-def test_replay_reads_jsonl_when_cursor_outside_ring():
+def test_replay_reads_jsonl_when_cursor_outside_ring(tmp_path):
     """The fixed _replay_locked must read events.jsonl when the ring doesn't
     cover the requested cursor (previously dead code returned [] silently).
     """
     import asyncio
 
-    from tools.api.event_broker import RunEventBroker
+    from tools.api.event_broker import RunEventBroker, shutdown_plugin_dispatcher
 
-    rd = Path(__import__("tempfile").mkdtemp()) / "run"
+    rd = tmp_path / "run"
     rd.mkdir(parents=True, exist_ok=True)
     broker = RunEventBroker("r1", rd, buffer_size=2)
 
     async def _run():
-        await broker.emit("state", {"v": 1})  # seq 1
-        await broker.emit("state", {"v": 2})  # seq 2
-        await broker.emit("state", {"v": 3})  # seq 3 -> evicts seq 1 from ring
-        # Ring holds seq 2,3. Cursor after=0 is older than the ring's first
-        # element, so the JSONL fallback path must run and return all 3.
-        replayed = await broker.replay(after=0)
-        assert len(replayed) == 3, f"expected 3, got {len(replayed)}"
+        try:
+            await broker.emit("state", {"v": 1})  # seq 1
+            await broker.emit("state", {"v": 2})  # seq 2
+            await broker.emit("state", {"v": 3})  # seq 3 -> evicts seq 1 from ring
+            # Ring holds seq 2,3. Cursor after=0 is older than the ring's first
+            # element, so the JSONL fallback path must run and return all 3.
+            replayed = await broker.replay(after=0)
+            assert len(replayed) == 3, f"expected 3, got {len(replayed)}"
+        finally:
+            broker.close()
+            await shutdown_plugin_dispatcher()
 
     asyncio.run(_run())
 
 
-def test_replay_jsonl_after_close():
+def test_replay_jsonl_after_close(tmp_path):
     """After the broker closes, a replay cursor outside the ring must still
     read from events.jsonl (the bug fix path)."""
     import asyncio
 
-    from tools.api.event_broker import RunEventBroker
+    from tools.api.event_broker import RunEventBroker, shutdown_plugin_dispatcher
 
-    rd = Path(__import__("tempfile").mkdtemp()) / "run"
+    rd = tmp_path / "run"
     rd.mkdir(parents=True, exist_ok=True)
     broker = RunEventBroker("r2", rd, buffer_size=1)
 
     async def _run():
-        await broker.emit("state", {"v": 1})
-        await broker.emit("state", {"v": 2})
-        broker.close()
-        # Ring holds only seq 2 (buffer_size=1); cursor 0 must fall back to JSONL.
-        replayed = await broker.replay(after=0)
-        assert len(replayed) == 2
+        try:
+            await broker.emit("state", {"v": 1})
+            await broker.emit("state", {"v": 2})
+            broker.close()
+            # Ring holds only seq 2 (buffer_size=1); cursor 0 must fall back to JSONL.
+            replayed = await broker.replay(after=0)
+            assert len(replayed) == 2
+        finally:
+            broker.close()
+            await shutdown_plugin_dispatcher()
 
     asyncio.run(_run())
 

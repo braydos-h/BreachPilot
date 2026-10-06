@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from tools.config_manager import load_validated_config as load_validated_config
 from tools.eval.baseline import check_regression as check_regression
 from tools.eval.baseline import save_baseline as save_baseline
 from tools.eval.graded import _CONFIG_PATH_KEY as _CONFIG_PATH_KEY
@@ -19,6 +20,7 @@ from tools.eval.graded import EvalReport as EvalReport
 from tools.eval.graded import FlagCheckResult as FlagCheckResult
 from tools.eval.graded import TargetScore as TargetScore
 from tools.eval.graded import _host_owned_when_met as _host_owned_when_met
+from tools.eval.graded import _open_verify_session as _open_verify_session
 from tools.eval.graded import default_agent_runner as default_agent_runner
 from tools.eval.graded import run_graded_eval as run_graded_eval
 from tools.eval.graded import verify_flag_check as verify_flag_check
@@ -47,7 +49,9 @@ from tools.eval.suite import load_target_oracle as load_target_oracle
 from tools.eval.suite import run_eval_suite as run_eval_suite
 from tools.eval.suite import score_against_oracle as score_against_oracle
 from tools.eval_checks import default_check_executor as default_check_executor
+from tools.exploit_session import run_exploit_session as run_exploit_session
 from tools.mcp_session import open_exploit_mcp_session as open_exploit_mcp_session
+from tools.model_router import build_router as build_router
 
 __all__ = [
     "EvalMetrics",
@@ -83,6 +87,9 @@ __all__ = [
     "aggregate_finding_lifecycle",
     "check_live_thresholds",
     "write_skipped_eval_report",
+    "load_validated_config",
+    "build_router",
+    "run_exploit_session",
 ]
 
 if __name__ == "__main__":  # pragma: no cover - manual entry

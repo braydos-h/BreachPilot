@@ -18,11 +18,11 @@ subsystem: api
 
 Shared guards: `_run_dir(run_id)` (`tools/api/routes/runs.py:55`) resolve `reports/<run_id>/` with escape check; `_safe_child` (`tools/api/routes/runs.py:98`) and `_safe_workspace_path` (`tools/api/routes/runs.py:121`) refuse `..`/absolute traversal. Whitelists: `_ARTIFACT_WHITELIST`, `_LOG_WHITELIST`, `_CONTENT_TYPES` (`tools/api/routes/runs.py:64`).
 
-Request model: `RunCreateRequest` (`tools/api/routes/runs.py:142`) and `TitleRequest`, `ToolCallRequest` (`tools/api/routes/runs.py:170`, `:177`).
+Request model: `RunCreateRequest` (`tools/api/routes/runs.py:243`) and `TitleRequest`, `ToolCallRequest`, `HitlDecideRequest` (`tools/api/routes/runs.py:269-282`).
 
 ## `POST /api/v1/runs` — `create_run` — 201
 
-`tools/api/routes/runs.py:184` — prepare, persist, and (unless `yes`) gate on `start_confirm`.
+`tools/api/routes/runs.py:471` — persist the run request and begin preparation.
 
 Body `RunCreateRequest`:
 
@@ -42,26 +42,29 @@ Body `RunCreateRequest`:
 | `kind` | `agent` | `agent` | only `agent` is presently supported |
 | `yes` | `bool` | `false` | skip `start_confirm` |
 
-Handler builds `RunRequest(kind=RunKind(body.kind), ...)` and calls `run_manager.create_run` (`tools/api/run_manager.py:187`). Response `201`:
+The handler builds `RunRequest(kind=RunKind(body.kind), ...)` and calls `run_manager.create_run`. Preparation may continue in the background after this request returns. The common response is `201` with `preview: null` and `state: "preparing"`:
 
 ```json
 {
   "run_id": "20260809_...",
-  "preview": { "run_id": "...", "target_ip": "10.0.0.50", "destructive": true, "required_confirmation_text": "ALLOW 10.0.0.50", "budgets": {...} },
-  "state": "awaiting_confirmation",
-  "decision": { "id": "dec-...", "kind": "start_confirm", "required_text": "ALLOW 10.0.0.50", "prompt_text": "..." }
+  "preview": null,
+  "state": "preparing"
 }
 ```
 
-When `yes=true`, `decision` absent and `state="queued"` (task created immediately). `409 conflict` when `len(_active) >= max_concurrent_runs` (`tools/api/run_manager.py:201`).
+Poll `GET /runs/{run_id}` and subscribe to `GET /runs/{run_id}/events` while preparation completes. The prepared preview and start-confirm decision are persisted and exposed by the run and decision endpoints. If preparation completes before the create response is assembled, `preview` may already be present; the state is `awaiting_confirmation` when a decision is pending or `queued` when execution can start. `yes=true` skips the start-confirm decision after preparation. `409 conflict` is returned when the active-run limit prevents creation.
+
+## `POST /api/v1/runs/demo/restore` — `restore_demo`
+
+Idempotently restores the built-in demo record and artifacts and clears its deletion tombstone. Returns `200 {run_id, restored:true}`.
 
 ## `GET /api/v1/runs` — `list_runs`
 
-`tools/api/routes/runs.py:226` — paginated, sortable, searchable history. Query: `limit 1..200 default 50`, `offset≥0`, `sort` enum `created_desc|created_asc|title_asc|title_desc|state_asc|state_desc` (`tools/api/persistence.py:113`), `q` filter `≤200` on `title|request_json`, `state` exact filter `≤32`. Calls `persistence.list_runs` + `count_runs`. Each row `{id, state, created_at, target, mode, goal_name, target_ip, model_alias, title}` (`tools/api/routes/runs.py:246`). Response `{runs:[...], sort, total}`.
+`tools/api/routes/runs.py:539` — paginated, sortable, searchable history. Query: `limit 1..200 default 50`, `offset≥0`, `sort` enum `created_desc|created_asc|title_asc|title_desc|state_asc|state_desc`, `q` filter `≤200`, and `state` exact filter `≤32`. Calls persistence asynchronously. Each row includes `{id, state, created_at, target, mode, goal_name, target_ip, model_alias, title}`. Response `{runs:[...], sort, total}`.
 
 ## `GET /api/v1/runs/{run_id}` — `get_run`
 
-`tools/api/routes/runs.py:265` — full detail: `{id, state, created_at, updated_at, request, preview, result, error, title, cancelled_at, resumed_from, decisions:[{id,kind,status,answer}]}`. `404` if missing.
+`tools/api/routes/runs.py:583` — full detail: `{id, state, created_at, updated_at, request, preview, result, error, title, cancelled_at, resumed_from, is_demo, decisions:[{id,kind,status,answer}]}`. `404` if missing.
 
 ## `POST /api/v1/runs/{run_id}/cancel` — `cancel_run`
 
@@ -69,7 +72,7 @@ When `yes=true`, `decision` absent and `state="queued"` (task created immediatel
 
 ## `POST /api/v1/runs/{run_id}/resume` — `resume_run`
 
-`tools/api/routes/runs.py:297` — copy original `request_json` fields intersecting `RunRequest.__dataclass_fields__`, set `resume_source=run_id`, `kind=RunKind(original.kind)`, `yes=False`. Re-use `run_manager.create_run`. Response `{run_id: new, resumed_from: old, preview:{run_id, target_ip}}`. `404` if original missing, `409` if concurrent cap hit.
+`tools/api/routes/runs.py:622` — copy original request fields supported by `RunRequest`, set `resume_source=run_id`, preserve the kind, and require the normal confirmation flow. Response `{run_id: new, resumed_from: old}`; preparation and preview follow the ordinary background run lifecycle. `404` if original missing; the active-run cap may reject creation.
 
 ## `POST /api/v1/runs/{run_id}/title` — `set_run_title`
 
@@ -107,7 +110,14 @@ Reads one file under `exploit_workspace/` via `_safe_workspace_path` (arbitrary 
 
 ### `GET /api/v1/runs/{run_id}/audit` — `get_audit` — `tools/api/routes/runs.py:465`
 
-Reads `exploit_audit.jsonl` (`reports/<run_id>/exploit_audit.jsonl` else `exploit_workspace/exploit_audit.jsonl`), tolerant splitlines+JSON ignore. Then `tools.exploit_agent.policy.verify_audit_chain(path)` for hash chain. Returns `{records:[...], chain_valid:bool, chain_reason:str}`.
+Reads the host-owned `reports/<run_id>/exploit_audit.jsonl`; older runs may fall back to `exploit_workspace/exploit_audit.jsonl`. Current runs create the canonical report-side file before worker startup, so a worker-writable legacy copy is not selected. Parsing tolerates malformed JSONL rows; `tools.exploit_agent.policy.verify_audit_chain(path)` checks the chain. Returns `{records:[...], chain_valid:bool, chain_reason:str}`.
+
+## Errors, sandbox, and human review
+
+- `GET /api/v1/runs/{run_id}/errors?kind=&tail=200` returns `{run_id, records, total_records, kinds}` from `errors.jsonl`; `tail` is bounded to 1–2000. An assessment with no deep-error records returns an empty list.
+- `GET /api/v1/runs/{run_id}/sandbox` returns a read-only summary derived from the run's audit and event artifacts. It does not control a live worker.
+- `GET /api/v1/runs/{run_id}/proposed` returns findings awaiting operator review, each with its read-only proof capsule.
+- `POST /api/v1/runs/{run_id}/decide` accepts `{finding_id, decision, note}` and persists a human decision. The server sets the actor to `human`; clients cannot self-assert an agent decision as human review. It returns `{run_id, finding_id, finding}`.
 
 ## Swarm / Campaign / Witness
 
@@ -125,7 +135,7 @@ Whitelist `_LOG_WHITELIST ∪ {terminal.log, python_run.log, msf_output.log, run
 - Helpers `_exploit_workspace`, `_credential_access_log`, `_find_credential_stores` (`tools/api/routes/runs.py:612`): finds `credentials/<target>/credentials.jsonl` per target + legacy `credentials.jsonl`.
 - `GET /api/v1/runs/{run_id}/credentials` — `list_credentials` (`tools/api/routes/runs.py:640`) iterates `CredentialStore(parent)` per store, maps `rec.to_json()` with `password:"[REDACTED]"` + synthetic `index`.
 - `POST /api/v1/runs/{run_id}/credentials/{index}/reveal` — `reveal_credential` (`tools/api/routes/runs.py:667`) global index across stores, audits `credential_access.jsonl`, returns `{index, username, target_host, password}` plaintext (auth required to call).
-- `POST /api/v1/runs/{run_id}/credentials/{index}/confirm` — `confirm_credential` (`tools/api/routes/runs.py:712`) marks `confirmed` via `CredentialStore.confirm_credential(username, target_host, credential_type, validated=True)`, audits with `action:"confirm"`, returns `{index, username, target_host, confirmed}`.
+- `POST /api/v1/runs/{run_id}/credentials/{index}/confirm` — authenticated operator action; marks `confirmed` after the operator reviews successful reuse evidence, audits with `action:"confirm"`, and returns `{index, username, target_host, confirmed}`. Agent-facing MCP confirmation is disabled.
 - `GET /api/v1/runs/{run_id}/loot` — `list_loot` (`tools/api/routes/runs.py:770`) candidates `exploit_workspace/loot/loot.jsonl` (modern per `LootStore(workspace/"loot")`) else `exploit_workspace/loot.jsonl` (legacy); returns `{loot: [item.to_json()]}`.
 - Errors `500` on credential/loot read failures.
 

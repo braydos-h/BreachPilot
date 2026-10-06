@@ -863,18 +863,14 @@ CONFIG_SCHEMA: dict[str, Any] = {
     },
     # Disposable execution sandbox (tools/sandbox/): every attack command runs
     # inside a hardened, per-run Docker worker instead of on the operator host.
-    # The worker is cap-dropped (NET_RAW at most, never NET_ADMIN), non-root,
+    # The worker has all Linux capabilities dropped, is non-root,
     # no-new-privileges, resource-bounded, and gets a default-DROP netns
     # firewall authorizing ONLY the effective target allowlist (plus pinned
     # research hosts only when ``allow_research_hosts`` is explicitly enabled;
     # default off). ANY sandbox
-    # failure DURING a session blocks offensive execution (fail closed -- host
-    # execution is never a per-command fallback). The one sanctioned fallback
-    # is the boot-time decision: when the Docker probe fails at server boot
-    # and ``fallback_native`` is true (explicit opt-in), the whole server process
-    # degrades to the legacy uncontained host-execution mode with a warning;
-    # ``fallback_native: false`` (default) fails closed instead. ``enabled: false`` is
-    # the explicit opt-out that always uses the legacy mode. See
+    # failure DURING or before a session blocks offensive execution (fail
+    # closed -- host execution is never a fallback). Legacy settings that
+    # disable the sandbox or request native fallback are rejected. See
     # docs/sandbox.md and docs/safety-model.md.
     "sandbox": {
         "enabled": True,
@@ -882,10 +878,8 @@ CONFIG_SCHEMA: dict[str, Any] = {
         "image": "breachpilot-sandbox:latest",
         "user": "sandbox",
         "read_only_rootfs": True,
-        # Degrade to the legacy host-execution mode when the boot-time Docker
-        # probe (CLI / daemon / worker image) fails, instead of blocking every
-        # execution. Explicit opt-in only (default false = fail closed). The
-        # WebUI home screen surfaces the degraded state.
+        # Deprecated compatibility field. True is rejected; sandbox failures
+        # always block execution rather than falling back to the host.
         "fallback_native": False,
         # When true, a sandbox session may start Docker if it is stopped and
         # stop it on exit only when BP started it and no containers remain.
@@ -906,14 +900,11 @@ CONFIG_SCHEMA: dict[str, Any] = {
         },
         "network": {
             "enforce": True,
-            # Wired flag (manager._apply_policy): a netns-firewall install
-            # failure blocks execution when true (default); when false the
-            # worker degrades to Docker-bridge isolation only (NOT
-            # containment) with an explicit WARNING + audit row. Worker
-            # creation/setup failures always fail closed regardless.
+            # Mandatory boundary. SandboxConfig rejects false values so an
+            # operator cannot launch a worker without the destination firewall.
             "fail_closed": True,
-            # "controlled": in-container DNS only reaches host-side-validated
-            # resolutions; "none": port 53 blocked entirely (no DNS bypass).
+            # Both modes block worker DNS packets. "controlled" provides
+            # host-resolved, pinned /etc/hosts mappings for allowlisted names.
             "allow_dns": "controlled",
             # Explicit dev-only mapping of sandbox loopback to the host gateway.
             # NEVER enable for production attack runs.
@@ -931,9 +922,9 @@ CONFIG_SCHEMA: dict[str, Any] = {
             "remove_on_exit": True,
             "remove_stale_on_startup": True,
         },
-        # NET_RAW for raw-packet scanning (nmap -sS). Minimum-capability grant;
-        # set false for strictly connect-scanning missions.
-        "multi_net_raw": True,
+        # Retained for compatibility but true is rejected: AF_PACKET could
+        # bypass the worker's IP-layer destination firewall.
+        "multi_net_raw": False,
     },
 }
 

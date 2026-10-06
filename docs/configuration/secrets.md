@@ -36,7 +36,7 @@ Legacy files without `version/api_keys` are read as flat `{ENV: value}` for back
 - `cve_lookup.api_key_env` (default `NVD_API_KEY`)
 - `cve_lookup.github.token_env` (default `GITHUB_TOKEN`)
 
-MCP research gating uses `research_api_key_env_names(config)` (`api_key_store.py:61`) — only `ollama` when `use_web_search/use_web_fetch` true plus `serpapi` when in `provider/fallback_provider`.
+MCP research gating uses `research_api_key_env_names(config)` (`api_key_store.py:61`) — Ollama's key is required when `use_web_search` is enabled, and SerpAPI's key is required when it is in `provider/fallback_provider`. URL fetches use the local destination-validated stdlib transport and do not require a provider key.
 
 **Read path** — `load_api_key_file(path)` (`api_key_store.py:82`) swallows `OSError/JSONDecodeError/TypeError` and returns `{}` on unreadable file — refuses to crash startup. `load_api_keys_into_env(path, allowed_names)` (`api_key_store.py:105`) iterates the file but **skips when `os.environ.get(name)` already truthy** — shell-exported env beats file.
 
@@ -89,7 +89,7 @@ Vendored `oauth/` checkout (`EvanZhouDev/openai-oauth`) + loopback proxy `127.0.
 
 ### Credential vault (attack-found creds, not provider keys)
 
-`tools/credential_store.py` — encrypted at-rest creds discovered during attack, keyed by `BREACHPILOT_VAULT_KEY` env (`AI_NMAP_VAULT_KEY` deprecated alias until 0.71) or auto-generated. Writes fail closed by default (no plaintext writes without `BREACHPILOT_ALLOW_PLAINTEXT_VAULT=1`); on-disk `confirmed=True` without a valid HMAC is downgraded. Access via MCP `cred_store_add/get/list/confirm`. Separate from `secr.json`.
+`tools/credential_store.py` — encrypted-at-rest credentials discovered during an assessment, keyed by `BREACHPILOT_VAULT_KEY` (`AI_NMAP_VAULT_KEY` deprecated alias until 0.71) or an auto-generated key outside the workspace. Passwords and free-text notes are encrypted. Writes fail closed by default (no plaintext writes without `BREACHPILOT_ALLOW_PLAINTEXT_VAULT=1`); raw vault files are blocked from workspace reads and untrusted `confirmed=True` records are downgraded. MCP `cred_store_confirm` always blocks; an authenticated operator confirms through the run credentials UI/API. Separate from `secr.json`.
 
 ## Permissions
 
@@ -124,4 +124,5 @@ No migration tool — old `secr.json` entries not yet overlaid by new env remain
 
 - `docs/configuration/overview.md` — file locations & precedence.
 - `docs/configuration/environment.md` — full env var directory.
-- `docs/providers.md` — Ollama vs ChatGPT wiring, why embeddings stay Ollama.
+- `docs/providers.md` — chat and embedding-provider selection, including the
+  separate legacy Flow B Ollama behavior.

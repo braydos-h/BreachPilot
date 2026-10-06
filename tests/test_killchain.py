@@ -231,6 +231,45 @@ async def test_failed_verification_leaves_state_unchanged(tmp_path: Path) -> Non
 
 
 @pytest.mark.asyncio
+async def test_default_network_verifier_uses_transition_target_and_port(tmp_path: Path, monkeypatch) -> None:
+    """Default kill-chain probes stay within the requested host/port pair."""
+    from tools.intelligence.graph.store import AttackGraphStore
+    from tools.killchain import KillChainMachine
+
+    captured: dict[str, Any] = {}
+
+    def fake_default_executor(**kwargs):
+        captured.update(kwargs)
+
+        def execute(check):
+            captured["check"] = check
+            return True, "scoped check passed"
+
+        return execute
+
+    monkeypatch.setattr("tools.eval_checks.default_check_executor", fake_default_executor)
+    machine = KillChainMachine(
+        graph_store=AttackGraphStore(":memory:"),
+        workspace=tmp_path,
+        tool_executor=FakeToolExecutor(),
+    )
+
+    result = await machine.attempt_transition(
+        "127.0.0.1",
+        "discovered",
+        "reachable",
+        edge_id="tcp_reachable",
+        context={"port": 8081},
+    )
+
+    assert result["success"]
+    assert captured["target_host"] == "127.0.0.1"
+    assert captured["target_ports"] == [8081]
+    assert captured["check"] == {"id": "port_open_probe", "type": "tcp_connect", "host": "127.0.0.1", "port": 8081}
+    assert machine.status("127.0.0.1")["state"] == "reachable"
+
+
+@pytest.mark.asyncio
 async def test_invalid_transition_rejected(tmp_path: Path) -> None:
     machine = _machine(tmp_path)
     result = await machine.attempt_transition("10.0.0.50", "discovered", "da")
@@ -567,7 +606,14 @@ async def test_end_to_end_scripted_chain(tmp_path: Path) -> None:
     # full chain from discovered: BFS plan covers the registered baseline edges
     plan = machine.plan("10.0.0.50", "shell_as_user")
     assert plan, "baseline edges must connect discovered to shell_as_user"
-    ctx: dict[str, Any] = {"user": "admin", "password": "password", "port": "80"}
+    ctx: dict[str, Any] = {
+        "user": "admin",
+        "password": "password",
+        "port": "80",
+        "service_banner_marker": "nginx",
+        "login_success_marker": "Logout",
+        "webshell_probe_marker": "BP_MARKER",
+    }
     for from_state, to_state, edge_id in _plan_pairs(plan):
         result = await machine.attempt_transition("10.0.0.50", from_state, to_state, edge_id=edge_id, context=ctx)
         assert result["success"], result
@@ -632,8 +678,8 @@ async def test_domain_path_verifies_end_to_end(tmp_path: Path) -> None:
     assert executor.calls[1][1]["domain"] == "CORP"
 
 
-def test_killchain_attempt_succeeds_when_shell_probe_passes(tmp_path: Path) -> None:
-    """MCP wiring: shell_command verifies run through in-process dispatch."""
+def test_killchain_worker_identity_does_not_verify_target_shell(tmp_path: Path) -> None:
+    """A uid marker from the sandbox worker cannot commit target access."""
     from tools.intelligence.graph.store import AttackGraphStore
     from tools.intelligence.graph.types import GraphNode, NodeType
     from tools.mcp_tools.killchain import register_killchain_tools
@@ -659,8 +705,12 @@ def test_killchain_attempt_succeeds_when_shell_probe_passes(tmp_path: Path) -> N
         to_state="shell_as_user",
         context_json=json.dumps({"user": "root", "password": "pw"}),
     )
-    assert out.startswith("KILLCHAIN_TRANSITION:")
-    assert "EVIDENCE:" in out
+    assert "verification failed" in out.lower()
+    refreshed = AttackGraphStore(db)
+    host = refreshed.get_node_by_value(NodeType.HOST, "10.0.0.50", "target:10.0.0.50")
+    assert host is not None
+    assert host.properties.get("attack_state") == "creds_in_hand"
+    refreshed.close()
 
 
 def test_killchain_context_parses_credential_shapes() -> None:

@@ -22,7 +22,7 @@ subsystem: mcp
 | Tool | Params | Result Shape | Gates / Notes |
 |------|--------|--------------|---------------|
 | `killchain_status` | `target: str` | `KILLCHAIN_STATUS:\nTARGET: ...\nSTATE: ...\nGOAL: ...\nAPPLICABLE_EDGES: ...\nPATH_TO_GOAL: ...` | `@audit_tool`. Read-only graph read — no target touch. Empty `target` → `BLOCKED: target is required.` |
-| `killchain_attempt` | `target: str`, `from_state: str`, `to_state: str`, `edge_id: str=""`, `context_json: str=""` | `KILLCHAIN_TRANSITION:` (+ `EDGE`, `TRANSITION`, `VERIFICATION: [PASS]/[FAIL]` lines, `EVIDENCE:`) or `KILLCHAIN_FAILED:` (+ `BLOCKED:`/`ERROR:` lines, `STATE UNCHANGED (verification failed or transition rejected).`) | `@require_allowlist("target")`. Invalid target → `BLOCKED`; non-object or malformed `context_json` → `BLOCKED`; missing playbook tool → `ERROR: killchain_attempt unavailable: ...`. |
+| `killchain_attempt` | `target: str`, `from_state: str`, `to_state: str`, `edge_id: str=""`, `context_json: str=""` | `KILLCHAIN_TRANSITION:` (+ `EDGE`, `TRANSITION`, `VERIFICATION: [PASS]/[FAIL]` lines, `EVIDENCE:`) or `KILLCHAIN_FAILED:` (+ `BLOCKED:`/`ERROR:` lines, `STATE UNCHANGED (verification failed or transition rejected).`) | `@require_allowlist("target")`. Context may provide `port`, `service_banner_marker`, `login_success_marker`, and `webshell_probe_marker`. Network checks bind to the requested target/port; missing markers fail closed. |
 | `killchain_plan` | `target: str`, `goal_state: str=""` | `KILLCHAIN_PLAN:\nTARGET: ...\nCURRENT_STATE: ...\nGOAL_STATE: ...\nPATH:\n  1. <edge_id> (<from> -> <to>)\n...\nREGISTERED_EDGES: N (stubs excluded)` | `@audit_tool`. Read-only BFS over verified edges — executes nothing. Empty `target` → `BLOCKED`; unparsable goal → `BLOCKED`; no path → `(no registered edge path — free-form module planning applies)`. |
 
 Example — status snapshot:
@@ -50,14 +50,14 @@ REGISTERED_EDGES: 0 (stubs excluded)
 
 ## Attempt Flow (Verified-Only Commit)
 
-1. `context_json`, when non-empty, must parse to a JSON object (playbook placeholders such as `user`, `password`, `port`) — otherwise `BLOCKED`.
-2. `machine.attempt_transition(target, from_state, to_state, edge_id=edge_id or None, context=context)` runs the edge playbook through the in-process tool executor, then independently verifies via check probes. Callers already inside an event loop hop to a worker thread so the machine gets a clean loop.
+1. `context_json`, when non-empty, must parse to a JSON object (playbook placeholders such as `user`, `password`, `port`, and target-specific HTTP response markers) — otherwise `BLOCKED`.
+2. `machine.attempt_transition(target, from_state, to_state, edge_id=edge_id or None, context=context)` runs the edge playbook through the in-process tool executor, then independently verifies via check probes bound to the exact target and selected port. Callers already inside an event loop hop to a worker thread so the machine gets a clean loop.
 3. Success renders `KILLCHAIN_TRANSITION:` with per-check `[PASS]` lines and an `EVIDENCE:` ref; anything else renders `KILLCHAIN_FAILED:` with `BLOCKED:`/`ERROR:` detail, per-check `[FAIL]` lines where present, and the `STATE UNCHANGED` footer — the state only advances when verification passes.
 
 ## In-Process Dispatch
 
 - `_in_process_tool_executor(mcp)` resolves the same decorated functions the agent invokes over MCP (`FastMCP._tool_manager._tools[name].fn`, falling back to an `mcp.tools` dict for test harnesses), so every playbook step re-applies the target-IP allowlist and writes audit rows. Sync functions run via `asyncio.to_thread`.
-- `_in_process_shell_session(mcp)` wraps that dispatch as a sync `(tool_name, args) -> str` session for `shell_command` verify probes; dispatch failures raise, and `eval_checks` degrades them to UNVERIFIED, never a pass.
+- HTTP/TCP probes use the shared executor with `target_host` and the numeric context `port`; HTTP edges require a resolved target-specific success marker. `shell_command` probes remain UNVERIFIED unless a dedicated target-bound shell executor is wired.
 
 ## Dependencies
 
@@ -100,7 +100,7 @@ Implementation note: `killchain.require_verification` (default true) is a config
 
 ## Source map
 
-- `tools/mcp_tools/killchain.py` — `register_killchain_tools`, `_in_process_tool_executor`, `_in_process_shell_session`
+- `tools/mcp_tools/killchain.py` — `register_killchain_tools`, `_in_process_tool_executor`
 - `tools/killchain/machine.py` — `KillChainMachine` (`status` / `attempt_transition` / `plan`)
 - `tools/killchain/states.py` — `AttackState`
 - `tools/killchain/edges.py` — edge registry (`all_edges`, `get_edge`)

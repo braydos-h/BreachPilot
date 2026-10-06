@@ -433,7 +433,9 @@ def _make_client(tmp_path: Path, monkeypatch, token: str = "test-token-012345678
     callables = Callables(build_router=lambda *a, **kw: _FakeRouter(), run_session=_fake_run_session)
     from app import create_app
 
-    return TestClient(create_app(config_path=config_path, callables=callables)), token
+    client = TestClient(create_app(config_path=config_path, callables=callables))
+    client.__enter__()
+    return client, token
 
 
 def _seed_run_with_proposal(client, token: str, tmp_path: Path) -> str:

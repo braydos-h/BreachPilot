@@ -16,6 +16,8 @@ through the provider/sink interfaces.
 from __future__ import annotations
 
 import asyncio
+import copy
+import inspect
 import json
 import time
 import traceback
@@ -23,10 +25,11 @@ from pathlib import Path
 from typing import Any
 
 from tools.attack_ui import get_ui
-from tools.exceptions import _EXC_GROUP_CATCH, _is_exception_group, _log_nested_exceptions
+from tools.exceptions import _EXC_GROUP_CATCH, _contains_cancellation, _is_exception_group, _log_nested_exceptions
 from tools.exploit_agent import ExploitSettings
 from tools.goal_engine import AttackGoal, GoalEngine
 from tools.goal_suggester import ReconAssessment
+from tools.kernel.audit_paths import AUDIT_FILENAME, prepare_external_audit_path, validate_run_workspace
 from tools.run_service.models import (
     EVENT_ARTIFACT,
     EVENT_RECON,
@@ -44,6 +47,24 @@ from tools.run_service.providers import (
 from tools.swarm_bridge import SwarmMcpBridge
 
 ui = get_ui()
+_SWARM_TEARDOWN_GRACE_SECONDS = 5.0
+_DETACHED_SWARM_TASKS: set[asyncio.Task[Any]] = set()
+
+
+def _retain_detached_swarm_task(task: asyncio.Task[Any]) -> None:
+    """Keep a timed-out worker alive only until its in-flight call returns."""
+    _DETACHED_SWARM_TASKS.add(task)
+
+    def _discard_finished(finished: asyncio.Task[Any]) -> None:
+        _DETACHED_SWARM_TASKS.discard(finished)
+        if not finished.cancelled():
+            try:
+                finished.exception()
+            except _EXC_GROUP_CATCH as exc:
+                if _is_exception_group(exc):
+                    _log_nested_exceptions(exc)
+
+    task.add_done_callback(_discard_finished)
 
 
 async def _emit_service_deep_error(
@@ -66,7 +87,9 @@ async def _emit_service_deep_error(
 
         run_id = reports_dir.name if isinstance(reports_dir, Path) else ""
         await emit_deep_error(event_sink, run_id, kind=kind, exc=exc, ctx=dict(ctx), reports_dir=reports_dir)
-    except _EXC_GROUP_CATCH:
+    except _EXC_GROUP_CATCH as exc:
+        if _contains_cancellation(exc):
+            raise
         pass
 
 
@@ -127,8 +150,13 @@ class TasksMixin:
         ui.status("RECON-FIRST MODE: Scanning target before goal selection...")
         ui.divider()
 
-        workspace = Path("exploit_workspace")
+        workspace = Path(str((config.get("exploit", {}) or {}).get("workspace_dir", "exploit_workspace")))
+        if not workspace.is_absolute():
+            workspace = reports_dir / workspace
+        reports_dir.mkdir(parents=True, exist_ok=True)
+        workspace = validate_run_workspace(workspace, reports_dir)
         workspace.mkdir(parents=True, exist_ok=True)
+        audit_path = prepare_external_audit_path(workspace, reports_dir / AUDIT_FILENAME)
 
         http_port = int(config.get("mcp", {}).get("http_port", 8001))
         assessment: ReconAssessment | None = None
@@ -136,9 +164,11 @@ class TasksMixin:
             async with self._c.open_session(
                 transport="http",
                 config_path=config_path,
+                config_override=config,
                 target_ip=target_ip,
                 exploit_port=http_port,
                 workspace=workspace,
+                audit_path=audit_path,
                 multi_model_enabled=bool(request.multi_model_consult),
                 active_model_alias=model_alias,
                 soft_fail=True,
@@ -157,6 +187,8 @@ class TasksMixin:
                         reports_dir=reports_dir,
                     )
         except _EXC_GROUP_CATCH as exc:
+            if _contains_cancellation(exc):
+                raise
             log_path = reports_dir / "recon_first_error.log"
             try:
                 log_path.write_text(
@@ -264,8 +296,13 @@ class TasksMixin:
         ui.status("FAST MODE: Running parallel recon preset before AI takeover...")
         ui.divider()
 
-        workspace = Path("exploit_workspace")
+        workspace = Path(str((config.get("exploit", {}) or {}).get("workspace_dir", "exploit_workspace")))
+        if not workspace.is_absolute():
+            workspace = reports_dir / workspace
+        reports_dir.mkdir(parents=True, exist_ok=True)
+        workspace = validate_run_workspace(workspace, reports_dir)
         workspace.mkdir(parents=True, exist_ok=True)
+        audit_path = prepare_external_audit_path(workspace, reports_dir / AUDIT_FILENAME)
         http_port = int(config.get("mcp", {}).get("http_port", 8001))
 
         # Resume: if a prior fast_recon.json is already on disk and recon is
@@ -302,9 +339,11 @@ class TasksMixin:
                 async with self._c.open_session(
                     transport="http",
                     config_path=config_path,
+                    config_override=config,
                     target_ip=target_ip,
                     exploit_port=http_port,
                     workspace=workspace,
+                    audit_path=audit_path,
                     multi_model_enabled=bool(request.multi_model_consult),
                     active_model_alias=model_alias,
                     soft_fail=True,
@@ -338,6 +377,8 @@ class TasksMixin:
                         if fast_result.cache_hit:
                             ui.info(f"FAST RECON CACHE HIT: loaded assessment (age < {fast_cfg.cache_ttl_seconds}s)")
             except _EXC_GROUP_CATCH as exc:
+                if _contains_cancellation(exc):
+                    raise
                 log_path = reports_dir / "recon_first_error.log"
                 try:
                     log_path.write_text(
@@ -532,22 +573,39 @@ class TasksMixin:
             try:
                 if mode == "attack":
                     from tools.autonomous_orchestrator import observe_autonomous_progress
+                    from tools.campaign.runtime_context import require_sandbox_recon
+                    from tools.run_service.sandbox_recon import sandbox_recon_via_mcp
 
-                    with observe_autonomous_progress(_track_progress):
-                        return await swarm_loop.run_autonomous_campaign([target_ip])
+                    async def sandbox_provider(target: str) -> Any:
+                        return await sandbox_recon_via_mcp(swarm_bridge, target, aggression="normal")
+
+                    # Flow A currently reaches its campaign engine through a
+                    # frozen AgentLoop compatibility adapter. Carry the active
+                    # run's sandbox-only provider in context so the constructed
+                    # orchestrator cannot select its library host-recon path.
+                    with require_sandbox_recon(sandbox_provider):
+                        with observe_autonomous_progress(_track_progress):
+                            return await swarm_loop.run_autonomous_campaign([target_ip])
                 max_cycles = int(exploit_cfg.get("max_rounds", 30))
                 return await asyncio.to_thread(swarm_loop.run, max_cycles)
             except _EXC_GROUP_CATCH as exc:
+                if _contains_cancellation(exc):
+                    raise
                 ui.error(f"Swarm campaign error: {exc}")
+                if _is_exception_group(exc):
+                    _log_nested_exceptions(exc)
                 # Deep Run Logs: keep the traceback, not just str(exc).
                 await _emit_swarm_deep_error(event_sink, reports_dir, exc, {"tool_name": "swarm_campaign"})
                 return {"error": str(exc)}
 
-        swarm_task = asyncio.create_task(_run_swarm())
         ui.info(
             f"Swarm mode ENABLED (critic={request.critic}, reflection={request.reflection}, adaptive_exploits={request.adaptive_exploits})."
         )
         await event_sink.emit(EVENT_SWARM, {"status": "started", "workspace": str(swarm_workspace)})
+        # Start the worker only after the last cancellable setup operation.
+        # Otherwise cancellation during event delivery loses the task handle
+        # before execute() can own and tear it down.
+        swarm_task = asyncio.create_task(_run_swarm())
         return swarm_loop, swarm_task, swarm_workspace
 
     async def _run_session(
@@ -560,6 +618,7 @@ class TasksMixin:
         goal: AttackGoal,
         exploit_settings: ExploitSettings,
         config_path: Path,
+        config: dict[str, Any] | None = None,
         reports_dir: Path,
         assessment: ReconAssessment | None,
         approval_prompt: Any,
@@ -573,31 +632,49 @@ class TasksMixin:
         event_sink: EventSink,
         cancellation: CancellationToken,
         checkpoint_hook: Any = None,
+        swarm_session_complete: Any = None,
     ) -> dict[str, Any]:
-        config = _config_cli_load(config_path)
-        http_port = int(config.get("mcp", {}).get("http_port", 8001))
+        # Run execution must use the same immutable settings snapshot that was
+        # used to prepare and confirm the preview. Re-reading config_path here
+        # allows a concurrent PATCH /config to change scope or policy halfway
+        # through a run.
+        session_config = copy.deepcopy(config) if config is not None else _config_cli_load(config_path)
+        http_port = int(session_config.get("mcp", {}).get("http_port", 8001))
 
-        result = await self._c.run_session(
-            client=model_client,
-            model=model_alias,
-            target_ip=target_ip,
-            mode=mode,
-            goal=goal,
-            exploit_settings=exploit_settings,
-            config_path=config_path,
-            mcp_transport="http",
-            exploit_port=http_port,
-            reports_dir=reports_dir,
-            assessment=assessment if (recon_first or resume_state is not None) else None,
-            approval_prompt=approval_prompt,
-            approval_provider=approval_provider,
-            swarm_attach=swarm_attach,
-            heartbeat=heartbeat,
-            original_target=original_target,
-            resolved_ip=resolved_ip,
-            event_sink=event_sink,
-            checkpoint_hook=checkpoint_hook,
-        )
+        session_kwargs: dict[str, Any] = {
+            "client": model_client,
+            "model": model_alias,
+            "target_ip": target_ip,
+            "mode": mode,
+            "goal": goal,
+            "exploit_settings": exploit_settings,
+            "config_path": config_path,
+            "config_override": session_config,
+            "mcp_transport": "http",
+            "exploit_port": http_port,
+            "reports_dir": reports_dir,
+            "assessment": assessment if (recon_first or resume_state is not None) else None,
+            "approval_prompt": approval_prompt,
+            "approval_provider": approval_provider,
+            "swarm_attach": swarm_attach,
+            "heartbeat": heartbeat,
+            "original_target": original_target,
+            "resolved_ip": resolved_ip,
+            "event_sink": event_sink,
+            "checkpoint_hook": checkpoint_hook,
+        }
+        if swarm_session_complete is not None:
+            try:
+                parameters = inspect.signature(self._c.run_session).parameters.values()
+            except (TypeError, ValueError) as exc:
+                raise TypeError("swarm mode requires a session runner with an in-session completion hook") from exc
+            if not any(
+                parameter.name == "swarm_session_complete" or parameter.kind is inspect.Parameter.VAR_KEYWORD
+                for parameter in parameters
+            ):
+                raise TypeError("swarm mode requires a session runner with an in-session completion hook")
+            session_kwargs["swarm_session_complete"] = swarm_session_complete
+        result = await self._c.run_session(**session_kwargs)
         ui.divider()
         ui.success(f"Session complete. {result.get('total_actions', 0)} actions executed.")
         ui.status(f"Goal:    {goal.name}")
@@ -639,22 +716,25 @@ class TasksMixin:
     async def _wait_swarm(
         self,
         *,
+        swarm_loop: Any,
         swarm_task: asyncio.Task[Any],
         swarm_bridge: SwarmMcpBridge,
         swarm_workspace: Path,
+        mode: str,
         config: dict[str, Any],
         request: RunRequest,
         result: dict[str, Any],
         event_sink: EventSink,
         reports_dir: Path | None = None,
     ) -> dict[str, Any]:
-        from tools.cli_exploit_settings import _compute_swarm_timeout
-
         swarm_start = time.monotonic()
-        swarm_timeout = _compute_swarm_timeout(config, _request_to_args(request))
+        swarm_timeout = 0.0
         # Task results are untyped payloads (dicts or futures of dicts).
         swarm_result: Any = None
         try:
+            from tools.cli_exploit_settings import _compute_swarm_timeout
+
+            swarm_timeout = _compute_swarm_timeout(config, _request_to_args(request))
             _last_progress = 0.0
             while not swarm_task.done():
                 remaining = swarm_timeout - (time.monotonic() - swarm_start)
@@ -689,7 +769,6 @@ class TasksMixin:
             )
         except asyncio.TimeoutError:
             ui.error(f"Swarm task timed out ({int(swarm_timeout)}s). Cancelling.")
-            swarm_task.cancel()
             result["swarm_result"] = {"error": "timeout"}
             # Deep Run Logs: a timed-out swarm is a stuck run — persist the
             # full stall context (timeout budget, snapshot) so the fixer-agent
@@ -701,7 +780,11 @@ class TasksMixin:
                 {"tool_name": "swarm_campaign", "response_excerpt": _read_swarm_snapshot(swarm_workspace)},
             )
         except _EXC_GROUP_CATCH as exc:
+            if _contains_cancellation(exc):
+                raise
             ui.error(f"Swarm task error: {exc}")
+            if _is_exception_group(exc):
+                _log_nested_exceptions(exc)
             result["swarm_result"] = {"error": str(exc)}
             await _emit_swarm_deep_error(
                 event_sink,
@@ -710,12 +793,12 @@ class TasksMixin:
                 {"tool_name": "swarm_campaign"},
             )
         finally:
-            if not swarm_task.done():
-                swarm_task.cancel()
-                try:
-                    await swarm_task
-                except asyncio.CancelledError:
-                    pass
+            await self._stop_swarm_task(
+                swarm_loop=swarm_loop,
+                swarm_task=swarm_task,
+                swarm_bridge=swarm_bridge,
+                mode=mode,
+            )
             # Run manifest (p2-06): swarm teardown refreshes the manifest so
             # the swarm's stores (swarm_state, findings) are indexed before
             # the run-end finalize. Best-effort — never gates the result.
@@ -727,3 +810,63 @@ class TasksMixin:
                 except Exception:  # noqa: BLE001 -- teardown only, never gates
                     pass
         return result
+
+    async def _stop_swarm_task(
+        self,
+        *,
+        swarm_loop: Any,
+        swarm_task: asyncio.Task[Any],
+        swarm_bridge: SwarmMcpBridge,
+        mode: str,
+    ) -> None:
+        """Stop and join the sibling swarm worker without leaking task errors.
+
+        Attack campaigns run asynchronously and can be cancelled directly.
+        The research loop runs in ``asyncio.to_thread``; cancelling its wrapper
+        would leave the OS thread running, so request its cooperative stop and
+        join the wrapper instead.
+        """
+        if not swarm_task.done():
+            stop_bridge = getattr(swarm_bridge, "stop", None)
+            if callable(stop_bridge):
+                stop_bridge()
+            if mode == "attack":
+                swarm_task.cancel()
+            else:
+                stop = getattr(swarm_loop, "stop", None)
+                if callable(stop):
+                    try:
+                        stop()
+                    except _EXC_GROUP_CATCH as exc:
+                        if _contains_cancellation(exc):
+                            raise
+                        ui.warning(f"Swarm stop request failed during teardown: {exc}")
+                        if _is_exception_group(exc):
+                            _log_nested_exceptions(exc)
+                else:
+                    swarm_task.cancel()
+
+        try:
+            await asyncio.wait_for(asyncio.shield(swarm_task), timeout=_SWARM_TEARDOWN_GRACE_SECONDS)
+        except asyncio.TimeoutError:
+            ui.warning(
+                "Swarm worker did not stop within the teardown grace period; "
+                "it will remain tracked until its in-flight operation returns."
+            )
+            _retain_detached_swarm_task(swarm_task)
+        except asyncio.CancelledError:
+            # Suppress the child's expected cancellation, but preserve a new
+            # cancellation directed at the owning run task.
+            if not swarm_task.cancelled():
+                raise
+        except _EXC_GROUP_CATCH as exc:
+            ui.warning(f"Swarm worker failed during teardown: {exc}")
+            if _is_exception_group(exc):
+                _log_nested_exceptions(exc)
+
+        wait_until_idle = getattr(swarm_bridge, "wait_until_idle", None)
+        if callable(wait_until_idle):
+            # dispatch() can outlive its synchronous timeout while the MCP
+            # coroutine is unwinding. Keep the owner session open until every
+            # such coroutine has finished using it.
+            await wait_until_idle()

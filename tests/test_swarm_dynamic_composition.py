@@ -21,6 +21,7 @@ Plain-dict blackboard, dummy agents, no live targets — mirrors the existing
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from tools.failure_taxonomy import FailureClass
@@ -75,12 +76,13 @@ def test_recon_agent_analysis_tasks_carry_recon_milestone_dep() -> None:
     [target, "recon"] so route_parallel's milestone gating actually engages."""
     agent = ReconAgent()
     task = {"task_id": "R-1", "target": "10.0.0.50"}
-    context = {"config": {}, "blackboard": {}, "stealth": False}
+    tool_context = SimpleNamespace(sandbox=object())
+    context = {"config": {}, "blackboard": {}, "stealth": False, "tool_context": tool_context}
 
     with patch(
-        "tools.recon_pipeline.ReconPipeline.recon_host",
+        "tools.mcp_tools.recon.sandbox_recon_host",
         new_callable=AsyncMock,
-        return_value=_fake_recon_result(),
+        return_value=(_fake_recon_result(), None),
     ):
         result = agent.run(task, context)
 
@@ -260,6 +262,7 @@ def test_failure_class_to_reflection_label_mapping_covers_core_classes() -> None
         "NETWORK_ISSUE",
         "TOOL_MISSING",
         "RATE_LIMITED",
+        "OPERATOR_REVIEW",
     }
     # Core classes that should have a mapping.
     assert _FAILURE_CLASS_TO_REFLECTION_LABEL[FailureClass.TARGET_UNREACHABLE] == "NETWORK_ISSUE"
@@ -268,6 +271,7 @@ def test_failure_class_to_reflection_label_mapping_covers_core_classes() -> None
     assert _FAILURE_CLASS_TO_REFLECTION_LABEL[FailureClass.SCOPE_BLOCKED] == "FIREWALL_BLOCK"
     assert _FAILURE_CLASS_TO_REFLECTION_LABEL[FailureClass.FALSE_POSITIVE] == "PATCHED"
     assert _FAILURE_CLASS_TO_REFLECTION_LABEL[FailureClass.SCHEMA_ERROR] == "PROTOCOL_ERROR"
+    assert _FAILURE_CLASS_TO_REFLECTION_LABEL[FailureClass.OUTCOME_UNKNOWN] == "OPERATOR_REVIEW"
     # Every mapped label is in the prompt's vocabulary.
     for label in _FAILURE_CLASS_TO_REFLECTION_LABEL.values():
         assert label in prompt_labels

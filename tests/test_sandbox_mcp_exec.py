@@ -2,7 +2,7 @@
 
 Covers:
 - Destination extraction for the scope gate (IPs, endpoints, encoded forms).
-- Disabled sandbox => (False, None) so documented legacy mode still works.
+- Missing sandbox => explicit unsupported error; agent commands never run on the host.
 - Active sandbox => contained execution via the manager.
 - Any sandbox failure becomes a canonical SANDBOX_* block (never host exec).
 """
@@ -19,7 +19,7 @@ from tools.mcp_tools.sandbox_exec import (
     run_command_in_sandbox,
     sandbox_error_block,
 )
-from tools.sandbox.exceptions import SandboxScopeError, SandboxUnavailableError
+from tools.sandbox.exceptions import SandboxScopeError, SandboxUnavailableError, SandboxUnsupportedError
 
 
 class FakeManager:
@@ -67,10 +67,9 @@ class TestCollectCommandTargets:
 
 
 class TestRunCommandInSandbox:
-    def test_disabled_returns_false(self):
-        ran, result = run_command_in_sandbox(Ctx(None), "id", timeout=30)
-        assert ran is False
-        assert result is None
+    def test_missing_sandbox_fails_closed(self):
+        with pytest.raises(SandboxUnsupportedError):
+            run_command_in_sandbox(Ctx(None), "id", timeout=30)
 
     def test_active_runs_through_manager(self):
         mgr = FakeManager()
@@ -97,8 +96,9 @@ class TestRunArgvInSandbox:
         assert kind == "argv"
         assert argv == ["nmap", "-sV", "192.0.2.10"]
 
-    def test_disabled_returns_false(self):
-        assert run_argv_in_sandbox(Ctx(None), ["ls"], timeout=5) == (False, None)
+    def test_missing_sandbox_fails_closed(self):
+        with pytest.raises(SandboxUnsupportedError):
+            run_argv_in_sandbox(Ctx(None), ["ls"], timeout=5)
 
 
 class TestSandboxErrorBlock:

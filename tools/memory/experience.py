@@ -284,11 +284,11 @@ class ExperienceStore:
         metadata: dict[str, Any] | None = None,
     ) -> None:
         """Phase 1: map an AttackModule's run() status string to a Bayesian
-        outcome and record it. ``info`` → ``partial`` (neutral 0.5 weight --
-        the module ran but produced no compromise signal, so it should not
-        inflate or deflate confidence); ``success``/``exploited``/
-        ``script_generated`` → ``success``; ``failed``/``blocked`` →
-        ``failure``. This feeds the orchestrator's module runs into the
+        outcome and record it. ``partial`` (including a completed but
+        unverified exploit attempt) is neutral, so a run without target-bound
+        evidence does not inflate confidence. ``success`` is reserved for a
+        verifier-confirmed outcome; ``failed``/``blocked`` → ``failure``.
+        This feeds the orchestrator's module runs into the
         same ExperienceStore the exploit-agent loop writes to, so
         ``find_modules`` on the next campaign reflects orchestrator history.
         """

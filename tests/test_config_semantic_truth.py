@@ -83,13 +83,11 @@ def test_no_doc_claims_fallback_native_defaults_true():
             text = path.read_text(encoding="utf-8")
         except OSError:
             continue
-        # Strip fenced code blocks: yaml examples showing
-        # `fallback_native: true` as an explicit opt-in are fine.
-        text_nofence = re.sub(r"```.*?```", "", text, flags=re.DOTALL)
+        scan_text = text
         for regex in (default_true_re, alt_re, true_default_re):
-            for match in regex.finditer(text_nofence):
+            for match in regex.finditer(scan_text):
                 # Allow sentences that explicitly say the default is FALSE.
-                snippet = text_nofence[max(0, match.start() - 60) : match.end() + 60]
+                snippet = scan_text[max(0, match.start() - 60) : match.end() + 60]
                 if re.search(r"default\s*[`'\"]?\s*false", snippet, re.IGNORECASE):
                     continue
                 offenders.append(f"{path.relative_to(REPO)}: {match.group(0).strip()[:100]}")

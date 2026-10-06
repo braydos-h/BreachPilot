@@ -147,8 +147,13 @@ async def open_exploit_mcp_session(
     multi_model_enabled: bool | None = None,
     active_model_alias: str = "",
     soft_fail: bool = False,
+    fallback_to_stdio: bool = True,
     original_target: str | None = None,
     resolved_ip: str | None = None,
+    network_telemetry_path: Path | None = None,
+    audit_path: Path | None = None,
+    config_override: dict[str, Any] | None = None,
+    boot_cb: Callable[[str, bool, bool], None] | None = None,
 ) -> AsyncIterator[Any]:
     async with _mcp_session.open_exploit_mcp_session(
         transport=transport,
@@ -159,8 +164,13 @@ async def open_exploit_mcp_session(
         multi_model_enabled=multi_model_enabled,
         active_model_alias=active_model_alias,
         soft_fail=soft_fail,
+        fallback_to_stdio=fallback_to_stdio,
         original_target=original_target,
         resolved_ip=resolved_ip,
+        network_telemetry_path=network_telemetry_path,
+        audit_path=audit_path,
+        config_override=config_override,
+        boot_cb=boot_cb,
         ctx=get_runtime_context(),
     ) as session:
         yield session
@@ -199,8 +209,12 @@ async def run_exploit_session(
     approval_provider: Any = None,
     swarm_attach: Callable[..., None] | None = None,
     heartbeat: "_mcp_session._RunHeartbeat | None" = None,
+    event_sink: Any = None,
+    checkpoint_hook: Any = None,
+    swarm_session_complete: Callable[..., Any] | None = None,
     original_target: str | None = None,
     resolved_ip: str | None = None,
+    config_override: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     return await _exploit_session.run_exploit_session(
         client=client,
@@ -218,6 +232,10 @@ async def run_exploit_session(
         approval_provider=approval_provider,
         swarm_attach=swarm_attach,
         heartbeat=heartbeat,
+        event_sink=event_sink,
+        checkpoint_hook=checkpoint_hook,
+        swarm_session_complete=swarm_session_complete,
+        config_override=config_override,
         original_target=original_target,
         resolved_ip=resolved_ip,
         ctx=get_runtime_context(),

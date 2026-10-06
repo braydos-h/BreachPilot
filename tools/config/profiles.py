@@ -10,7 +10,7 @@ serves three postures without forking it:
   re-states it).
 - ``recon`` — propose-only recon: ``read_only`` + ``attack_mode: false`` so
   the agent gathers intel without executing anything.
-- ``ci`` — hermetic/deterministic: no registry auto-update, no sandbox,
+- ``ci`` — hermetic/deterministic: read-only, sandbox-contained, no registry auto-update,
   no witness, no peer consultation, no deep-reasoning extras.
 
 Usage::
@@ -39,7 +39,7 @@ PROFILE_DESCRIPTIONS: dict[str, str] = {
     "recon": "Propose-only reconnaissance: read_only permission, attack_mode "
     "off, no auto post-exploit. The agent gathers intel and proposes attacks "
     "without executing them.",
-    "ci": "Hermetic CI posture: deterministic model registry, no sandbox, "
+    "ci": "Hermetic CI posture: read-only and sandbox-contained, deterministic model registry, "
     "no witness watcher, no peer consultation. For mocked/offline test runs.",
 }
 
@@ -69,11 +69,13 @@ PROFILES: dict[str, dict[str, Any]] = {
         },
     },
     "ci": {
+        "exploit": {
+            "permission": "read_only",
+            "attack_mode": False,
+            "auto_post_exploit": False,
+        },
         "models": {
             "auto_update": False,
-        },
-        "sandbox": {
-            "enabled": False,
         },
         "witness": {
             "enabled": False,

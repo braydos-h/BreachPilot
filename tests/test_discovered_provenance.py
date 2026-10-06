@@ -219,7 +219,9 @@ def test_sandbox_policy_records_full_provenance(monkeypatch):
 
     monkeypatch.setattr(
         "tools.validation_utils.resolve_all_addresses",
-        lambda host: ["93.184.216.34", "2606:2800:220:1:248:1893:25c8:1946"] if host == "example.com" else [],
+        lambda host, **_kwargs: (
+            ["93.184.216.34", "2606:2800:220:1:248:1893:25c8:1946"] if host == "example.com" else []
+        ),
     )
     # Silence research-host resolution (no network in tests).
     monkeypatch.setattr(policy, "RESEARCH_HOSTS", ())
@@ -249,19 +251,21 @@ def test_sandbox_policy_resolution_change(monkeypatch):
     """A changed DNS answer authorizes the new set, not the stale one."""
     import tools.sandbox.policy as policy
 
-    answers = {"example.com": ["10.0.0.1"]}
-    monkeypatch.setattr("tools.validation_utils.resolve_all_addresses", lambda host: list(answers.get(host, [])))
+    answers = {"example.com": ["93.184.216.34"]}
+    monkeypatch.setattr(
+        "tools.validation_utils.resolve_all_addresses", lambda host, **_kwargs: list(answers.get(host, []))
+    )
     monkeypatch.setattr(policy, "RESEARCH_HOSTS", ())
 
     net1 = policy.build_network_policy(_sandbox_config())
-    assert "10.0.0.1" in net1.authorized_destinations
+    assert "93.184.216.34" in net1.authorized_destinations
 
-    answers["example.com"] = ["10.0.0.2"]
+    answers["example.com"] = ["93.184.216.35"]
     clear_discovered()
     net2 = policy.build_network_policy(_sandbox_config())
-    assert "10.0.0.2" in net2.authorized_destinations
-    assert "10.0.0.1" not in net2.authorized_destinations
-    assert net2.resolved_domain_addresses["example.com"] == ["10.0.0.2"]
+    assert "93.184.216.35" in net2.authorized_destinations
+    assert "93.184.216.34" not in net2.authorized_destinations
+    assert net2.resolved_domain_addresses["example.com"] == ["93.184.216.35"]
 
 
 def test_sandbox_policy_explicit_ip_without_domain(monkeypatch):
@@ -274,7 +278,7 @@ def test_sandbox_policy_explicit_ip_without_domain(monkeypatch):
     import tools.sandbox.policy as policy
 
     _clear_env(monkeypatch)
-    monkeypatch.setattr("tools.validation_utils.resolve_all_addresses", lambda host: [])
+    monkeypatch.setattr("tools.validation_utils.resolve_all_addresses", lambda host, **_kwargs: [])
     monkeypatch.setattr(policy, "RESEARCH_HOSTS", ())
 
     config = {
@@ -290,7 +294,7 @@ def test_sandbox_policy_explicit_ip_without_domain(monkeypatch):
 def test_sandbox_policy_metadata_still_blocked(monkeypatch):
     import tools.sandbox.policy as policy
 
-    monkeypatch.setattr("tools.validation_utils.resolve_all_addresses", lambda host: [])
+    monkeypatch.setattr("tools.validation_utils.resolve_all_addresses", lambda host, **_kwargs: [])
     monkeypatch.setattr(policy, "RESEARCH_HOSTS", ())
 
     net = policy.build_network_policy(_sandbox_config())
@@ -301,32 +305,37 @@ def test_sandbox_policy_metadata_still_blocked(monkeypatch):
 
 
 def _make_server(tmp_path, *, require_allowlist=False, allowed_targets=None):
+    from unittest.mock import patch
+
     from mcp_exploit_server import create_mcp_server
     from tools.cve_lookup import CVESearchSettings, NVDClient
     from tools.exploit_search import ExploitSearch, ExploitSearchSettings
     from tools.web_researcher import WebResearcher, WebResearcherSettings
 
-    return create_mcp_server(
-        ExploitSearch(ExploitSearchSettings()),
-        NVDClient(CVESearchSettings()),
-        WebResearcher(WebResearcherSettings()),
-        tmp_path,
-        {
-            "exploit": {
-                "require_explicit_allowlist": require_allowlist,
-                "allowed_targets": allowed_targets or [],
+    with patch("tools.sandbox.resolve_manager_with_fallback", return_value=(None, "")):
+        return create_mcp_server(
+            ExploitSearch(ExploitSearchSettings()),
+            NVDClient(CVESearchSettings()),
+            WebResearcher(WebResearcherSettings()),
+            tmp_path,
+            {
+                "exploit": {
+                    "require_explicit_allowlist": require_allowlist,
+                    "allowed_targets": allowed_targets or [],
+                },
+                "skills": {"enabled": False},
+                "multi_model": {"enabled": False},
             },
-            "skills": {"enabled": False},
-            "multi_model": {"enabled": False},
-        },
-    )
+        )
 
 
 def _text(result) -> str:
+    if isinstance(result, (list, tuple)):
+        return "".join(_text(item) for item in result)
     if hasattr(result, "content") and result.content:
-        for item in result.content:
-            if hasattr(item, "text"):
-                return item.text
+        return "".join(_text(item) for item in result.content)
+    if hasattr(result, "text"):
+        return str(result.text)
     return str(result)
 
 
@@ -381,32 +390,51 @@ async def test_vhost_enum_pair_rejects_untied_ip(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_vhost_enum_pair_cannot_authorize_private_host_fetch(tmp_path, monkeypatch):
+    """Domain provenance cannot replace an explicit private IP/CIDR grant."""
+    _clear_env(monkeypatch)
+    monkeypatch.setenv("EXPLOIT_TARGET_DOMAIN", "example.com")
+    import tools.mcp_tools.domain as domain_tools
+    from tools.mcp_shared import add_discovered_target
+
+    add_discovered_target("web.example.com", "10.23.0.8", source="test")
+    fetches: list[str] = []
+    monkeypatch.setattr(
+        domain_tools,
+        "_stdlib_fetch",
+        lambda url, **_kwargs: (fetches.append(url) or 200, {}, "response"),
+    )
+    mcp = _make_server(tmp_path, require_allowlist=True, allowed_targets=["example.com"])
+
+    text = _text(
+        await mcp.call_tool(
+            "vhost_enum",
+            {"target_ip": "10.23.0.8", "port": 80, "domain": "web.example.com", "timeout": 30},
+        )
+    )
+
+    assert "BLOCKED" in text
+    assert "explicit IP or CIDR" in text
+    assert fetches == []
+
+
+@pytest.mark.asyncio
 async def test_terminal_bare_discovered_ip_still_blocked(tmp_path, monkeypatch):
     """Free-text terminal use of a discovered IP (no hostname context) fails closed."""
     _clear_env(monkeypatch)
     monkeypatch.setenv("EXPLOIT_TARGET_DOMAIN", "example.com")
-    import tools.mcp_tools.terminal.execute as terminal_execute
     from tools.mcp_shared import add_discovered_target
-
-    class _CompletedProcess:
-        """Minimal Popen stand-in: authorization tests must not run a host shell."""
-
-        pid = 999_999
-        returncode = 0
-
-        def communicate(self, timeout=None):
-            return b"stub terminal output\n", None
-
-    monkeypatch.setattr(terminal_execute.subprocess, "Popen", lambda *args, **kwargs: _CompletedProcess())
 
     add_discovered_target("web.example.com", "93.184.216.34", source="enumerate_subdomains")
     mcp = _make_server(tmp_path, require_allowlist=True, allowed_targets=["example.com"])
 
     text = _text(await mcp.call_tool("run_exploit_terminal", {"command": "curl -k https://93.184.216.34/"}))
     assert "not in the explicit allowlist" in text
-    # ...while the hostname form keeps working.
+    # ...while the hostname is not denied by the allowlist. The absent worker
+    # then blocks execution before a target request can run.
     text2 = _text(await mcp.call_tool("run_exploit_terminal", {"command": "curl https://web.example.com/"}))
     assert "not in the explicit allowlist" not in text2
+    assert "SANDBOX_UNSUPPORTED" in text2
 
 
 # ── Multi-address system resolution: A/AAAA, cache, TTL, changes ──────────
@@ -523,25 +551,28 @@ def test_sandbox_policy_picks_up_changed_resolution(monkeypatch, _clean_dns_cach
 
     import tools.sandbox.policy as policy
 
-    answers = {"example.com": ["10.0.0.1", "2001:db8::1"]}
+    answers = {"example.com": ["93.184.216.34", "2606:2800:220:1:248:1893:25c8:1946"]}
     monkeypatch.setattr(_sock, "getaddrinfo", lambda h, *a, **k: _addrinfo(*answers[h]))
     monkeypatch.setattr(policy, "RESEARCH_HOSTS", ())
 
     net1 = policy.build_network_policy(_sandbox_config())
-    assert "10.0.0.1" in net1.authorized_destinations
-    assert "2001:db8::1" in net1.authorized_destinations
-    assert net1.resolved_domain_addresses["example.com"] == ["10.0.0.1", "2001:db8::1"]
+    assert "93.184.216.34" in net1.authorized_destinations
+    assert "2606:2800:220:1:248:1893:25c8:1946" in net1.authorized_destinations
+    assert net1.resolved_domain_addresses["example.com"] == [
+        "93.184.216.34",
+        "2606:2800:220:1:248:1893:25c8:1946",
+    ]
 
     # DNS moves the host; within the TTL the policy still sees the old set
     # (bounded staleness, not unbounded), then converges after expiry.
-    answers["example.com"] = ["10.0.0.2"]
+    answers["example.com"] = ["93.184.216.35"]
     net2 = policy.build_network_policy(_sandbox_config())
-    assert "10.0.0.1" in net2.authorized_destinations
+    assert "93.184.216.34" in net2.authorized_destinations
 
     import tools.validation_utils as vu
 
     monkeypatch.setattr(vu.time, "monotonic", lambda: 10**9)
     clear_discovered()
     net3 = policy.build_network_policy(_sandbox_config())
-    assert "10.0.0.2" in net3.authorized_destinations
-    assert "10.0.0.1" not in net3.authorized_destinations
+    assert "93.184.216.35" in net3.authorized_destinations
+    assert "93.184.216.34" not in net3.authorized_destinations

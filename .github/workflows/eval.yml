@@ -2,7 +2,7 @@ name: Eval
 
 # Graded eval loop (oracle v2). The unit-test job is fully mocked and runs on
 # push/PR touching eval code; the live nightly-eval job needs real targets
-# (docker compose suite) + a model backend (Ollama Cloud), so it only runs on
+# (docker compose suite) + the provider selected in config.yaml (OpenCode Go), so it only runs on
 # schedule or manual dispatch. A missing backend is recorded as an explicit
 # SKIPPED report (live_outcome=SKIPPED) — never as a green PASS.
 
@@ -40,10 +40,11 @@ jobs:
           cache-dependency-path: |
             pyproject.toml
             requirements.txt
+            constraints-dev.txt
       - name: Install project + dev dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -e ".[dev]"
+          python -m pip install -c constraints-dev.txt -e ".[dev,ollama]"
       - name: Run eval unit tests (all mocked)
         run: python -m pytest tests/test_eval_harness.py tests/test_eval_suite.py tests/test_eval_cli.py tests/test_eval_live_outcome.py tests/test_eval_provenance.py tests/test_benchmark_metrics.py -v
 
@@ -51,9 +52,9 @@ jobs:
     name: Nightly graded eval (live targets)
     runs-on: ubuntu-latest
     timeout-minutes: 60
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
     env:
-      OLLAMA_API_KEY: ${{ secrets.OLLAMA_API_KEY }}
+      OPENCODE_GO_API_KEY: ${{ secrets.OPENCODE_GO_API_KEY }}
       EXPLOIT_ALLOWED_TARGETS: 127.0.0.1
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
@@ -64,38 +65,42 @@ jobs:
           cache-dependency-path: |
             pyproject.toml
             requirements.txt
-      - name: Record explicit SKIPPED report without OLLAMA_API_KEY
-        if: env.OLLAMA_API_KEY == ''
+            constraints-dev.txt
+      - name: Record explicit SKIPPED report without OPENCODE_GO_API_KEY
+        if: env.OPENCODE_GO_API_KEY == ''
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -e ".[dev]"
-          python -c "from tools.eval_harness import write_skipped_eval_report; print(write_skipped_eval_report('reports/eval', reason='OLLAMA_API_KEY not set; live graded eval skipped with zero live signal'))"
+          python -m pip install -c constraints-dev.txt -e ".[dev,ollama]"
+          python -c "from tools.eval_harness import write_skipped_eval_report; print(write_skipped_eval_report('reports/eval', reason='OPENCODE_GO_API_KEY not set for configured provider opencode_go; live graded eval skipped with zero live signal'))"
           {
             echo "## Nightly graded eval — SKIPPED"
             echo ""
-            echo "Live outcome: \`SKIPPED\` (OLLAMA_API_KEY not set; zero live targets executed)."
+            echo "Live outcome: \`SKIPPED\` (OPENCODE_GO_API_KEY not set; zero live targets executed)."
             echo "This is not a green evaluation — no PASS/FAIL signal was produced."
           } >> "$GITHUB_STEP_SUMMARY"
-          echo "OLLAMA_API_KEY not set; wrote SKIPPED eval report (see artifact)."
+          echo "OPENCODE_GO_API_KEY not set; wrote SKIPPED eval report (see artifact)."
       - name: Install project + dev dependencies
-        if: env.OLLAMA_API_KEY != ''
+        if: env.OPENCODE_GO_API_KEY != ''
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -e ".[dev]"
+          python -m pip install -c constraints-dev.txt -e ".[dev,ollama]"
+      - name: Prepare contained local-lab config
+        if: env.OPENCODE_GO_API_KEY != ''
+        run: python scripts/prepare_ci_lab_config.py --output reports/ci-local-lab.yaml
       - name: Start eval target suite (docker compose)
-        if: env.OLLAMA_API_KEY != ''
+        if: env.OPENCODE_GO_API_KEY != ''
         run: docker compose -f eval_targets/docker-compose.yml up -d
       - name: Run graded eval suite
-        if: env.OLLAMA_API_KEY != ''
-        run: python main.py --eval --save-baseline
+        if: env.OPENCODE_GO_API_KEY != ''
+        run: python main.py --config reports/ci-local-lab.yaml --eval --save-baseline
       - name: Hermetic benchmark repeats (min n=5 per target)
-        if: env.OLLAMA_API_KEY != ''
-        run: python main.py --benchmark xben --trials 5
+        if: env.OPENCODE_GO_API_KEY != ''
+        run: python main.py --config reports/ci-local-lab.yaml --benchmark xben --trials 5
       - name: Regression gate (fail on hard regressions vs baseline)
-        if: env.OLLAMA_API_KEY != ''
-        run: python main.py --eval --check-regression
+        if: env.OPENCODE_GO_API_KEY != ''
+        run: python main.py --config reports/ci-local-lab.yaml --eval --check-regression
       - name: Stop eval target suite
-        if: always() && env.OLLAMA_API_KEY != ''
+        if: always() && env.OPENCODE_GO_API_KEY != ''
         run: docker compose -f eval_targets/docker-compose.yml down
       - name: Upload eval reports
         if: always()

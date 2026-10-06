@@ -5,14 +5,20 @@ audit, swarm, campaign, credentials, loot."""
 from __future__ import annotations
 
 import asyncio
+import io
 import json
+import os
 import re
+import stat
+import sys
+from collections import deque
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any, BinaryIO, Iterator, TextIO
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
+from starlette.responses import StreamingResponse
 
 from tools.api.auth import BearerAuth
 from tools.api.errors import APIError
@@ -61,6 +67,133 @@ _CONTENT_TYPES = {
     ".webp": "image/webp",
     ".svg": "image/svg+xml",
 }
+
+
+def _read_log_tail_from_handle(handle: TextIO, tail: int) -> tuple[list[str], int]:
+    """Count all log lines while retaining only the requested tail."""
+    recent: deque[str] = deque(maxlen=tail)
+    total = 0
+    for physical_line in handle:
+        # Preserve str.splitlines() behavior, including Unicode separators.
+        for line in physical_line.splitlines():
+            total += 1
+            recent.append(line)
+    return list(recent), total
+
+
+def _read_log_tail(path: Path, tail: int) -> tuple[list[str], int]:
+    """Count all log lines while retaining only the requested tail."""
+    with path.open("r", encoding="utf-8", errors="replace") as handle:
+        return _read_log_tail_from_handle(handle, tail)
+
+
+def _windows_open_handle_path(fd: int) -> Path | None:
+    """Resolve an already-open Windows handle for containment verification."""
+    if sys.platform != "win32":
+        return None
+    import ctypes
+    import msvcrt
+
+    get_path = ctypes.windll.kernel32.GetFinalPathNameByHandleW
+    get_path.argtypes = [ctypes.c_void_p, ctypes.c_wchar_p, ctypes.c_uint32, ctypes.c_uint32]
+    get_path.restype = ctypes.c_uint32
+    buffer = ctypes.create_unicode_buffer(32768)
+    length = get_path(msvcrt.get_osfhandle(fd), buffer, len(buffer), 0)
+    if length == 0 or length >= len(buffer):
+        return None
+    raw = buffer.value
+    if raw.startswith("\\\\?\\UNC\\"):
+        raw = "\\\\" + raw[8:]
+    elif raw.startswith("\\\\?\\"):
+        raw = raw[4:]
+    return Path(raw)
+
+
+def _open_contained_file(root: Path, candidate: Path) -> tuple[BinaryIO, int]:
+    """Open a resolved file without following a replacement symlink.
+
+    POSIX walks the path from an open workspace directory descriptor and
+    refuses symlinks in every component. Windows verifies the final path of
+    the opened handle before returning it. The returned descriptor pins the
+    validated file before a streaming response is created.
+    """
+    root = root.resolve()
+    try:
+        relative = candidate.relative_to(root)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="File not found") from None
+    if not relative.parts:
+        raise HTTPException(status_code=404, detail="File not found")
+
+    # O_NONBLOCK prevents a regular-file-to-FIFO replacement race from
+    # stalling the async route before fstat rejects the non-regular handle.
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NONBLOCK", 0)
+    fd = -1
+    try:
+        if os.name == "posix" and os.open in os.supports_dir_fd and hasattr(os, "O_NOFOLLOW"):
+            directory_flag = getattr(os, "O_DIRECTORY", 0)
+            if not directory_flag:
+                raise HTTPException(status_code=503, detail="Secure file streaming is unavailable")
+            current_fd = os.open(root, flags | directory_flag | os.O_NOFOLLOW)
+            try:
+                for index, part in enumerate(relative.parts):
+                    child_flags = flags | os.O_NOFOLLOW
+                    if index < len(relative.parts) - 1:
+                        child_flags |= directory_flag
+                    next_fd = os.open(part, child_flags, dir_fd=current_fd)
+                    if current_fd != -1:
+                        os.close(current_fd)
+                    current_fd = next_fd
+                fd = current_fd
+                current_fd = -1
+            finally:
+                if current_fd != -1:
+                    os.close(current_fd)
+        elif sys.platform == "win32":
+            fd = os.open(candidate, flags | getattr(os, "O_BINARY", 0))
+            opened_path = _windows_open_handle_path(fd)
+            if opened_path is None or not opened_path.resolve().is_relative_to(root):
+                raise HTTPException(status_code=404, detail="File not found")
+        else:
+            raise HTTPException(status_code=503, detail="Secure file streaming is unavailable")
+
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode):
+            raise HTTPException(status_code=404, detail="File not found")
+        handle = os.fdopen(fd, "rb")
+        fd = -1
+        return handle, info.st_size
+    except HTTPException:
+        raise
+    except OSError:
+        raise HTTPException(status_code=404, detail="File not found") from None
+    finally:
+        if fd != -1:
+            os.close(fd)
+
+
+def _read_contained_log_tail(root: Path, candidate: Path, tail: int) -> tuple[list[str], int]:
+    """Tail a log from a descriptor opened with the workspace containment checks."""
+    handle, _size = _open_contained_file(root, candidate)
+    try:
+        with io.TextIOWrapper(handle, encoding="utf-8", errors="replace") as text_handle:
+            return _read_log_tail_from_handle(text_handle, tail)
+    finally:
+        handle.close()
+
+
+def _stream_file(handle: BinaryIO, expected_size: int, chunk_size: int = 64 * 1024) -> Iterator[bytes]:
+    """Stream the opened file's captured length, failing on concurrent truncation."""
+    try:
+        remaining = expected_size
+        while remaining:
+            chunk = handle.read(min(chunk_size, remaining))
+            if not chunk:
+                raise OSError("file changed during download")
+            remaining -= len(chunk)
+            yield chunk
+    finally:
+        handle.close()
 
 
 def _safe_child(parent: Path, name: str, *, allow_subdirs: bool = False) -> Path:
@@ -165,6 +298,10 @@ def create_router(auth: BearerAuth, persistence: ApiPersistence, run_manager: Ru
     def _ps() -> ApiPersistence:
         return persistence
 
+    async def _get_run_row(run_id: str) -> dict[str, Any] | None:
+        """Read run metadata on its SQLite actor, never on the API event loop."""
+        return await _ps().actor.arun(_ps().get_run, run_id)
+
     def _run_dir(run_id: str) -> Path:
         """Resolve the reports/<run_id>/ directory, refusing path escapes."""
         base = _ps().reports_dir.resolve()
@@ -216,6 +353,16 @@ def create_router(auth: BearerAuth, persistence: ApiPersistence, run_manager: Ru
                     continue
                 if isinstance(record, dict):
                     yield record
+
+    def _list_workspace_files(ws: Path) -> list[dict[str, Any]]:
+        """Walk a run workspace outside the API event loop."""
+        if not ws.is_dir():
+            return []
+        return [
+            {"path": path.relative_to(ws).as_posix(), "bytes": path.stat().st_size}
+            for path in sorted(ws.rglob("*"))
+            if path.is_file()
+        ]
 
     # Sandbox helpers (pure, but need to be inside closure for _run_dir)
     _SANDBOX_CODE_RE = re.compile(r"SANDBOX_[A-Z_]+")
@@ -292,7 +439,8 @@ def create_router(auth: BearerAuth, persistence: ApiPersistence, run_manager: Ru
         # rows only (max = total). Never the sum (that would double-count).
         summary["executions"] = {"attempts": max(counts.pop("started"), counts["total"]), **counts}
         events_path = _run_dir(run_id) / "events.jsonl"
-        blocks: list[dict[str, Any]] = []
+        blocks: deque[dict[str, Any]] = deque(maxlen=_RECENT_BLOCK_LIMIT)
+        block_count = 0
         for event in _read_jsonl_dicts(events_path):
             if str(event.get("type") or "") != "tool_result":
                 continue
@@ -304,6 +452,7 @@ def create_router(auth: BearerAuth, persistence: ApiPersistence, run_manager: Ru
             if not match:
                 continue
             code = match.group(0)
+            block_count += 1
             blocks.append(
                 {
                     "timestamp": event.get("timestamp") or "",
@@ -314,22 +463,26 @@ def create_router(auth: BearerAuth, persistence: ApiPersistence, run_manager: Ru
             )
         if blocks:
             summary["found"] = True
-            summary["blocked"]["recent"] = blocks[-_RECENT_BLOCK_LIMIT:]
-            summary["blocked"]["total"] = max(int(summary["blocked"]["total"]), len(blocks))
+            summary["blocked"]["recent"] = list(blocks)
+            summary["blocked"]["total"] = max(int(summary["blocked"]["total"]), block_count)
         return summary
 
-    def _read_state_json(run_id: str, filename: str, *, subdir: str = "") -> dict[str, Any]:
+    async def _read_state_json(run_id: str, filename: str, *, subdir: str = "") -> dict[str, Any]:
         """Read a JSON state file under reports/<run_id>/swarm_workspace/[subdir/]."""
-        if _ps().get_run(run_id) is None:
+        if await _get_run_row(run_id) is None:
             raise HTTPException(status_code=404, detail="Run not found")
         base = _run_dir(run_id) / "swarm_workspace"
         state_path = base / subdir / filename if subdir else base / filename
-        if not state_path.exists() or not state_path.is_file():
-            raise HTTPException(status_code=404, detail=f"{filename} not found")
-        try:
-            return json.loads(state_path.read_text(encoding="utf-8"))
-        except json.JSONDecodeError:
-            raise HTTPException(status_code=500, detail=f"Could not parse {filename}")
+
+        def _read() -> dict[str, Any]:
+            if not state_path.exists() or not state_path.is_file():
+                raise HTTPException(status_code=404, detail=f"{filename} not found")
+            try:
+                return json.loads(state_path.read_text(encoding="utf-8"))
+            except json.JSONDecodeError:
+                raise HTTPException(status_code=500, detail=f"Could not parse {filename}") from None
+
+        return await asyncio.to_thread(_read)
 
     # ── Routes ──────────────────────────────────────────────────────────────────
 
@@ -448,10 +601,10 @@ def create_router(auth: BearerAuth, persistence: ApiPersistence, run_manager: Ru
     @router.get("/runs/{run_id}")
     async def get_run(run_id: str, auth: str = Depends(_require_auth)) -> dict[str, Any]:
         """Get run details: effective state, progress, pending decisions, artifacts, result, errors."""
-        run = _ps().get_run(run_id)
+        run = await _get_run_row(run_id)
         if run is None:
             raise HTTPException(status_code=404, detail="Run not found")
-        decisions = _ps().list_decisions(run_id)
+        decisions = await _ps().actor.arun(_ps().list_decisions, run_id)
         is_demo = bool(run.get("is_demo"))
         # Backfill for pre-migrated rows
         if not is_demo:
@@ -487,7 +640,7 @@ def create_router(auth: BearerAuth, persistence: ApiPersistence, run_manager: Ru
     @router.post("/runs/{run_id}/resume")
     async def resume_run(run_id: str, auth: str = Depends(_require_auth)) -> dict[str, Any]:
         """Create a new execution record linked by resumed_from, reusing existing report/session state."""
-        original = _ps().get_run(run_id)
+        original = await _get_run_row(run_id)
         if original is None:
             raise HTTPException(status_code=404, detail="Original run not found")
         req_data = original.get("request_json", {})
@@ -520,7 +673,7 @@ def create_router(auth: BearerAuth, persistence: ApiPersistence, run_manager: Ru
         Best-effort: a titler failure (ollama unreachable, empty response) returns
         the current title unchanged with a 200, never 5xx.
         """
-        run = _ps().get_run(run_id)
+        run = await _get_run_row(run_id)
         if run is None:
             raise HTTPException(status_code=404, detail="Run not found")
         current = run.get("title", "") or ""
@@ -538,7 +691,7 @@ def create_router(auth: BearerAuth, persistence: ApiPersistence, run_manager: Ru
                 config=cfg,
             )
         if new_title and new_title != current:
-            _ps().update_run_title(run_id, new_title)
+            await _ps().actor.arun(_ps().update_run_title, run_id, new_title)
             return {"run_id": run_id, "title": new_title, "regenerated": body.regen and not body.title}
         return {"run_id": run_id, "title": current, "regenerated": False}
 
@@ -560,7 +713,7 @@ def create_router(auth: BearerAuth, persistence: ApiPersistence, run_manager: Ru
     @router.get("/runs/{run_id}/artifacts")
     async def list_artifacts(run_id: str, auth: str = Depends(_require_auth)) -> dict[str, Any]:
         """List known run-level artifacts present on disk."""
-        if _ps().get_run(run_id) is None:
+        if await _get_run_row(run_id) is None:
             raise HTTPException(status_code=404, detail="Run not found")
         run_dir = _run_dir(run_id)
         artifacts: list[dict[str, Any]] = []
@@ -584,7 +737,7 @@ def create_router(auth: BearerAuth, persistence: ApiPersistence, run_manager: Ru
     @router.get("/runs/{run_id}/artifacts/{name:path}")
     async def get_artifact(run_id: str, name: str, auth: str = Depends(_require_auth)) -> Any:
         """Serve one artifact's content. Whitelist-bound; path-traversal-safe."""
-        if _ps().get_run(run_id) is None:
+        if await _get_run_row(run_id) is None:
             raise HTTPException(status_code=404, detail="Run not found")
         run_dir = _run_dir(run_id)
         is_enhanced = name.startswith("enhanced/")
@@ -604,55 +757,56 @@ def create_router(auth: BearerAuth, persistence: ApiPersistence, run_manager: Ru
         if not path.exists() or not path.is_file():
             raise HTTPException(status_code=404, detail="Artifact not found")
         content_type = _CONTENT_TYPES.get(path.suffix.lower(), "application/octet-stream")
-        from fastapi import Response
-
-        return Response(content=path.read_bytes(), media_type=content_type)
+        handle, size = _open_contained_file(run_dir, path)
+        return StreamingResponse(
+            _stream_file(handle, size),
+            media_type=content_type,
+            headers={"Content-Length": str(size)},
+        )
 
     # ── Workspace file browser (C10) ─────────────────────────────────────────────
 
     @router.get("/runs/{run_id}/workspace")
     async def list_workspace(run_id: str, auth: str = Depends(_require_auth)) -> dict[str, Any]:
         """List files under the run's exploit_workspace/ (recursive, relative paths)."""
-        if _ps().get_run(run_id) is None:
+        if await _get_run_row(run_id) is None:
             raise HTTPException(status_code=404, detail="Run not found")
         ws = _exploit_workspace(run_id)
-        if not ws.is_dir():
-            return {"files": []}
-        files: list[dict[str, Any]] = []
-        for p in sorted(ws.rglob("*")):
-            if p.is_file():
-                files.append({"path": p.relative_to(ws).as_posix(), "bytes": p.stat().st_size})
+        files = await asyncio.to_thread(_list_workspace_files, ws)
         return {"files": files}
 
     @router.get("/runs/{run_id}/workspace/{path:path}")
     async def get_workspace_file(run_id: str, path: str, auth: str = Depends(_require_auth)) -> Any:
         """Read one file under the run's exploit_workspace/ (path-traversal-safe)."""
-        if _ps().get_run(run_id) is None:
+        if await _get_run_row(run_id) is None:
             raise HTTPException(status_code=404, detail="Run not found")
         ws = _exploit_workspace(run_id)
         target = _safe_workspace_path(ws, path)
         if not target.is_file():
             raise HTTPException(status_code=404, detail="File not found")
         content_type = _CONTENT_TYPES.get(target.suffix.lower(), "application/octet-stream")
-        from fastapi import Response
-
-        return Response(content=target.read_bytes(), media_type=content_type)
+        handle, size = _open_contained_file(ws, target)
+        return StreamingResponse(
+            _stream_file(handle, size),
+            media_type=content_type,
+            headers={"Content-Length": str(size)},
+        )
 
     # ── Audit trail (C6) ────────────────────────────────────────────────────────
 
     @router.get("/runs/{run_id}/audit")
     async def get_audit(run_id: str, auth: str = Depends(_require_auth)) -> dict[str, Any]:
         """Read the tamper-evident exploit audit log + verify the hash chain."""
-        if _ps().get_run(run_id) is None:
+        if await _get_run_row(run_id) is None:
             raise HTTPException(status_code=404, detail="Run not found")
         audit_path = _find_audit_file(run_id)
-        records: list[dict[str, Any]] = list(_read_jsonl_dicts(audit_path)) if audit_path else []
+        records = await asyncio.to_thread(lambda: list(_read_jsonl_dicts(audit_path))) if audit_path else []
         chain_valid, chain_reason = (True, "no audit log")
         if audit_path is not None:
             try:
                 from tools.exploit_agent.policy import verify_audit_chain
 
-                chain_valid, chain_reason = verify_audit_chain(audit_path)
+                chain_valid, chain_reason = await asyncio.to_thread(verify_audit_chain, audit_path)
             except Exception as exc:
                 chain_valid, chain_reason = False, f"verification error: {exc}"
         return {"records": records, "chain_valid": chain_valid, "chain_reason": chain_reason}
@@ -673,10 +827,10 @@ def create_router(auth: BearerAuth, persistence: ApiPersistence, run_manager: Ru
         200 with an empty list when the run wrote no deep errors; 404 for
         unknown runs. The file is also in the artifact whitelist.
         """
-        if _ps().get_run(run_id) is None:
+        if await _get_run_row(run_id) is None:
             raise HTTPException(status_code=404, detail="Run not found")
         errors_path = _run_dir(run_id) / "errors.jsonl"
-        records: list[dict[str, Any]] = list(_read_jsonl_dicts(errors_path)) if errors_path.is_file() else []
+        records = await asyncio.to_thread(lambda: list(_read_jsonl_dicts(errors_path)))
         kinds = sorted({str(r.get("kind") or "") for r in records if r.get("kind")})
         if kind:
             records = [r for r in records if str(r.get("kind") or "") == kind]
@@ -699,9 +853,9 @@ def create_router(auth: BearerAuth, persistence: ApiPersistence, run_manager: Ru
         structures when the run has no sandbox data; 404 for unknown runs. No
         Docker exec/remove controls -- live worker state stays manager-side.
         """
-        if _ps().get_run(run_id) is None:
+        if await _get_run_row(run_id) is None:
             raise HTTPException(status_code=404, detail="Run not found")
-        return _run_sandbox_summary(run_id)
+        return await asyncio.to_thread(_run_sandbox_summary, run_id)
 
     # ── HITL evidence loop (Flow A: agents propose, human decides) ──────────
 
@@ -712,7 +866,7 @@ def create_router(auth: BearerAuth, persistence: ApiPersistence, run_manager: Ru
         Each entry embeds its read-only ``proof`` capsule (stored probe exec +
         output excerpt + machine retest/verify verdicts) — no target touch.
         """
-        if _ps().get_run(run_id) is None:
+        if await _get_run_row(run_id) is None:
             raise HTTPException(status_code=404, detail="Run not found")
         from tools.mcp_tools.hitl import list_proposed_findings, proof_capsule
 
@@ -736,7 +890,7 @@ def create_router(auth: BearerAuth, persistence: ApiPersistence, run_manager: Ru
         self-approve. Persists into the run artifact JSON and emits a
         ``hitl_decision`` event for live WebUI refresh.
         """
-        if _ps().get_run(run_id) is None:
+        if await _get_run_row(run_id) is None:
             raise HTTPException(status_code=404, detail="Run not found")
         if not (body.finding_id or "").strip():
             raise HTTPException(status_code=400, detail="finding_id is required")
@@ -752,25 +906,16 @@ def create_router(auth: BearerAuth, persistence: ApiPersistence, run_manager: Ru
             raise HTTPException(status_code=400, detail=str(exc))
         except LookupError as exc:
             raise HTTPException(status_code=404, detail=str(exc))
-        broker_registry = getattr(_rm(), "_events", None)
-        if broker_registry is not None:
-            hitl_event = {
-                "finding_id": body.finding_id.strip(),
-                "decision": str(finding.get("hitl_status") or ""),
-                "note": body.note or "",
-                "actor": "human",
-            }
-            try:
-                broker = broker_registry.get_or_create(run_id)
-                try:
-                    await broker.emit("hitl_decision", hitl_event)
-                except RuntimeError:
-                    # Broker closed when the run left active handling (review
-                    # happens post-run) — re-arm it for this annotation, then emit.
-                    broker.reopen()
-                    await broker.emit("hitl_decision", hitl_event)
-            except Exception:  # noqa: BLE001 -- persistence won; a dropped live event heals via polling
-                pass
+        hitl_event = {
+            "finding_id": body.finding_id.strip(),
+            "decision": str(finding.get("hitl_status") or ""),
+            "note": body.note or "",
+            "actor": "human",
+        }
+        try:
+            await _rm().emit_run_event(run_id, "hitl_decision", hitl_event)
+        except Exception:  # noqa: BLE001 -- persistence won; a dropped live event heals via polling
+            pass
         return {"run_id": run_id, "finding_id": body.finding_id.strip(), "finding": finding}
 
     # ── Swarm + campaign state (C7-C8) ──────────────────────────────────────────
@@ -786,29 +931,21 @@ def create_router(auth: BearerAuth, persistence: ApiPersistence, run_manager: Ru
         ``reports/witness.jsonl``) and is process-global, not per-run. Returns the
         parsed flag records; 404 when the log is absent so the WebUI no-retries.
         """
-        if _ps().get_run(run_id) is None:
+        if await _get_run_row(run_id) is None:
             raise HTTPException(status_code=404, detail="Run not found")
         cfg = _rm().config or {}
         witness_cfg = cfg.get("witness", {}) or {}
         log_path = str(witness_cfg.get("log_path", "reports/witness.jsonl") or "reports/witness.jsonl")
         path = Path(log_path)
-        if not path.is_file():
+        flags = await asyncio.to_thread(lambda: list(_read_jsonl_dicts(path)))
+        if not flags and not path.is_file():
             raise HTTPException(status_code=404, detail="witness log not found")
-        flags: list[dict[str, Any]] = []
-        for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                flags.append(json.loads(line))
-            except json.JSONDecodeError:
-                continue
         return {"flags": flags}
 
     @router.get("/runs/{run_id}/swarm")
     async def get_swarm_state(run_id: str, auth: str = Depends(_require_auth)) -> dict[str, Any]:
         """Read the swarm orchestrator state (swarm_state.json)."""
-        return {"state": _read_state_json(run_id, "swarm_state.json")}
+        return {"state": await _read_state_json(run_id, "swarm_state.json")}
 
     @router.get("/runs/{run_id}/campaign")
     async def get_campaign_state(run_id: str, auth: str = Depends(_require_auth)) -> dict[str, Any]:
@@ -817,7 +954,7 @@ def create_router(auth: BearerAuth, persistence: ApiPersistence, run_manager: Ru
         The autonomous orchestrator runs under ``swarm_workspace/autonomous/`` so
         the state file lives there, not at the swarm_workspace root.
         """
-        return {"state": _read_state_json(run_id, "attack_states.json", subdir="autonomous")}
+        return {"state": await _read_state_json(run_id, "attack_states.json", subdir="autonomous")}
 
     # ── Log tailing (C9) ────────────────────────────────────────────────────────
 
@@ -833,7 +970,7 @@ def create_router(auth: BearerAuth, persistence: ApiPersistence, run_manager: Ru
         """Tail a run log. ``name`` must be in the whitelist; per-attempt logs need
         ``attempt_id`` + ``target_ip`` to resolve under exploit_workspace/<ip>/<id>/.
         """
-        if _ps().get_run(run_id) is None:
+        if await _get_run_row(run_id) is None:
             raise HTTPException(status_code=404, detail="Run not found")
         run_dir = _run_dir(run_id)
         per_attempt = {"terminal.log", "python_run.log", "msf_output.log", "run_active_check.ps1"}
@@ -857,13 +994,17 @@ def create_router(auth: BearerAuth, persistence: ApiPersistence, run_manager: Ru
         log_path = next((p for p in candidates if p.exists() and p.is_file()), None)
         if log_path is None:
             raise HTTPException(status_code=404, detail="Log not found")
-        all_lines = log_path.read_text(encoding="utf-8", errors="replace").splitlines()
-        returned = all_lines[-tail:]
+        try:
+            returned, total_lines = await asyncio.to_thread(_read_contained_log_tail, run_dir, log_path, tail)
+        except HTTPException as exc:
+            if exc.status_code == 404:
+                raise HTTPException(status_code=404, detail="Log not found") from None
+            raise
         return {
             "name": name,
             "lines": returned,
             "total_lines_returned": len(returned),
-            "total_lines_in_file": len(all_lines),
+            "total_lines_in_file": total_lines,
         }
 
     # ── Credentials + loot (C3-C5) ──────────────────────────────────────────────
@@ -871,7 +1012,7 @@ def create_router(auth: BearerAuth, persistence: ApiPersistence, run_manager: Ru
     @router.get("/runs/{run_id}/credentials")
     async def list_credentials(run_id: str, auth: str = Depends(_require_auth)) -> dict[str, Any]:
         """List credentials harvested during the run. Passwords are NEVER returned."""
-        if _ps().get_run(run_id) is None:
+        if await _get_run_row(run_id) is None:
             raise HTTPException(status_code=404, detail="Run not found")
         ws = _exploit_workspace(run_id)
         stores = _find_credential_stores(ws)
@@ -883,10 +1024,11 @@ def create_router(auth: BearerAuth, persistence: ApiPersistence, run_manager: Ru
             out: list[dict[str, Any]] = []
             idx = 0
             for store_path in stores:
-                store = CredentialStore(store_path.parent)
+                store = CredentialStore(store_path.parent, workspace_root=ws)
                 for rec in store.all_credentials():
                     data = rec.to_json()
                     data["password"] = "[REDACTED]"
+                    data["notes"] = "[REDACTED]"
                     data["index"] = idx
                     out.append(data)
                     idx += 1
@@ -901,7 +1043,7 @@ def create_router(auth: BearerAuth, persistence: ApiPersistence, run_manager: Ru
         auth: str = Depends(_require_auth),
     ) -> dict[str, Any]:
         """Reveal one credential's plaintext password. Audited."""
-        if _ps().get_run(run_id) is None:
+        if await _get_run_row(run_id) is None:
             raise HTTPException(status_code=404, detail="Run not found")
         ws = _exploit_workspace(run_id)
         stores = _find_credential_stores(ws)
@@ -913,7 +1055,7 @@ def create_router(auth: BearerAuth, persistence: ApiPersistence, run_manager: Ru
             records: list[Any] = []
             store_paths: list[Path] = []
             for store_path in stores:
-                store = CredentialStore(store_path.parent)
+                store = CredentialStore(store_path.parent, workspace_root=ws)
                 for rec in store.all_credentials():
                     records.append(rec)
                     store_paths.append(store_path)
@@ -950,7 +1092,7 @@ def create_router(auth: BearerAuth, persistence: ApiPersistence, run_manager: Ru
         this is the only path to ``confirmed=True`` (``validated=True`` is required by
         ``CredentialStore.confirm_credential``). Passwords are never returned.
         """
-        if _ps().get_run(run_id) is None:
+        if await _get_run_row(run_id) is None:
             raise HTTPException(status_code=404, detail="Run not found")
         ws = _exploit_workspace(run_id)
         stores = _find_credential_stores(ws)
@@ -962,7 +1104,7 @@ def create_router(auth: BearerAuth, persistence: ApiPersistence, run_manager: Ru
             records: list[Any] = []
             store_paths: list[Path] = []
             for store_path in stores:
-                store = CredentialStore(store_path.parent)
+                store = CredentialStore(store_path.parent, workspace_root=ws)
                 for rec in store.all_credentials():
                     records.append(rec)
                     store_paths.append(store_path)
@@ -971,7 +1113,7 @@ def create_router(auth: BearerAuth, persistence: ApiPersistence, run_manager: Ru
         if index < 0 or index >= len(records):
             raise HTTPException(status_code=404, detail="Credential index out of range")
         rec = records[index]
-        store = CredentialStore(store_paths[index].parent)
+        store = CredentialStore(store_paths[index].parent, workspace_root=ws)
         try:
             changed = store.confirm_credential(
                 username=rec.username,
@@ -1001,7 +1143,7 @@ def create_router(auth: BearerAuth, persistence: ApiPersistence, run_manager: Ru
     @router.get("/runs/{run_id}/loot")
     async def list_loot(run_id: str, auth: str = Depends(_require_auth)) -> dict[str, Any]:
         """List loot captured during the run."""
-        if _ps().get_run(run_id) is None:
+        if await _get_run_row(run_id) is None:
             raise HTTPException(status_code=404, detail="Run not found")
         ws = _exploit_workspace(run_id)
         # LootStore is constructed with a workspace dir and reads <dir>/loot.jsonl.
@@ -1031,7 +1173,7 @@ def create_router(auth: BearerAuth, persistence: ApiPersistence, run_manager: Ru
         """Delete a run from the DB. Refuses active runs. ``?purge=true`` also
         removes the reports/<run_id>/ directory.
         """
-        if _ps().get_run(run_id) is None:
+        if await _get_run_row(run_id) is None:
             raise HTTPException(status_code=404, detail="Run not found")
         if _rm().active_for(run_id) is not None:
             raise APIError("conflict", "Cannot delete an active run.", status_code=409)

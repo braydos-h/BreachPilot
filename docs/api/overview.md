@@ -142,13 +142,13 @@ Detail in `docs/api/run-manager.md`.
 - Protocols: `DecisionProvider` / `EventSink` / `ApprovalProvider` + `CancellationToken`.
 - Adapters: `Terminal*` (CLI) vs `Api*` (daemon). `ApiDecisionProvider.request` persists + awaits future; `ApiEventSink.emit` forwards to broker; `ApiApprovalProvider.approve` routes through `tool_approval` decision.
 
-`tools/run_service/service.py` `AssessmentService` — `prepare()` (pure, worker-thread) builds `RunPreview`; `execute()` opens MCP session, runs agent loop / swarm, writes `session_summary.md` / `run.json` / `enhanced_report.json`, derives `campaign_result` for the graph.
+`tools/run_service/service.py` `AssessmentService` — `prepare()` runs in a worker thread and builds `RunPreview`; it also loads configured plugins and creates the run's reports directory. `execute()` opens the MCP session, runs the agent loop / swarm, writes `session_summary.md` / `run.json` / `enhanced_report.json`, and derives `campaign_result` for the graph.
 
 ## Endpoint Families
 
 | Family | Module | Prefix | Auth |
 |--------|--------|--------|------|
-| System | `tools/api/routes/system.py` | `/api/v1` | bearer (except `GET /health`) |
+| System | `tools/api/routes/system/` package | `/api/v1` | bearer (except `GET /health`) |
 | Runs | `tools/api/routes/runs.py` | `/api/v1` | bearer |
 | Decisions | `tools/api/routes/decisions.py` | `/api/v1` | bearer |
 | Events (REST + SSE + WS) | `tools/api/routes/events.py` | `/api/v1` + `WS /ws/v1` | bearer (REST/SSE) / first-message auth (WS) |

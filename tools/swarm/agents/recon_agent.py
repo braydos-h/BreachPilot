@@ -15,7 +15,6 @@ import json
 import time
 from typing import Any
 
-from tools.recon_pipeline import ReconConfig, ReconPipeline
 from tools.swarm.base import Agent, AgentResult, AgentStatus
 from tools.swarm.bb_compat import bb_set
 
@@ -189,20 +188,26 @@ class ReconAgent(Agent):
         error = ""
 
         try:
-            # ── Stage 1: Full recon via the shared ReconPipeline ──
-            # Mirror the MCP run_full_recon path: ReconConfig.from_config +
-            # ReconPipeline(recon_cfg) + await pipeline.recon_host(target).
-            # The previous code raised TypeError/AttributeError: it passed
-            # non-existent ``target=``/``ports=`` kwargs to ReconConfig, a
-            # second positional (tool_router) to ReconPipeline.__init__(config),
-            # and called a non-existent pipeline.run() -- so the swarm recon
-            # path never actually ran.
-            recon_cfg = ReconConfig.from_config(
-                context.get("config"),
-                aggression_level="stealth" if context.get("stealth", False) else "normal",
+            # All target-active swarm recon uses the same pinned sandbox worker
+            # as the public MCP recon tools. Missing context or worker failure
+            # is terminal for this task; there is no host ReconPipeline fallback.
+            tool_context = context.get("tool_context")
+            if tool_context is None or getattr(tool_context, "sandbox", None) is None:
+                raise RuntimeError("sandbox recon context is unavailable; refusing host-side reconnaissance")
+            from tools.mcp_tools.recon import sandbox_recon_host
+
+            host_result, recon_error = _run_coro(
+                sandbox_recon_host(
+                    tool_context,
+                    target,
+                    context.get("config"),
+                    aggression="stealth" if context.get("stealth", False) else "normal",
+                )
             )
-            pipeline = ReconPipeline(recon_cfg)
-            host_result = _run_coro(pipeline.recon_host(target))
+            if recon_error:
+                raise RuntimeError(recon_error)
+            if host_result is None:
+                raise RuntimeError("sandbox recon returned no result")
             result = host_result.to_dict()
 
             raw_services = result.get("services", [])

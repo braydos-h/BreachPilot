@@ -319,6 +319,14 @@ class AttackState:
         self.failed_attempts[module_name].append(error)
 
     def record_success(self, module_name: str, result: dict[str, Any]) -> None:
+        """Record a verifier-confirmed compromise or credential outcome.
+
+        Module status, script output, and plugin-supplied fields are not proof.
+        The executor sets ``verified_success`` only from its trusted structured
+        verifier path; direct callers must provide that explicit verdict too.
+        """
+        if result.get("verified_success") is not True:
+            return
         self.successful_exploits.append(module_name)
         if result.get("shell_type"):
             self.shell_type = result["shell_type"]

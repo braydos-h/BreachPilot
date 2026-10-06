@@ -161,7 +161,9 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     )
 
     ops = parser.add_argument_group("operational")
-    ops.add_argument("--doctor", action="store_true", help="Run a self-check (Python, nmap, Ollama, config) and exit")
+    ops.add_argument(
+        "--doctor", action="store_true", help="Run a self-check (Python, nmap, active provider, config) and exit"
+    )
     ops.add_argument("--demo", action="store_true", help="Run against a local sandbox target (DVWA-style)")
     ops.add_argument("--resume", type=str, default="", help="Resume a prior run by run_id or session_id")
     ops.add_argument(

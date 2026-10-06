@@ -140,14 +140,16 @@ def test_ad_ldap_enum_produces_user_list_read_only() -> None:
     assert ADLDAPEnum.phase_hint == "enumerate"
 
 
-def test_credential_spray_requires_user_list() -> None:
-    assert "user_list" in CredentialSpray.requires
+def test_credential_spray_treats_user_list_as_optional() -> None:
+    assert "user_list" in CredentialSpray.optional_requires
+    assert "user_list" not in CredentialSpray.requires
     assert "credentials" in CredentialSpray.produces
     assert CredentialSpray.phase_hint == "exploit"
 
 
-def test_password_spray_requires_user_list() -> None:
-    assert "user_list" in PasswordSpray.requires
+def test_password_spray_treats_user_list_as_optional() -> None:
+    assert "user_list" in PasswordSpray.optional_requires
+    assert "user_list" not in PasswordSpray.requires
     assert "credentials" in PasswordSpray.produces
 
 

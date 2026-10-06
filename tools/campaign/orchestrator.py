@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import os
 import time
+from collections.abc import Awaitable
 from pathlib import Path
 from typing import Any, Callable
 
@@ -23,6 +24,7 @@ from tools.campaign import preflight as _preflight
 from tools.campaign import service_tasks as _service_tasks
 from tools.campaign import state_store as _state_store
 from tools.campaign.executor import AttackModuleExecutor
+from tools.campaign.runtime_context import current_required_sandbox_recon
 from tools.campaign.state import (
     AggressionLevel,
     AttackState,
@@ -73,6 +75,8 @@ class AutonomousOrchestrator:
         reflection_agent: Any = None,
         experience_store: Any | None = None,
         semantic_memory: Any | None = None,
+        sandbox_recon_provider: Callable[[str], Awaitable[Any]] | None = None,
+        require_sandbox_recon: bool = False,
     ) -> None:
         self._workspace = workspace_root
         self._workspace.mkdir(parents=True, exist_ok=True)
@@ -80,6 +84,9 @@ class AutonomousOrchestrator:
         self._tool_executor = tool_executor
         self._recon_config = recon_config or ReconConfig()
         self._recon = ReconPipeline(self._recon_config)
+        flow_provider = current_required_sandbox_recon()
+        self._sandbox_recon_provider = sandbox_recon_provider or flow_provider
+        self._require_sandbox_recon = require_sandbox_recon or flow_provider is not None
         # Evidence-aware module ranking: the dormant ExperienceStore at
         # tools/attack_modules/registry.py:205-328 already supports Bayesian
         # confidence boosting/demotion, but the autonomous path never passed

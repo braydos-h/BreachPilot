@@ -34,7 +34,7 @@ function sandboxData(overrides: Partial<SandboxStatusResponse> = {}): SandboxSta
     user: "sandbox",
     read_only_rootfs: true,
     mode: "contained",
-    fallback_native: true,
+    fallback_native: false,
     fallback_reason: "",
     docker_available: true,
     docker_error: "",
@@ -122,33 +122,42 @@ describe("AdvancedSettings sandbox panel", () => {
   });
 
   it("warns with the build command when the worker image is missing", () => {
-    setup(sandboxData({ image_present: false }));
+    setup(sandboxData({ mode: "blocked", image_present: false }));
     const section = sandboxSection();
-    expect(within(section).getByText("Image missing")).toBeInTheDocument();
+    expect(within(section).getByText("Execution blocked")).toBeInTheDocument();
+    expect(within(section).getByText("The worker image is not built — every attack command will be blocked (fail closed).")).toBeInTheDocument();
     expect(
       within(section).getByText("docker build -t breachpilot-sandbox:latest docker/sandbox"),
     ).toBeInTheDocument();
   });
 
-  it("reports an unreachable Docker daemon as a hard failure", () => {
-    setup(sandboxData({ docker_available: false, docker_error: "cannot connect to the Docker daemon" }));
+  it("warns on an unknown sandbox mode instead of guessing the posture", () => {
+    setup(sandboxData({ mode: "native_fallback" as unknown as "contained" | "blocked" }));
     const section = sandboxSection();
-    expect(within(section).getByText("Docker unreachable")).toBeInTheDocument();
+    expect(within(section).getByText("Unknown sandbox status")).toBeInTheDocument();
+    expect(within(section).getByRole("status")).toHaveTextContent(/unknown sandbox mode/i);
+    expect(within(section).queryByText("Contained (docker)")).not.toBeInTheDocument();
+    expect(within(section).queryByText("Execution blocked")).not.toBeInTheDocument();
+  });
+
+  it("reports an unreachable Docker daemon as a hard failure", () => {
+    setup(sandboxData({ mode: "blocked", docker_available: false, docker_error: "cannot connect to the Docker daemon" }));
+    const section = sandboxSection();
+    expect(within(section).getByText("Execution blocked")).toBeInTheDocument();
     expect(within(section).getByText("cannot connect to the Docker daemon")).toBeInTheDocument();
   });
 
-  it("marks the disabled legacy host-execution mode", () => {
+  it("reports blocked status if Docker is unreachable", () => {
     setup(
       sandboxData({
-        enabled: false,
-        note: "sandbox disabled -- documented legacy host-execution mode",
+        mode: "blocked",
+        docker_available: false,
+        docker_error: "cannot connect to Docker",
       }),
     );
     const section = sandboxSection();
-    expect(within(section).getByText("Disabled (host exec)")).toBeInTheDocument();
-    expect(
-      within(section).getByText("sandbox disabled -- documented legacy host-execution mode"),
-    ).toBeInTheDocument();
+    expect(within(section).getByText("Execution blocked")).toBeInTheDocument();
+    expect(within(section).getByText(/Docker is unavailable — attack execution is blocked/)).toBeInTheDocument();
   });
 });
 
@@ -234,11 +243,12 @@ describe("AdvancedSettings browser panel", () => {
     vi.clearAllMocks();
   });
 
-  it("shows a ready backend with config detail and capabilities", () => {
+  it("shows contained worker readiness and capabilities", () => {
     setupBrowser(browserData());
     const section = browserSection();
     expect(within(section).getByText("Ready (playwright)")).toBeInTheDocument();
-    expect(within(section).getByText("playwright 1.60.0 + chromium runtime present")).toBeInTheDocument();
+    expect(within(section).getByText("Chromium runs only inside the required sandbox worker.")).toBeInTheDocument();
+    expect(within(section).getByText("sandbox worker only")).toBeInTheDocument();
     expect(within(section).getByText("browser.navigate")).toBeInTheDocument();
     expect(within(section).getByText("browser.dom.inspect")).toBeInTheDocument();
   });
@@ -249,7 +259,7 @@ describe("AdvancedSettings browser panel", () => {
     expect(within(section).getByText("Disabled")).toBeInTheDocument();
   });
 
-  it("shows setup hints when enabled but the SDK is missing", () => {
+  it("shows the worker build hint when the host SDK is missing", () => {
     setupBrowser(
       browserData({
         available: false,
@@ -266,10 +276,37 @@ describe("AdvancedSettings browser panel", () => {
     );
     const section = browserSection();
     expect(within(section).getByText("Not ready")).toBeInTheDocument();
-    expect(within(section).getByText('python -m pip install -e ".[browser]"')).toBeInTheDocument();
+    expect(
+      within(section).getByText("docker build -t breachpilot-sandbox:browser -f docker/sandbox/Dockerfile.browser docker/sandbox"),
+    ).toBeInTheDocument();
+    expect(within(section).getByText("sandbox.image: breachpilot-sandbox:browser")).toBeInTheDocument();
+    expect(within(section).getByText(/host Playwright does not enable execution/i)).toBeInTheDocument();
   });
 
-  it("shows the chromium hint when the SDK is present but the runtime is missing", () => {
+  it("does not treat a complete host browser install as a contained worker", () => {
+    setupBrowser(
+      browserData({
+        available: false,
+        capabilities: [],
+        health: {
+          name: "browser_backend_playwright",
+          ok: true,
+          detail: "host Playwright and Chromium are installed",
+          playwright_present: true,
+          playwright_version: "1.60.0",
+          chromium_present: true,
+        },
+      }),
+    );
+    const section = browserSection();
+    expect(within(section).getByText("Not ready")).toBeInTheDocument();
+    expect(within(section).getByText(/host Playwright does not enable execution/i)).toBeInTheDocument();
+    expect(
+      within(section).getByText("docker build -t breachpilot-sandbox:browser -f docker/sandbox/Dockerfile.browser docker/sandbox"),
+    ).toBeInTheDocument();
+  });
+
+  it("keeps the worker build hint when only host Chromium is missing", () => {
     setupBrowser(
       browserData({
         available: false,
@@ -285,6 +322,9 @@ describe("AdvancedSettings browser panel", () => {
       }),
     );
     const section = browserSection();
-    expect(within(section).getByText("python -m playwright install chromium")).toBeInTheDocument();
+    expect(
+      within(section).getByText("docker build -t breachpilot-sandbox:browser -f docker/sandbox/Dockerfile.browser docker/sandbox"),
+    ).toBeInTheDocument();
+    expect(within(section).queryByText("python -m playwright install chromium")).not.toBeInTheDocument();
   });
 });

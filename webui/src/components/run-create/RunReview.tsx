@@ -23,10 +23,16 @@ interface RunReviewProps {
   observerMode: ObserverMode;
   reconFirst: boolean | null;
   yes: boolean;
+  /** A server-reported sandbox or other preflight check has not passed. */
+  launchBlocked: boolean;
   /** True while the create POST itself is in flight (no run id yet). */
   isCreating: boolean;
   /** Live startup panel state (sending/preparing + backend stage). */
   startup: RunStartupState | null;
+  /** A run ID exists, but the status query has failed and needs recovery. */
+  startupStatusError: boolean;
+  startupStatusRetrying: boolean;
+  onRetryStatus: () => void;
   /** Filled run detail once preparation completes (preview + decisions). */
   runDetail: RunDetail | null;
   createError: string;
@@ -88,8 +94,12 @@ export function RunReview({
   observerMode,
   reconFirst,
   yes,
+  launchBlocked,
   isCreating,
   startup,
+  startupStatusError,
+  startupStatusRetrying,
+  onRetryStatus,
   runDetail,
   createError,
   onCreate,
@@ -130,7 +140,7 @@ export function RunReview({
     );
   };
 
-  const launchDisabled = isCreating || !!startup;
+  const launchDisabled = isCreating || !!startup || launchBlocked;
 
   return (
     <div className="space-y-4">
@@ -183,7 +193,7 @@ export function RunReview({
                     Edit target
                   </Button>
                 )}
-                <Button type="button" size="sm" variant="outline" onClick={onRetry}>
+                <Button type="button" size="sm" variant="outline" onClick={onRetry} disabled={launchBlocked}>
                   Retry
                 </Button>
               </span>
@@ -192,7 +202,14 @@ export function RunReview({
         </CardContent>
       </Card>
 
-      {startup && <RunStartupProgress startup={startup} />}
+      {startup && (
+        <RunStartupProgress
+          startup={startup}
+          statusError={startupStatusError}
+          statusRetrying={startupStatusRetrying}
+          onRetryStatus={onRetryStatus}
+        />
+      )}
 
       {!startup && !runDetail && (
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
@@ -250,7 +267,11 @@ export function RunReview({
                     <code className="rounded bg-muted px-1.5 py-0.5 font-mono">{requiredText}</code>
                   </div>
                 </div>
+                <label htmlFor="run-start-confirmation" className="text-xs font-medium">
+                  Confirmation phrase
+                </label>
                 <Input
+                  id="run-start-confirmation"
                   value={confirmText}
                   onChange={(e) => setConfirmText(e.target.value)}
                   placeholder={requiredText}

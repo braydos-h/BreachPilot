@@ -40,7 +40,7 @@ function ProofCapsule({ finding }: { finding: ProposedFinding }) {
       <div className="flex flex-wrap gap-1.5">
         <Badge variant="info">Verification: {proof.verify_status || "HOLDING"}</Badge>
         {proof.retest_status && <Badge variant="secondary">Retest: {proof.retest_status}</Badge>}
-        {proof.proof_runs > 0 && <Badge variant="muted">Proof passed {proof.proof_runs}/{proof.proof_runs}</Badge>}
+        {proof.proof_runs > 0 && <Badge variant="muted">Requested proof trials: {proof.proof_runs}</Badge>}
         {proof.proof_sha256 && (
           <Badge variant="muted" title={proof.proof_sha256}>
             sha {proof.proof_sha256.slice(0, 12)}…
@@ -132,12 +132,18 @@ function ProposalRow({
   );
 }
 
-type LifecycleFilter = "all" | "awaiting" | "verified" | "inconclusive" | "rejected" | "fixed";
+const LIFECYCLE_FILTERS = ["all", "awaiting", "approved", "verified", "inconclusive", "rejected", "fixed"] as const;
+type LifecycleFilter = typeof LIFECYCLE_FILTERS[number];
+
+function isLifecycleFilter(value: string | null): value is LifecycleFilter {
+  return LIFECYCLE_FILTERS.some((filter) => filter === value);
+}
 
 export function EvidenceTab({ runId }: EvidenceTabProps) {
   const [params, setParams] = useSearchParams();
   const filter = params.get("q") ?? "";
-  const lifecycle = (params.get("lifecycle") as LifecycleFilter | null) ?? "all";
+  const lifecycleParam = params.get("lifecycle");
+  const lifecycle = isLifecycleFilter(lifecycleParam) ? lifecycleParam : "all";
   const setFilter = (v: string) => {
     setParams((prev) => {
       const next = new URLSearchParams(prev);
@@ -160,7 +166,13 @@ export function EvidenceTab({ runId }: EvidenceTabProps) {
     const q = filter.trim().toLowerCase();
     let all = proposed.data?.proposed ?? [];
     if (lifecycle === "awaiting") all = all.filter((f) => (f.hitl_status || "PROPOSED").toUpperCase() === "PROPOSED");
-    else if (lifecycle === "verified") all = all.filter((f) => (f.hitl_status || "").toUpperCase() === "APPROVED");
+    else if (lifecycle === "approved") all = all.filter((f) => (f.hitl_status || "").toUpperCase() === "APPROVED");
+    else if (lifecycle === "verified") all = all.filter((f) => (f.proof.verify_status || "").toUpperCase() === "VERIFIED");
+    else if (lifecycle === "inconclusive") all = all.filter((f) =>
+      (f.proof.verify_status || "").toUpperCase() === "INCONCLUSIVE" ||
+      (f.proof.retest_status || "").toUpperCase() === "INCONCLUSIVE",
+    );
+    else if (lifecycle === "fixed") all = all.filter((f) => (f.proof.retest_status || "").toUpperCase() === "FIXED");
     else if (lifecycle === "rejected") all = all.filter((f) => (f.hitl_status || "").toUpperCase() === "REJECTED");
     if (!q) return all;
     return all.filter(
@@ -193,13 +205,12 @@ export function EvidenceTab({ runId }: EvidenceTabProps) {
           />
         </div>
       </div>
-      <div className="flex flex-wrap gap-1.5" role="tablist" aria-label="Finding lifecycle filter">
-        {(["all", "awaiting", "verified", "inconclusive", "rejected", "fixed"] as LifecycleFilter[]).map((l) => (
+      <div className="flex flex-wrap gap-1.5" role="group" aria-label="Finding lifecycle filter">
+        {LIFECYCLE_FILTERS.map((l) => (
           <button
             key={l}
             type="button"
-            role="tab"
-            aria-selected={lifecycle === l}
+            aria-pressed={lifecycle === l}
             onClick={() => setLifecycle(l)}
             className={`rounded-full border px-2.5 py-1 text-[13px] ${lifecycle === l ? "border-primary/50 bg-primary/10 text-primary" : "text-muted-foreground hover:bg-accent"}`}
           >

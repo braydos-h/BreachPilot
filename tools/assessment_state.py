@@ -175,7 +175,13 @@ class AssessmentStateStore:
         return path
 
 
-def aggregate_state(target: str, workspace: Path | str, config: dict[str, Any] | None = None) -> dict[str, Any]:
+def aggregate_state(
+    target: str,
+    workspace: Path | str,
+    config: dict[str, Any] | None = None,
+    *,
+    audit_path: Path | str | None = None,
+) -> dict[str, Any]:
     """Compact cross-store snapshot for one target.
 
     Reads (all best-effort): the attack plan (DAG state), the owned assessment
@@ -239,7 +245,7 @@ def aggregate_state(target: str, workspace: Path | str, config: dict[str, Any] |
     snap["credentials_available"] = sum(1 for p in creds_dir.glob("*.jsonl")) if creds_dir.is_dir() else 0
 
     # Audit rollup (last entries for this target).
-    snap["activity"] = _audit_rollup(ws, target)
+    snap["activity"] = _audit_rollup(ws, target, audit_path=audit_path)
 
     return snap
 
@@ -279,9 +285,15 @@ def _newest_recon(ws: Path, target: str) -> dict[str, Any] | None:
     return None
 
 
-def _audit_rollup(ws: Path, target: str, limit: int = 25) -> dict[str, Any]:
+def _audit_rollup(
+    ws: Path,
+    target: str,
+    limit: int = 25,
+    *,
+    audit_path: Path | str | None = None,
+) -> dict[str, Any]:
     """Tally audit entries for the target; return compact refs, not raw output."""
-    audit = ws / "exploit_audit.jsonl"
+    audit = Path(audit_path) if audit_path is not None else ws / "exploit_audit.jsonl"
     out: dict[str, Any] = {"tool_calls": 0, "blocked": 0, "by_tool": {}, "recent": []}
     if not audit.exists():
         return out

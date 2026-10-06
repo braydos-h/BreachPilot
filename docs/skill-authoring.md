@@ -173,15 +173,15 @@ moment, and its `Workflow` reliable enough that phases it informs succeed.
 
 ### Semantic matching
 
-When `skills.semantic_matching: true` (default) and an embedder is available
-(local `ollama.embed_host`, model `nomic-embed-text`), skills are also
-ranked by cosine similarity of name + description + domain + subdomain +
-tags against the run context. This means **description quality directly
-drives semantic recall** — a description that names the techniques, targets,
-and tools of the skill will match queries that share no tags. When
-embeddings are unavailable the selector logs one
-`[WARN] skills: embeddings unavailable, falling back to tag matching` and
-deterministic tag matching remains the floor.
+When `skills.semantic_matching: true` (default) and an embedding provider is
+available, skills are also ranked by cosine similarity using each skill's
+name, description, domain, subdomain, and tags against the run context. The checked-in config
+sets `embeddings.provider: none`, so a default install uses deterministic tag
+matching without network requests. Selecting Ollama uses `ollama.embed_host`
+and `nomic-embed-text`; if an enabled provider is unavailable, the selector
+logs one warning and falls back to tag matching. Explicitly disabled
+embeddings do not warn. This means **description quality directly drives
+semantic recall** when semantic embeddings are enabled.
 
 ### Iteration checklist
 

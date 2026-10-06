@@ -6,7 +6,7 @@ source: [config.yaml, tools/config_manager.py, tools/kernel/config.py, tools/con
 
 # Configuration Overview
 
-Runtime source of truth is `config.yaml` at the repo root. `tools/config_manager.py::CONFIG_SCHEMA` mirrors the same defaults for when the file is missing or a key is absent. `tools/kernel/config.py::load_config` is the pure loader re-exported by `tools/config_cli` and `tools/mcp_shared`.
+Runtime source of truth is `config.yaml` at the repo root. `tools/config/schema.py::CONFIG_SCHEMA` holds schema defaults and is re-exported by the compatibility module `tools/config_manager.py`. `tools/kernel/config.py::load_config` is the light loader re-exported by `tools/config_cli` and `tools/mcp_shared`.
 
 > `opencode.json` is editor-local (gitignored) for the opencode.ai editor — never application config. App config lives only in `config.yaml` (AGENTS.md rule 5). `mission.yaml` is Flow B scope; the exploit engine reads `config.yaml:exploit` instead.
 
@@ -21,21 +21,22 @@ Runtime source of truth is `config.yaml` at the repo root. `tools/config_manager
 | `~/.codex/auth.json` / `$CODEX_HOME/auth.json` | ChatGPT OAuth tokens (openai-oauth). Existence-only check; never read/logged. | `~/.codex/auth.json` | `chatgpt.oauth_file` when set (`tools/providers/chatgpt_provider.py`) | n/a (outside repo) |
 | `exploit_workspace/` | Per-target attempt artifacts + threat-intel cache | `exploit_workspace` (`exploit.workspace_dir`) | `EXPLOIT_WORKSPACE` env | yes |
 | `reports/<run_id>/` | Per-run audit, nmap, session logs | `reports` (`--reports-dir`) | `--reports-dir` | yes |
-| `webui/dist/` | Built SPA | `webui/dist/index.html` | n/a (built via `npm run build`) | yes (dist) |
+| `webui/dist/` | Built SPA | `webui/dist/index.html` | Source checkout: `webui/dist`; wheel: installation data prefix `/webui/dist`, resolved by `tools.paths.get_webui_dist_dir()` | yes (dist) |
 
-All workspace/run dirs are gitignored. First `--web` run does `npm install && npm run build` (`main.py:565`).
+All workspace/run dirs are gitignored. In a source checkout, `--web` builds with `npm ci && npm run build` only when `webui/dist/index.html` is missing. A release wheel includes the built SPA under the Python environment's data prefix; the runtime resolver finds it without a checkout or Node.js.
 
 ## Packaged vs runtime paths (wheel vs checkout)
 
 BreachPilot distinguishes three path kinds (see `tools/paths.py`):
 
-* **Packaged immutable resources** — default skill catalog (`skills/`), `tools/mitre_technique_map.json`, and `webui/dist` when built. Located via `importlib.resources` so a `pip install dist/*.whl` from `/tmp` still finds them without a repo checkout. Do not use `Path(__file__).parent / "../../skills"` — use `tools.paths.get_packaged_skills_dir()`.
+* **Packaged resources** — default skill catalog (`skills/`), `tools/mitre_technique_map.json`, and the built WebUI. Skills and other package resources use `importlib.resources`; wheel WebUI data files are installed beneath the environment data prefix and resolved first by `tools.paths.get_webui_dist_dir()`. A `pip install dist/*.whl` from `/tmp` therefore does not require a repository checkout. Do not use `Path(__file__).parent / "../../skills"` — use `tools.paths.get_packaged_skills_dir()`.
 * **User/runtime state** — `reports/`, `exploit_workspace/`, `research_workspace/`, `swarm_workspace/`. Relative to **cwd** when not explicitly supplied (the operator chooses where artifacts go).
 * **Explicitly supplied paths** — `--config`, `--reports-dir`, `skills.roots` entries, `api.token_file`, etc. Always honored as given; relative values are resolved from **cwd** (or from the config file's directory when the source is known).
 
 | Kind | Example default | Resolved from | Wheel behavior |
 |------|-----------------|---------------|----------------|
 | Packaged skills | `skills` (default `skills.roots: ["skills"]`) | `importlib.resources.files("skills")` → `site-packages/skills` | Works from any cwd, even after `pip install` |
+| Packaged WebUI | `webui/dist` | `tools.paths.get_webui_dist_dir()` → install data prefix (wheel), package resource, or checkout | Found from any cwd after `pip install` |
 | Explicit skill root | `skills.roots: ["my_skills"]` in `config.yaml` | `cwd / "my_skills"` (or config file's dir) | Honors operator's custom dir |
 | Runtime state | `reports/` (`--reports-dir`) | `cwd / "reports"` | Creates in the directory you launch from |
 | Config file | `config.yaml` | Hierarchy below | Falls back to packaged defaults when no file exists |
@@ -49,7 +50,7 @@ BreachPilot distinguishes three path kinds (see `tools/paths.py`):
 3. **User config locations** — `$XDG_CONFIG_HOME/breachpilot/config.yaml`, `~/.config/breachpilot/config.yaml`, `~/.breachpilot/config.yaml` (first match wins).
 4. **Packaged defaults** — `tools/config/schema.py::CONFIG_SCHEMA` deep-copy (no file). This guarantees `sandbox.enabled: true` etc. survive when cwd has no `config.yaml` — the wheel-cwd bug.
 
-`tools/kernel/config.load_config(Path("config.yaml"))` is hierarchy-aware for the default sentinel: a missing `Path("config.yaml")` now returns the effective config (deep copy of `CONFIG_SCHEMA`) instead of `{}` so sandbox posture does not silently become disabled. An explicit custom path like `tmp_path / "missing.yaml"` still returns `{}` for helper/test callers that intentionally pass partial dicts (preserved).
+`tools/kernel/config.load_config(Path("config.yaml"))` is hierarchy-aware for the default sentinel: if the working-directory file is missing, it resolves user config locations and then packaged schema defaults instead of returning `{}`. A missing explicit custom path passed to this light loader, such as `tmp_path / "missing.yaml"`, still returns `{}`. The validated effective-config path applies schema defaults to a missing explicit file.
 
 Runtime code that needs posture defaults (sandbox, exploit, skills) must use `load_effective_config()` or the hierarchy-aware `load_config` for the default sentinel; helper/test code that intentionally passes `{}` to `SandboxConfig.from_config({})` keeps the documented `enabled=False` behavior.
 
@@ -59,40 +60,29 @@ Runtime code that needs posture defaults (sandbox, exploit, skills) must use `lo
 cli flag  --config <path>  (default Path("config.yaml"))
         │
         ▼
-tools/kernel/config.load_config(path)          # tools/kernel/config.py:11
-  ├─ path missing → return {} (no raise)
-  ├─ yaml.safe_load(...) or {}                  # yaml parsing
-  └─ non-dict root → raise ValueError           # must be mapping
-        │
-        ▼
-tools/config_manager.ConfigValidator(path)      # config_manager.py:703
-  ├─ .load()        # loads into self._config
-  ├─ .validate()    # errors / warnings / unknown_keys
-  ├─ .apply_defaults()  # deep-merge CONFIG_SCHEMA defaults under loaded keys
-  └─ .save()        # yaml.safe_dump back to disk
-        │
-        ▼
-load_validated_config(path)                    # config_manager.py:1281
-  ├─ raises ValueError on result.is_valid==False
-  ├─ logs warnings + unknown_keys
-  └─ returns merged config (with defaults)
-        │
-        ▼
-consumers
-  ├─ main.py async_main: load_config(config_path) then apply_skills_cli_overrides
-  ├─ app.py create_app: load_config or in-memory override (--web sets api.serve_webui in-memory)
-  ├─ mcp_exploit_server._create_server / mcp_server / mcp_engine_server
-  └─ tools/doctor.run_doctor(config_path) — loads raw yaml separately
+tools/kernel/config.load_config(path)          # light loader, no schema validation
+  ├─ existing path → parse YAML mapping
+  ├─ missing default sentinel → tools.paths.load_effective_config()
+  │    ├─ cwd/user config found → validate + apply CONFIG_SCHEMA defaults
+  │    └─ no file found → return a deep copy of CONFIG_SCHEMA
+  ├─ missing explicit custom path → return {}
+  └─ non-dict YAML root → raise ValueError
+
+Separate validated path:
+tools.config.loader.load_validated_config(path)
+  ├─ ConfigValidator.load_and_validate()
+  ├─ raise ValueError when validation fails
+  └─ return config merged with CONFIG_SCHEMA defaults (does not save it)
 ```
 
 Two loaders coexist:
 
 - **Validated path** — `load_validated_config` (`config_manager.py:1281`) — raises on errors, used by doctor/self-test and `MCP_BOOT_TIMEOUT_SECONDS` flow. Deep-merges defaults.
-- **Light path** — `tools/kernel/config.load_config` (`tools/config_cli.load_config` re-export, `tools/mcp_shared.load_config`) — pure, no defaults, no validation, returns `{}` on missing. Used by `main.py:593`, `mcp_*_server.py`, and `tools/mcp_session.py` where defaults are applied defensively per-consumer (`cfg.get("agent", {}).get(key, default)`).
+- **Light path** — `tools/kernel/config.load_config` (`tools/config_cli.load_config` re-export, `tools/mcp_shared.load_config`) — parses YAML without general schema validation. A missing default sentinel delegates to the effective-config hierarchy; a missing explicit custom path returns `{}`. Used by `main.py`, `app.py`, and MCP/session paths.
 
 `ConfigValidator._build_defaults()` (`config_manager.py:1194`) is `copy.deepcopy(CONFIG_SCHEMA)`. `apply_defaults()` (`config_manager.py:1200`) deep-merges `self._config` over `copy.deepcopy(CONFIG_SCHEMA)` — file wins over schema.
 
-Live PATCH: `PATCH /api/v1/system/config` (`tools/api/routes/system.py:110`) atomic deep-merge + re-validation via `ConfigValidator`; loopback `allowed_origins` enforced; writes through `validator.save()`.
+Live PATCH: `PATCH /api/v1/config` (`tools/api/routes/system/config.py`) applies an atomic deep-merge and re-validates the result through `ConfigValidator`; loopback `allowed_origins` is enforced and the validated config is persisted.
 
 Interactive allowlist write: `tools/config_cli.add_target_to_allowlist` (`tools/config_cli.py:21`) normalizes IP via `ipaddress.ip_address` or domain via `tools/validation_utils.is_fqdn`, de-duplicates case-insensitively, and does atomic comment-preserving YAML edit (`_add_allowed_target_to_yaml`, `_yaml_block_end`) — fallback to `yaml.safe_dump` for unusual layouts.
 
@@ -180,7 +170,7 @@ Runtime target-lock env (threaded by `tools/mcp_session.py:255`):
 - `EXPLOIT_DISCOVERED_TARGETS` — CSV of subdomain / IP discovered mid-run (`mcp_shared.add_discovered_target`).
 - `EXPLOIT_WORKSPACE` — workspace root override; also influences KEV cache path (`cve_lookup.py:171`).
 
-Other: `MCP_ALLOW_PUBLIC_BIND=1` + `--allow-public-bind` two-person rule; `MCP_HTTP_TOKEN` optional bearer for MCP HTTP; `AI_NMAP_DEBUG=1` (`--debug`); `AI_NMAP_ACTIVE_MODEL_ALIAS`, `AI_NMAP_MULTI_MODEL_ENABLED` threaded into MCP server.
+Other: `MCP_ALLOW_PUBLIC_BIND=1` + `--allow-public-bind` two-person rule; `MCP_HTTP_TOKEN` is required for non-loopback MCP HTTP binds and optional on loopback; `AI_NMAP_DEBUG=1` (`--debug`); `AI_NMAP_ACTIVE_MODEL_ALIAS`, `AI_NMAP_MULTI_MODEL_ENABLED` threaded into MCP server.
 
 See `docs/configuration/environment.md` for full `.env.example` mapping and `docs/configuration/secrets.md` for `secr.json` + provider auth.
 
@@ -198,7 +188,7 @@ See `docs/configuration/environment.md` for full `.env.example` mapping and `doc
 | `api.*` | yes (daemon) | `app.create_app` / `uvicorn.run`; `--api-host/port` override is per-invocation |
 | Secrets (`OLLAMA_API_KEY` etc.) | no — env load at `bootstrap_startup_api_keys` | `load_api_keys_into_env` only sets when `os.environ[name]` absent; re-export needed for MCP subprocess |
 
-`PATCH /api/v1/system/config` is the live path for `api`-safe keys; a malformed patch is rejected before write. Verify with `python main.py --doctor` (Python/nmap/Ollama/config/ports/workspace) and `python main.py --self-test` (localhost smoke) before sessions (see `docs/configuration/validation.md`).
+`PATCH /api/v1/config` is the live path for `api`-safe keys; a malformed patch is rejected before write. Verify with `python main.py --doctor` (Python/nmap/active provider/config/ports/workspace) and `python main.py --self-test` (localhost smoke) before sessions (see `docs/configuration/validation.md`).
 
 ## Related
 

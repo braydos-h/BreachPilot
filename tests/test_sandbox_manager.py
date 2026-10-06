@@ -1,7 +1,7 @@
 """Unit tests for SandboxManager (tools/sandbox/manager.py).
 
 Security invariants covered:
-- Disabled config resolves to None (explicit legacy host mode, never silent).
+- Disabled config is rejected; it can never enable host execution.
 - ``require_explicit_allowlist`` + EMPTY allowlist => DENY target-touching
   execution (the empty-allowlist fail-open regression).
 - Unauthorized target => SandboxScopeError before any container work.
@@ -15,6 +15,8 @@ Security invariants covered:
 from __future__ import annotations
 
 import json
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
@@ -132,8 +134,9 @@ class TestResolveManager:
         assert mgr.cfg.enabled is True
         mgr.destroy()
 
-    def test_enabled_false_disables(self, tmp_path):
-        assert resolve_manager(tmp_path, {"sandbox": {"enabled": False}}) is None
+    def test_enabled_false_is_rejected(self, tmp_path):
+        with pytest.raises(ValueError, match="sandbox.enabled=false is unsafe"):
+            resolve_manager(tmp_path, {"sandbox": {"enabled": False}})
 
     def test_enabled_true_returns_manager(self, tmp_path):
         mgr = resolve_manager(tmp_path, {"sandbox": {"enabled": True}})
@@ -318,6 +321,134 @@ class TestWorkspace:
 
 
 class TestLifecycle:
+    def test_concurrent_cold_start_creates_one_worker_and_network(self, tmp_path, fake_backend):
+        class SlowCountingBackend(FakeBackend):
+            def __init__(self):
+                super().__init__()
+                self.created_networks: list[str] = []
+                self.created_workers: list[str] = []
+                self.calls_lock = threading.Lock()
+
+            def create_network(self, name: str) -> str:
+                with self.calls_lock:
+                    self.created_networks.append(name)
+                # Leave a window for all barrier-released callers to contend
+                # for cold-start ownership.
+                threading.Event().wait(0.05)
+                return name
+
+            def create_worker(self, spec: Any, *, read_only_rootfs: bool) -> str:
+                with self.calls_lock:
+                    self.created_workers.append(spec.sandbox_id)
+                return super().create_worker(spec, read_only_rootfs=read_only_rootfs)
+
+        backend = SlowCountingBackend()
+        mgr = _manager(tmp_path, backend)
+        caller_count = 8
+        ready = threading.Barrier(caller_count + 1)
+
+        def ensure_after_barrier() -> str:
+            ready.wait(timeout=3)
+            return mgr.ensure_sandbox()
+
+        with ThreadPoolExecutor(max_workers=caller_count) as executor:
+            callers = [executor.submit(ensure_after_barrier) for _ in range(caller_count)]
+            ready.wait(timeout=3)
+            worker_ids = [caller.result(timeout=5) for caller in callers]
+
+        assert len(backend.created_networks) == 1
+        assert len(backend.created_workers) == 1
+        assert set(worker_ids) == {backend.created_workers[0]}
+        mgr.destroy()
+
+    def test_destroy_waits_for_cold_start_and_prevents_resurrection(self, tmp_path, fake_backend):
+        class BlockingBackend(FakeBackend):
+            def __init__(self):
+                super().__init__()
+                self.network_started = threading.Event()
+                self.release_network = threading.Event()
+                self.created_workers: list[str] = []
+
+            def create_network(self, name: str) -> str:
+                self.network_started.set()
+                if not self.release_network.wait(timeout=3):
+                    raise TimeoutError("test did not release network creation")
+                return name
+
+            def create_worker(self, spec: Any, *, read_only_rootfs: bool) -> str:
+                self.created_workers.append(spec.sandbox_id)
+                return super().create_worker(spec, read_only_rootfs=read_only_rootfs)
+
+        backend = BlockingBackend()
+        mgr = _manager(tmp_path, backend)
+        destroy_started = threading.Event()
+
+        def destroy_after_starting() -> dict[str, bool]:
+            destroy_started.set()
+            return mgr.destroy()
+
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            startup = executor.submit(mgr.ensure_sandbox)
+            assert backend.network_started.wait(timeout=3)
+            teardown = executor.submit(destroy_after_starting)
+            assert destroy_started.wait(timeout=3)
+            # Allow teardown to contend while the backend is blocked in the
+            # middle of startup. It must wait until startup has committed.
+            threading.Event().wait(0.05)
+            backend.release_network.set()
+            worker_id = startup.result(timeout=5)
+            teardown.result(timeout=5)
+
+        assert backend.created_workers == [worker_id]
+        assert mgr.container_id == ""
+        assert mgr.network_name == ""
+        with pytest.raises(SandboxUnavailableError, match="destroyed"):
+            mgr.ensure_sandbox()
+
+    def test_destroy_persists_complete_network_drop_measurement(self, tmp_path, fake_backend, monkeypatch):
+        from tools.sandbox.telemetry import read_network_scope_measurement
+
+        mgr = _manager(tmp_path, fake_backend)
+        assert mgr.ensure_sandbox()
+        path = tmp_path / "network-scope.json"
+        mgr.network_telemetry_path = path
+        ruleset_template = """*filter
+:OUTPUT ACCEPT [0:0]
+:NAI-OUTPUT - [0:0]
+:NAI-DROP - [0:0]
+[0:0] -A OUTPUT -j NAI-OUTPUT
+[0:0] -A NAI-OUTPUT -j NAI-DROP
+[{packets}:100] -A NAI-DROP -j DROP
+COMMIT
+"""
+        monkeypatch.setattr("tools.sandbox.manager._db.start_netns_counter_keeper", lambda *_: "keeper123")
+        monkeypatch.setattr("tools.sandbox.manager._db.docker_inspect_state", lambda *_: "exited")
+        monkeypatch.setattr(
+            "tools.sandbox.manager._db.read_netns_counter_keeper",
+            lambda _cid, binary: (0, ruleset_template.format(packets=2 if binary == "iptables-save" else 3), ""),
+        )
+        monkeypatch.setattr("tools.sandbox.manager._db.stop_netns_counter_keeper", lambda *_: True)
+
+        mgr.destroy()
+
+        assert read_network_scope_measurement(path) == 5
+
+    def test_overlapping_execution_keeps_network_measurement_unknown(self, tmp_path, fake_backend, monkeypatch):
+        from tools.sandbox.telemetry import read_network_scope_measurement
+
+        mgr = _manager(tmp_path, fake_backend)
+        assert mgr.ensure_sandbox()
+        path = tmp_path / "network-scope.json"
+        mgr.network_telemetry_path = path
+        mgr._active_execs = 1
+        monkeypatch.setattr("tools.sandbox.manager._db.start_netns_counter_keeper", lambda *_: "keeper123")
+        monkeypatch.setattr("tools.sandbox.manager._db.docker_inspect_state", lambda *_: "exited")
+        monkeypatch.setattr("tools.sandbox.manager._db.stop_netns_counter_keeper", lambda *_: True)
+
+        mgr.destroy()
+
+        assert read_network_scope_measurement(path) is None
+
     def test_destroy_idempotent_and_audited(self, tmp_path, fake_backend):
         mgr = _manager(tmp_path, fake_backend)
         mgr.execute("id", target_ip="192.0.2.5")
@@ -369,6 +500,29 @@ class TestAuditTrail:
         assert row["sandbox"]["env_keys"] == sorted(row["sandbox"]["env_keys"])
         mgr.destroy()
 
+    def test_audit_path_can_be_kept_outside_worker_workspace(self, tmp_path, fake_backend):
+        from tools.sandbox.models import SandboxConfig
+
+        workspace = tmp_path / "ws"
+        workspace.mkdir()
+        audit_path = tmp_path / "reports" / "exploit_audit.jsonl"
+        config = {"exploit": {"allowed_targets": ["192.0.2.5"]}, "sandbox": {"enabled": True}}
+        mgr = SandboxManager(
+            SandboxConfig.from_config(config),
+            workspace,
+            config_dict=config,
+            backend=fake_backend,
+            audit_path=audit_path,
+        )
+
+        mgr.execute("id", target_ip="192.0.2.5", tool_name="run_exploit_terminal")
+
+        assert audit_path.is_file()
+        assert not (workspace / "exploit_audit.jsonl").exists()
+        rows = [json.loads(line) for line in audit_path.read_text(encoding="utf-8").splitlines()]
+        assert any(isinstance(row.get("sandbox"), dict) for row in rows)
+        mgr.destroy()
+
 
 class TestStatusReport:
     """status_report is the WebUI/doctor surface; image_present must
@@ -396,11 +550,12 @@ class TestStatusReport:
         assert report["image_present"] is None
         assert report["docker_error"] == "no daemon"
 
-    def test_image_unknown_when_explicitly_disabled(self):
+    def test_legacy_disabled_config_reports_blocked(self):
         report = status_report({"sandbox": {"enabled": False}})
-        assert report["enabled"] is False
+        assert report["enabled"] is True
+        assert report["mode"] == "blocked"
         assert report["image_present"] is None
-        assert "note" in report
+        assert "sandbox.enabled=false is unsafe" in report["fallback_reason"]
 
     def test_absent_section_never_reports_disabled(self, tmp_path, monkeypatch):
         # BP-02: absent section => contained defaults; without Docker info

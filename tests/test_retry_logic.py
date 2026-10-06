@@ -966,6 +966,32 @@ class TestToolFallbackDeadlineAndProcessGroup:
             kill_spy.assert_awaited()
 
     @pytest.mark.asyncio
+    async def test_execute_async_kills_process_group_on_cancellation(self) -> None:
+        """Caller cancellation must not leave an already-started child running."""
+        communicate_started = asyncio.Event()
+        never_complete = asyncio.Event()
+        mock_proc = AsyncMock()
+        mock_proc.returncode = None
+
+        async def blocked_communicate():
+            communicate_started.set()
+            await never_complete.wait()
+            return b"", b""
+
+        mock_proc.communicate = blocked_communicate
+        with patch("shutil.which", side_effect=["/usr/bin/nmap"]):
+            with patch("asyncio.create_subprocess_exec", return_value=mock_proc):
+                with patch.object(ToolFallback, "_kill_process", new=AsyncMock()) as kill_spy:
+                    fallback = ToolFallback(["nmap"], timeout=5.0)
+                    task = asyncio.create_task(fallback.execute_async(["-p-", "target"]))
+                    await communicate_started.wait()
+                    task.cancel()
+                    with pytest.raises(asyncio.CancelledError):
+                        await task
+
+        kill_spy.assert_awaited_once_with(mock_proc)
+
+    @pytest.mark.asyncio
     async def test_kill_process_falls_back_to_proc_kill_when_killpg_unavailable(self) -> None:
         """If os.killpg raises (e.g. group already gone / not supported),
         _kill_process must fall back to proc.kill() and still await

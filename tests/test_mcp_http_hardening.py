@@ -20,11 +20,13 @@ uvicorn bind), which is all that is needed on a box without the deps.
 from __future__ import annotations
 
 import asyncio
+import sys
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
 
-from tools.mcp_shared import _wrap_http_auth, assert_loopback_bind
+from tools.mcp_shared import _wrap_http_auth, assert_loopback_bind, run_mcp_http_server
 
 # ── assert_loopback_bind ───────────────────────────────────────────────────────
 
@@ -66,6 +68,33 @@ def test_public_bind_refused_when_env_falsy(monkeypatch):
     monkeypatch.setenv("MCP_ALLOW_PUBLIC_BIND", "0")
     with pytest.raises(ValueError, match="non-loopback"):
         assert_loopback_bind("0.0.0.0", allow_public_bind=True)
+
+
+def test_public_http_server_requires_bearer_token(monkeypatch):
+    monkeypatch.setenv("MCP_ALLOW_PUBLIC_BIND", "1")
+    monkeypatch.delenv("MCP_HTTP_TOKEN", raising=False)
+
+    with pytest.raises(ValueError, match="MCP_HTTP_TOKEN is required"):
+        run_mcp_http_server(SimpleNamespace(), "0.0.0.0", 8001, allow_public_bind=True)
+
+
+def test_public_http_server_wraps_app_with_configured_auth(monkeypatch):
+    monkeypatch.setenv("MCP_ALLOW_PUBLIC_BIND", "1")
+    monkeypatch.setenv("MCP_HTTP_TOKEN", "test-token")
+    original_app = _dummy_app()
+    seen: dict[str, Any] = {}
+    monkeypatch.setitem(
+        sys.modules, "uvicorn", SimpleNamespace(run=lambda app, **kwargs: seen.update(app=app, **kwargs))
+    )
+    mcp = SimpleNamespace(streamable_http_app=lambda: original_app)
+
+    run_mcp_http_server(mcp, "0.0.0.0", 8001, allow_public_bind=True)
+
+    assert seen["app"] is not original_app
+    assert (seen["host"], seen["port"]) == ("0.0.0.0", 8001)
+    status, body = _run_asgi(seen["app"], [])
+    assert status == 401
+    assert b"MCP_HTTP_TOKEN" in body
 
 
 # ── _wrap_http_auth (ASGI middleware) ──────────────────────────────────────────

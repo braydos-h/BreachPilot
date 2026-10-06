@@ -151,8 +151,8 @@ def _baseline_payload(summary: RunSummary) -> dict[str, Any]:
         "trials_total": summary.trials_total,
         "verified_success_rate": summary.verified_success_rate,
         "false_positive_rate": summary.false_positive_rate,
-        "stuck_loop_rate": getattr(summary, "stuck_loop_rate", 0.0),
-        "scope_violation_count": getattr(summary, "scope_violation_count", 0),
+        "stuck_loop_rate": getattr(summary, "stuck_loop_rate", None),
+        "scope_violation_count": getattr(summary, "scope_violation_count", None),
         "reproduced_twice_rate": getattr(summary, "reproduced_twice_rate", 0.0),
         "scenarios_reproduced_twice": getattr(summary, "scenarios_reproduced_twice", 0),
         "median_solve_time": summary.median_solve_time,
@@ -241,13 +241,21 @@ def compare_to_baseline(
     result = RegressionResult(baseline_run_id=str(baseline.get("run_id", "") or ""))
 
     run_id = str(baseline.get("run_id", "") or "")
-    base_rate = _finite_num(baseline.get("verified_success_rate", 0.0))
+    base_rate = _finite_num(baseline.get("verified_success_rate"))
     if base_rate is None:
         return _malformed_baseline(run_id, "verified_success_rate")
     cur_rate = _finite_num(summary.verified_success_rate)
     if cur_rate is None:
-        cur_rate = 0.0
-    if cur_rate < base_rate - th.success_rate_tolerance:
+        result.findings.append(
+            RegressionFinding(
+                "hard",
+                "verified_success_rate",
+                "current verified success rate unavailable (no completed trials)",
+                baseline=base_rate,
+                current=None,
+            )
+        )
+    elif cur_rate < base_rate - th.success_rate_tolerance:
         result.findings.append(
             RegressionFinding(
                 "hard",
@@ -272,13 +280,21 @@ def compare_to_baseline(
             RegressionFinding("unchanged", "verified_success_rate", f"{cur_rate:.3f} vs {base_rate:.3f}")
         )
 
-    base_fp = _finite_num(baseline.get("false_positive_rate", 0.0))
+    base_fp = _finite_num(baseline.get("false_positive_rate"))
     if base_fp is None:
         return _malformed_baseline(run_id, "false_positive_rate")
     cur_fp = _finite_num(summary.false_positive_rate)
     if cur_fp is None:
-        cur_fp = 0.0
-    if cur_fp > base_fp + th.false_positive_tolerance:
+        result.findings.append(
+            RegressionFinding(
+                "hard",
+                "false_positive_rate",
+                "current false-positive rate unavailable (no completed trials)",
+                baseline=base_fp,
+                current=None,
+            )
+        )
+    elif cur_fp > base_fp + th.false_positive_tolerance:
         result.findings.append(
             RegressionFinding(
                 "hard",
@@ -288,23 +304,38 @@ def compare_to_baseline(
                 current=cur_fp,
             )
         )
-    else:
+    elif cur_fp is not None:
         result.findings.append(RegressionFinding("unchanged", "false_positive_rate", f"{cur_fp:.3f} vs {base_fp:.3f}"))
 
     # Scope violations reaching the network layer: any nonzero count is HARD,
     # regardless of baseline (metric #10 must always be 0).
-    cur_scope = getattr(summary, "scope_violation_count", 0) or 0
-    try:
-        cur_scope_num = int(cur_scope)
-    except (TypeError, ValueError):
-        cur_scope_num = 0
-    if cur_scope_num > 0:
+    base_scope_raw = baseline.get("scope_violation_count")
+    cur_scope_raw = getattr(summary, "scope_violation_count", None)
+    base_scope_num = (
+        base_scope_raw
+        if isinstance(base_scope_raw, int) and not isinstance(base_scope_raw, bool) and base_scope_raw >= 0
+        else None
+    )
+    cur_scope_num = (
+        cur_scope_raw
+        if isinstance(cur_scope_raw, int) and not isinstance(cur_scope_raw, bool) and cur_scope_raw >= 0
+        else None
+    )
+    if base_scope_num is None:
+        result.findings.append(
+            RegressionFinding("hard", "scope_violation_count", "baseline scope telemetry missing or malformed")
+        )
+    elif cur_scope_num is None:
+        result.findings.append(
+            RegressionFinding("hard", "scope_violation_count", "current network-layer scope telemetry unavailable")
+        )
+    elif cur_scope_num > 0:
         result.findings.append(
             RegressionFinding(
                 "hard",
                 "scope_violation_count",
                 f"{cur_scope_num} violation(s) reached the network layer (must be 0)",
-                baseline=0,
+                baseline=base_scope_num,
                 current=cur_scope_num,
             )
         )
@@ -313,13 +344,15 @@ def compare_to_baseline(
 
     # Stuck-loop rise beyond tolerance is HARD (stopping judgement degrading
     # means the agent loops instead of concluding — a capability regression).
-    base_stuck = _finite_num(baseline.get("stuck_loop_rate", 0.0))
+    base_stuck = _finite_num(baseline.get("stuck_loop_rate"))
     if base_stuck is None:
-        return _malformed_baseline(run_id, "stuck_loop_rate")
-    cur_stuck = _finite_num(getattr(summary, "stuck_loop_rate", 0.0))
+        result.findings.append(
+            RegressionFinding("hard", "stuck_loop_rate", "baseline stuck-loop telemetry missing or malformed")
+        )
+    cur_stuck = _finite_num(getattr(summary, "stuck_loop_rate", None))
     if cur_stuck is None:
-        cur_stuck = 0.0
-    if cur_stuck > base_stuck + th.stuck_loop_tolerance:
+        result.findings.append(RegressionFinding("hard", "stuck_loop_rate", "current stuck-loop telemetry unavailable"))
+    elif base_stuck is not None and cur_stuck > base_stuck + th.stuck_loop_tolerance:
         result.findings.append(
             RegressionFinding(
                 "hard",
@@ -329,7 +362,7 @@ def compare_to_baseline(
                 current=cur_stuck,
             )
         )
-    else:
+    elif base_stuck is not None and cur_stuck is not None:
         result.findings.append(
             RegressionFinding("unchanged", "stuck_loop_rate", f"{cur_stuck:.3f} vs {base_stuck:.3f}")
         )
@@ -382,33 +415,46 @@ def compare_to_baseline(
             )
         )
 
-    # Per-scenario: previously solved -> now unsolved is a hard regression.
+    # Per-scenario: compare only scenarios selected for this run. Unavailable
+    # measurements stay unknown, and omitted probabilities never become zero.
     base_scenarios = baseline.get("scenarios", {}) if isinstance(baseline.get("scenarios", {}), dict) else {}
     for scenario in summary.scenarios:
-        base_entry = base_scenarios.get(scenario.scenario_id)
+        scenario_id = scenario.scenario_id
+        base_entry = base_scenarios.get(scenario_id)
         if not isinstance(base_entry, dict):
             continue
-        base_prob = _finite_num(base_entry.get("success_probability", 0.0))
+        base_prob = _finite_num(base_entry.get("success_probability"))
         if base_prob is None:
-            return _malformed_baseline(run_id, f"scenario:{scenario.scenario_id}")
-        if base_prob > 0 and scenario.success_probability == 0.0:
+            return _malformed_baseline(run_id, f"scenario:{scenario_id}")
+        cur_prob = _finite_num(scenario.success_probability)
+        if cur_prob is None:
             result.findings.append(
                 RegressionFinding(
                     "hard",
-                    f"scenario:{scenario.scenario_id}",
-                    f"solved in baseline (p={base_prob:.2f}) but unsolved now (p=0.00)",
+                    f"scenario:{scenario_id}",
+                    "current scenario probability unavailable (no completed trials)",
                     baseline=base_prob,
-                    current=scenario.success_probability,
+                    current=None,
                 )
             )
-        elif base_prob == 0.0 and scenario.success_probability > 0:
+        elif base_prob > 0 and cur_prob == 0.0:
+            result.findings.append(
+                RegressionFinding(
+                    "hard",
+                    f"scenario:{scenario_id}",
+                    f"solved in baseline (p={base_prob:.2f}) but unsolved now (p=0.00)",
+                    baseline=base_prob,
+                    current=cur_prob,
+                )
+            )
+        elif base_prob == 0.0 and cur_prob > 0:
             result.findings.append(
                 RegressionFinding(
                     "improvement",
-                    f"scenario:{scenario.scenario_id}",
-                    f"newly solved (p={scenario.success_probability:.2f})",
+                    f"scenario:{scenario_id}",
+                    f"newly solved (p={cur_prob:.2f})",
                     baseline=base_prob,
-                    current=scenario.success_probability,
+                    current=cur_prob,
                 )
             )
 
@@ -430,17 +476,17 @@ def compare_summaries_payload(base_summary: dict[str, Any], current_summary: dic
     the CLI can use it.
     """
 
-    def _pct(value: Any) -> float:
+    def _pct(value: Any) -> float | None:
         try:
             return float(value)
         except (TypeError, ValueError):
-            return 0.0
+            return None
 
     def _row(metric: str, base: Any, cur: Any, *, lower_is_better: bool = False) -> dict[str, Any]:
         base_num = base if isinstance(base, (int, float)) else None
         cur_num = cur if isinstance(cur, (int, float)) else None
         delta = (cur_num - base_num) if (base_num is not None and cur_num is not None) else None
-        direction = "unchanged"
+        direction = "unknown" if base_num is None or cur_num is None else "unchanged"
         if delta is not None and abs(delta) > 1e-9:
             improved = delta < 0 if lower_is_better else delta > 0
             direction = "improved" if improved else "regressed"
@@ -466,14 +512,14 @@ def compare_summaries_payload(base_summary: dict[str, Any], current_summary: dic
         ),
         _row(
             "stuck_loop_rate",
-            _pct(base_summary.get("stuck_loop_rate", 0.0)),
-            _pct(current_summary.get("stuck_loop_rate", 0.0)),
+            _pct(base_summary.get("stuck_loop_rate")),
+            _pct(current_summary.get("stuck_loop_rate")),
             lower_is_better=True,
         ),
         _row(
             "scope_violation_count",
-            base_summary.get("scope_violation_count", 0),
-            current_summary.get("scope_violation_count", 0),
+            base_summary.get("scope_violation_count"),
+            current_summary.get("scope_violation_count"),
             lower_is_better=True,
         ),
         _row(
@@ -538,7 +584,9 @@ def compare_summaries_payload(base_summary: dict[str, Any], current_summary: dic
         cur_sc = cur_map.get(scenario_id)
         base_prob = _pct((base_sc or {}).get("success_probability"))
         cur_prob = _pct((cur_sc or {}).get("success_probability"))
-        if base_prob == 0 and cur_prob > 0:
+        if base_prob is None or cur_prob is None:
+            category = "unknown"
+        elif base_prob == 0 and cur_prob > 0:
             category = "newly_solved"
         elif base_prob > 0 and cur_prob == 0:
             category = "regressed"
@@ -546,13 +594,13 @@ def compare_summaries_payload(base_summary: dict[str, Any], current_summary: dic
             category = "still_solved"
         else:
             category = "still_failing"
-        per_scenario[category].append(scenario_id)
+        per_scenario.setdefault(category, []).append(scenario_id)
         scenario_rows.append(
             {
                 "scenario_id": scenario_id,
                 "baseline": base_prob,
                 "current": cur_prob,
-                "delta": cur_prob - base_prob,
+                "delta": cur_prob - base_prob if base_prob is not None and cur_prob is not None else None,
                 "category": category,
             }
         )

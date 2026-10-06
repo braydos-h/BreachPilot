@@ -1,59 +1,32 @@
-# Branch protection — `main` ruleset (#41)
+# Branch protection — `main`
 
-Status: in-repo contract defined here; **application requires a repo admin**
-and is tracked as EXTERNAL in `scripts/release_gate.py` until applied.
+The canonical ruleset is [`docs/governance/ruleset-main.json`](governance/ruleset-main.json).
+Its application is external and requires repository-admin access; until the
+GitHub API reports the full active ruleset, `scripts/release_gate.py` keeps
+`branch-rules-applied` as `EXTERNAL` or fails on an insufficient ruleset.
 
-## Required ruleset for `main`
+The release gate checks the actual ruleset against that contract: exact
+`refs/heads/main` scope, active enforcement, no bypass actors, deletion and
+force-push protection, the required pull-request review rules, strict required
+status checks, and the four documented GitHub Actions contexts. The spec is
+the source of truth for the required review and check values.
 
-- No force pushes; no deletion.
-- PR required before merging (required human approvals: 0 is acceptable solo —
-  the rule that matters is *code doesn't land without automated verification*).
-- Required status checks (must all be green):
-  - `CI success` (the `ci` aggregator: tests, sandbox, browser, coverage,
-    lint, types, package, webui, audit)
-  - `Eval unit tests` (`eval-unit`)
-  - CodeQL (`codeql`)
-  - Dependency review (`dependency-review`)
-- Dismiss stale approvals on new pushes (when approvals are required).
+## Apply and verify
 
-## Apply (maintainer, one time)
+From the repository root, a maintainer with admin access can apply the spec:
 
 ```bash
-# Replace OWNER/REPO. Requires admin.
-gh api repos/OWNER/REPO/rulesets -X POST -f - <<'JSON'
-{
-  "name": "main-protected",
-  "enforcement": "active",
-  "target": "branch",
-  "conditions": {"ref_name": {"include": ["refs/heads/main"], "exclude": []}},
-  "rules": [
-    {"type": "deletion"},
-    {"type": "non_fast_forward"},
-    {"type": "required_status_checks",
-     "parameters": {"required_status_checks": [
-       {"context": "CI success"},
-       {"context": "Eval unit tests (mocked, no API key)"}
-     ], "strict": true}},
-    {"type": "pull_request", "parameters": {"required_approving_review_count": 0,
-      "dismiss_stale_reviews_on_push": true, "require_code_owner_review": false}}
-  ]
-}
-JSON
+./scripts/apply-ruleset-main.sh
 ```
 
-Verify: `gh api repos/OWNER/REPO/rulesets --jq '.[].name'`, then confirm the
-release gate box `branch-rules-applied` flips from EXTERNAL to satisfied and
-record the ruleset ID + date in `todo/04-runtime-governance-and-ci/41-*.md`.
-
-## Satisfying the release gate (admin)
+Then verify the API response and feed it to the release gate:
 
 ```bash
-gh api repos/OWNER/REPO/rulesets > branch-rules.json
+gh api repos/braydos-h/BreachPilot/rulesets > branch-rules.json
 python scripts/release_gate.py --branch-rules-file branch-rules.json
 ```
 
-The gate passes `branch-rules-applied` when the JSON names `main`, shows
-active enforcement, and requires CI checks. Commit the file as a release
-artifact (or pass it between `release.yml` jobs); missing file stays
-EXTERNAL, malformed file FAILs. See `docs/release.md` for the full
-artifact table.
+The gate accepts only a ruleset satisfying the full checked-in contract. A
+ruleset requiring `CI success` alone is insufficient. See
+[`docs/governance/branch-protection.md`](governance/branch-protection.md) for
+the required contexts and merge policy.

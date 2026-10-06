@@ -2955,6 +2955,7 @@ export const SETTING_META: Record<string, SettingMeta> = {
     order: 7,
     dependsOn: "sandbox.enabled",
     advanced: true,
+    hide: true,
   },
   "sandbox.network.allow_dns": {
     label: "Network.allow DNS",
@@ -2987,6 +2988,7 @@ export const SETTING_META: Record<string, SettingMeta> = {
     order: 11,
     dependsOn: "sandbox.enabled",
     advanced: true,
+    hide: true,
   },
   "sandbox.network.extra_allow_cidrs": {
     label: "Network.extra Allow CIDRs",
@@ -3003,6 +3005,7 @@ export const SETTING_META: Record<string, SettingMeta> = {
     order: 13,
     dependsOn: "sandbox.enabled",
     advanced: true,
+    hide: true,
   },
   "sandbox.network.map_host_loopback": {
     label: "Network.map Host Loopback",

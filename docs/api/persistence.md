@@ -137,7 +137,7 @@ Events are **not** rows — `RunEventBroker` writes `reports/<run_id>/events.jso
 
 ## Reset Semantics
 
-`POST /api/v1/system/reset` (`tools/api/routes/system.py:526`) refuses when `run_manager.has_active`, else `reset_all()` (rows) + `shutil.rmtree(reports_dir)` etc., then `mkdir` + `_init_db()` so the live `ApiPersistence` keeps working. `research_workspace/research.db` tables are wiped in-place (file held open).
+`POST /api/v1/system/reset` (`tools/api/routes/system/core.py`) refuses when `run_manager.has_active`, else `reset_all()` (rows) + `shutil.rmtree(reports_dir)` etc., then recreates the reports directory so the live `ApiPersistence` keeps working. Research workspace tables are cleared in place.
 
 ## Tests
 

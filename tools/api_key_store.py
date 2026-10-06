@@ -83,9 +83,10 @@ def research_api_key_env_names(config: dict[str, Any]) -> list[str]:
         str(research.get("fallback_provider", "serpapi") or "").lower(),
     }
 
-    if "ollama" in provider_names and (
-        bool(ollama.get("use_web_search", True)) or bool(ollama.get("use_web_fetch", True))
-    ):
+    # Ollama is used for search only. URL fetches always use the local
+    # destination-validated stdlib transport, so that capability does not
+    # require a provider credential.
+    if "ollama" in provider_names and bool(ollama.get("use_web_search", True)):
         names.append(str(ollama.get("api_key_env", "OLLAMA_API_KEY") or "OLLAMA_API_KEY"))
     if "serpapi" in provider_names:
         names.append(str(serpapi.get("api_key_env", "SERPAPI_API_KEY") or "SERPAPI_API_KEY"))
@@ -120,12 +121,17 @@ def load_api_keys_into_env(
     *,
     allowed_names: Iterable[str] | None = None,
 ) -> list[str]:
-    """Load saved keys into ``os.environ`` when not already set."""
+    """Load explicitly allowed saved keys into ``os.environ`` when unset.
 
-    allowed = set(allowed_names or [])
+    An omitted or empty allowlist loads nothing. Callers must derive the
+    permitted environment names from the active configuration rather than
+    trusting arbitrary names present in the local store.
+    """
+
+    allowed = set(allowed_names or ())
     loaded: list[str] = []
     for name, value in load_api_key_file(path).items():
-        if allowed and name not in allowed:
+        if name not in allowed:
             continue
         if not os.environ.get(name):
             os.environ[name] = value

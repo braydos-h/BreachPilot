@@ -37,6 +37,7 @@ export function SkillsSettings({
     <div className="space-y-2">
       <Label className="text-sm font-semibold">Skills</Label>
       <SegmentedControl
+            label="Skills mode"
         value={skillsMode}
         onChange={(v) => setSkillsMode(v as SkillsMode)}
         options={SKILLS_OPTIONS.map((o) => ({ value: o.value, label: o.label }))}

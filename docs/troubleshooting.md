@@ -11,7 +11,7 @@ an exact fix. When in doubt, start with the diagnostics table below — the
 |---|---|---|
 | `python main.py --doctor` | Python >= 3.11, imports, nmap binary, workspace writable, config validity, Ollama reachability + model registry, MCP/WebUI port free, (Linux) root/sudo + Kali tooling | 0 = all pass, 1 = any fail (`tools/doctor.py:305`) |
 | `python main.py --self-test` | Safe localhost-only smoke test; writes `reports/self_test_<run_id>/self_test_report.{json,md}` | 0 = pass, 1 = fail (`tools/self_test.py:65`) |
-| `python -m pytest tests/ -v` | Full suite (~250 files, all mocked — no live nmap/network) | 0 = pass |
+| Targeted pytest file | Relevant regression coverage; integration and live-LLM files are opt-in | 0 = pass |
 | `ruff check .` | Lint (line-length 120, E/F/W/I, E501 ignored) | 0 = clean |
 | `python main.py --setup-api-keys` | Prompt for provider keys, save to `secr.json` (gitignored) | — |
 
@@ -93,18 +93,20 @@ an exact fix. When in doubt, start with the diagnostics table below — the
   `sudo: true` and no passwordless sudo, `sudo -n` fails fast instead of
   hanging on a password prompt (`tools/nmap_priv.py:79`).
 
-### OLLAMA_API_KEY missing → auth failure on first chat
+### OLLAMA_API_KEY missing when Ollama Cloud is selected
 
 - **Symptom:** `--doctor` reports `[FAIL] ollama_reachable` (401) against
   `https://api.ollama.com`; or the first LLM call fails with an auth error.
-- **Cause:** the default model path is Ollama Cloud; the ollama client
-  auto-attaches `Authorization: Bearer $OLLAMA_API_KEY` to every request, so
-  a missing key 401s on the first chat (`tools/model_router.py:287`,
-  `tools/doctor.py:145`). Keys are read from **process environment variables
-  or `secr.json`** — there is no `.env` auto-load.
-- **Check:** `echo $env:OLLAMA_API_KEY` (PowerShell) /
-  `echo $OLLAMA_API_KEY` (bash); or `python main.py --doctor` and read the
-  `ollama_reachable` line.
+- **Cause:** this occurs when `models.provider: ollama` is active and
+  `ollama.host` points to `https://api.ollama.com`. The checked-in config uses
+  OpenCode Go for chat. For Ollama, the client auto-attaches
+  `Authorization: Bearer $OLLAMA_API_KEY`, so a missing key causes the cloud
+  request to fail (`tools/model_router.py:287`, `tools/doctor.py:145`). Keys
+  are read from **process environment variables or `secr.json`** — there is
+  no `.env` auto-load.
+- **Check:** confirm `models.provider: ollama`, then check
+  `echo $env:OLLAMA_API_KEY` (PowerShell) / `echo $OLLAMA_API_KEY` (bash),
+  or run `python main.py --doctor` and inspect the active-provider checks.
 - **Fix:**
   ```bash
   python main.py --setup-api-keys      # prompts + writes secr.json (gitignored)
@@ -127,9 +129,12 @@ an exact fix. When in doubt, start with the diagnostics table below — the
   ollama:
     host: http://localhost:11434
   ```
-  Embeddings stay local by default via `ollama.embed_host` (falls back to
-  `ollama.host` when absent). Local daemons ignore the Authorization header,
-  so sending it unconditionally is safe (`tools/doctor.py:148`).
+  When `embeddings.provider: ollama` is selected, the Ollama embedding provider
+  uses `ollama.embed_host` (falls back to `ollama.host` when absent). The
+  checked-in `embeddings.provider: none` disables requests in provider-aware
+  Flow A memory and skill consumers. Frozen Flow B's legacy agent loop still
+  uses direct Ollama semantic memory when enabled. Local daemons ignore the
+  Authorization header, so sending it is safe (`tools/doctor.py:148`).
 
 ### Missing local model
 
@@ -306,15 +311,16 @@ an exact fix. When in doubt, start with the diagnostics table below — the
 
 - **Symptom:** a test fails with `nmap not found` or tries to reach the
   network.
-- **Cause:** you ran a test that isn't mocked — but the whole suite is
-  designed to be offline. All ~250 tests mock subprocess/network; no live
-  Nmap, no live network (README §Testing).
-- **Check:** `python -m pytest tests/ -v`
+- **Cause:** the selected test performs integration or live-LLM work. The
+  default marker selection excludes those tests, but the repository has both
+  mocked tests and opt-in integration/live tests.
+- **Check:** inspect the marker and fixtures in the specific test file. Run one
+  focused file using the command in `docs/testing-guide.md`; full-suite runs
+  belong to CI.
 - **Fix:** nothing to install. If a specific test still hits the network,
   it's a bug — report it. Run a single file:
   ```bash
-  python -m pytest tests/test_doctor.py -v
-  python -m pytest tests/ -v -k "scope"
+  python -m pytest tests/test_doctor.py -q -p no:cacheprovider -n 0
   ```
 
 ### Async tests fail with "no running event loop" / coroutine warnings
@@ -397,23 +403,20 @@ an exact fix. When in doubt, start with the diagnostics table below — the
   or delete `.webui_secret_key` to regenerate. The token is never logged or
   returned through the API.
 
-### Sandbox / execution failures (`SANDBOX_*`, fallback banner)
+### Sandbox / execution failures (`SANDBOX_*`, blocked banner)
 
-- **Symptom:** tool results contain `SANDBOX_*` errors; WebUI home shows amber
-  "Sandbox unavailable"; results contain a `SANDBOX_FALLBACK:` line.
-- **Cause:** sandbox is default-on (`sandbox.enabled: true`). Mid-session
-  sandbox failures fail closed (offensive execution blocked, no host
-  fallback). At boot, an unusable Docker stack (CLI missing, daemon down,
-  image not built) degrades the whole session to legacy native mode only when
-  `sandbox.fallback_native: true` (explicit opt-in, default `false`) — warning + banner + per-result
-  `SANDBOX_FALLBACK:` line. See `docs/sandbox.md`, README §Safety model.
+- **Symptom:** tool results contain `SANDBOX_*` errors; WebUI home reports
+  that execution is blocked because Docker or the worker image is unavailable.
+- **Cause:** sandbox execution is mandatory. Missing Docker, a missing image,
+  or a mid-session sandbox failure blocks attack execution. Both
+  `sandbox.enabled: false` and `sandbox.fallback_native: true` are rejected;
+  no host-execution fallback exists. See `docs/sandbox.md`, README §Safety model.
 - **Check:** `docker info`, `docker images | findstr breachpilot-sandbox`
   (Windows) / `docker images | grep breachpilot-sandbox` (Linux);
-  `python main.py --doctor` verifies Docker + worker image when enabled.
-- **Fix:** `docker build -t breachpilot-sandbox:latest docker/sandbox` and
-  start the Docker daemon/Desktop. For strict fail-closed posture set
-  `sandbox.fallback_native: false` (executions denied until Docker works);
-  `sandbox.enabled: false` is the explicit uncontained opt-out.
+  `python main.py --doctor` verifies Docker and the worker image.
+- **Fix:** start Docker and build the worker image with
+  `docker build -t breachpilot-sandbox:latest docker/sandbox`, then restart
+  the assessment.
 
 ### Single-run conflict (409) / audit tamper warning / MCP boot timeout
 
@@ -424,8 +427,8 @@ an exact fix. When in doubt, start with the diagnostics table below — the
   (`api.max_concurrent_runs: 3`, legacy single-run = 409 in
   `tools/api/run_manager.py`); tamper-evident audit chain detects edits;
   MCP boot budget is 30s (`MCP_BOOT_TIMEOUT_SECONDS`, `tools/mcp_session.py`).
-- **Check:** WebUI runs page / `reports/<run_id>/activity.jsonl`;
-  `exploit_workspace/<target>/<attempt>/exploit_audit.jsonl`.
+- **Check:** WebUI runs page / `reports/<run_id>/activity.jsonl` and the
+  host-owned `reports/<run_id>/exploit_audit.jsonl`.
 - **Fix:** wait/cancel the active run or raise `api.max_concurrent_runs`;
   never hand-edit audit JSONL; re-run `--doctor` for MCP boot causes.
 
@@ -469,8 +472,8 @@ an exact fix. When in doubt, start with the diagnostics table below — the
 | `--api-host must be loopback`, exit 2 | [Non-loopback bind refusal](#non-loopback-bind-refusal) |
 | `Unauthorized: MCP_HTTP_TOKEN required` on HTTP MCP | [MCP_HTTP_TOKEN mismatch](#mcp_http_token-mismatch) |
 | Skill hints rebuild every few actions (prompt churn) | [Skill reselect storms](#skill-reselect-storms) |
-| `Docker sandbox unavailable ... falling back to NATIVE` | [Sandbox Docker unavailable](#sandbox-docker-unavailable-fallback_native) |
-| Benchmark trials `INFRASTRUCTURE_ERROR (SANDBOX_FAILED)` | [Benchmark sandbox_required refusal](#benchmark-sandbox_required-refusal) |
+| `SANDBOX_UNAVAILABLE` / attack execution blocked | [Sandbox Docker unavailable](#sandbox-docker-unavailable) |
+| Benchmark trials `INFRASTRUCTURE_ERROR (SANDBOX_FAILED)` | [Benchmark sandbox availability failure](#benchmark-sandbox-availability-failure) |
 | Credential store plaintext WARNING on startup | [.vault_key plaintext fallback](#vault_key-plaintext-fallback-warning) |
 | WebUI event stream reconnects after ~90s silence | [SSE 90s watchdog](#sse-90s-watchdog-reconnects) |
 
@@ -552,52 +555,36 @@ an exact fix. When in doubt, start with the diagnostics table below — the
   Set `reselect_mid_run: false` if recon output keeps tripping rebuilds with
   no benefit.
 
-### Sandbox Docker unavailable (`fallback_native`)
+### Sandbox Docker unavailable
 
-- **Symptoms:** boot log says
-  `Docker sandbox unavailable (<reason>) -- falling back to NATIVE
-  (uncontained) legacy host execution for this session` and tool results carry
-  `SANDBOX_FALLBACK:` lines (`tools/sandbox/manager.py:108`,
-  `tools/mcp_tools/sandbox_exec.py:187`).
-- **Cause:** Docker CLI missing, daemon down, or the worker image not built,
-  with opt-in `sandbox.fallback_native: true` (default `false`) degrading the whole session to native
-  mode (decision in `tools/sandbox/__init__.py:18`; notice text in
-  `tools/sandbox/manager.py:104`).
-- **Check:**
-  ```bash
-  docker info
-  docker images | grep breachpilot-sandbox
-  ```
-- **Fix:** start the Docker daemon and build the worker image
-  (`docker build -t breachpilot-sandbox:latest docker/sandbox`), or fail
-  closed instead:
-  ```yaml
-  # config.yaml
-  sandbox:
-    enabled: true
-    fallback_native: false
-  ```
+When Docker or the worker image is unavailable, BreachPilot blocks attack
+execution and reports `SANDBOX_UNAVAILABLE`. Check the daemon and image:
 
-### Benchmark `sandbox_required` refusal
+```bash
+docker info
+docker images | grep breachpilot-sandbox
+```
 
-- **Symptoms:** every trial is marked
-  `INFRASTRUCTURE_ERROR (SANDBOX_FAILED)` with a `sandbox_unavailable` error
-  event whose detail reads
-  `sandbox_required=true but sandbox.enabled=false; ... There is no
-  host-execution fallback` (`tools/benchmark/runner.py:180`).
-- **Cause:** `sandbox_required` defaults to true on both the environment and
-  run configs (`tools/benchmark/models.py:293`, `:313`) while
-  `sandbox.enabled` is false — benchmarks refuse to run uncontained.
-- **Check:** `sandbox.enabled` in `config.yaml` versus the benchmark request's
-  `sandbox_required` (`tools/benchmark/service.py:113`).
-- **Fix:** enable the sandbox (see previous entry), or explicitly opt the
-  benchmark run out of containment:
-  ```bash
-  python main.py --benchmark xben --no-sandbox-required
-  ```
-  Implementation note: verify the exact CLI flag spelling with
-  `python main.py --help` — the config/request key is `sandbox_required`, but
-  the flag wrapper lives in `tools/benchmark_cli.py` and was not re-read here.
+Start Docker and build the image with
+`docker build -t breachpilot-sandbox:latest docker/sandbox`, then restart the
+assessment. `sandbox.enabled: false` and `sandbox.fallback_native: true` are
+rejected; no configuration enables host-execution fallback.
+
+### Benchmark sandbox availability failure
+
+- **Symptoms:** a benchmark run is rejected for invalid legacy sandbox config,
+  or trials report `SANDBOX_FAILED` because the worker cannot start or its
+  network policy cannot be installed.
+- **Cause:** benchmark missions use the same required sandbox as other agent
+  attack execution. `benchmark.sandbox_required` controls the benchmark trial
+  gate; setting it false does not disable containment or permit host execution.
+- **Check:** use `python main.py --doctor`, `docker info`, and
+  `docker images | grep breachpilot-sandbox` to verify the daemon and worker.
+- **Fix:** remove `sandbox.enabled: false` or `sandbox.fallback_native: true`
+  from configuration, then restore Docker and the worker image as described
+  in the previous entry.
+- For local loopback labs, use only the dev option
+  `sandbox.network.map_host_loopback: true`.
 
 ### `.vault_key` plaintext fallback warning
 

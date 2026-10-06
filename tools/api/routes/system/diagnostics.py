@@ -24,6 +24,19 @@ __all__ = ["register"]
 def register(router: APIRouter, ctx: SystemContext) -> None:
     """Mount the diagnostics endpoints (paths/auth unchanged)."""
 
+    def _validated_sandbox_config() -> Any:
+        from tools.api.errors import APIError
+        from tools.sandbox.models import SandboxConfig
+
+        try:
+            return SandboxConfig.from_config(ctx.config)
+        except (AttributeError, TypeError, ValueError) as exc:
+            raise APIError(
+                "invalid_sandbox_config",
+                "Sandbox configuration is invalid; containment must remain enabled.",
+                status_code=400,
+            ) from exc
+
     @router.get("/system/info")
     async def get_system_info(auth: str = Depends(ctx.require_auth)) -> dict[str, Any]:
         """Host info: hostname, OS, Python, local IPs, public IP (best-effort).
@@ -152,6 +165,7 @@ def register(router: APIRouter, ctx: SystemContext) -> None:
         """
         from tools.sandbox.remediation import build_plan
 
+        _validated_sandbox_config()
         return await asyncio.to_thread(build_plan, ctx.config)
 
     @router.post("/system/sandbox/fix")
@@ -166,17 +180,10 @@ def register(router: APIRouter, ctx: SystemContext) -> None:
         """
         from tools.api.errors import APIError
         from tools.sandbox import remediation as _rem
-        from tools.sandbox.models import SandboxConfig
         from tools.sandbox.remediation import _job_to_dict, _start_background_job, create_job
 
-        # Do not treat disabled as success – refuse to "fix" an intentional choice.
-        cfg = SandboxConfig.from_config(ctx.config)
-        if not cfg.enabled:
-            raise APIError(
-                "sandbox_disabled",
-                "Sandbox is intentionally disabled (sandbox.enabled: false). Enable it in config.yaml instead.",
-                status_code=400,
-            )
+        # Reject invalid legacy opt-outs before starting a remediation job.
+        _validated_sandbox_config()
 
         # Fail closed on concurrent running job: one fix at a time.
         with _rem._JOBS_LOCK:

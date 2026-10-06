@@ -35,6 +35,7 @@ class FailureClass(str, enum.Enum):
     SCOPE_BLOCKED = "scope_blocked"
     TRANSPORT_ERROR = "transport_error"
     SCHEMA_ERROR = "schema_error"
+    OUTCOME_UNKNOWN = "outcome_unknown"
     UNKNOWN = "unknown"
 
 
@@ -97,6 +98,10 @@ _RECOVERY: dict[FailureClass, tuple[RecoveryAction, str]] = {
         RecoveryAction.STOP,
         "Action is outside the authorized target set; never retry it against another host.",
     ),
+    FailureClass.OUTCOME_UNKNOWN: (
+        RecoveryAction.ESCALATE_OPERATOR,
+        "The action may still be running or may have completed after timeout; inspect its state before starting another attempt.",
+    ),
     FailureClass.TRANSPORT_ERROR: (
         RecoveryAction.RETRY_SAME,
         "Transient transport/model-backend error; retry with backoff. Repeated transport errors mean the backend is down -- stop.",
@@ -115,6 +120,7 @@ _RECOVERY: dict[FailureClass, tuple[RecoveryAction, str]] = {
 # Kept conservative: patterns map onto signals the codebase already emits
 # (BLOCKED:/ERROR: markers, canonical stdout markers, common tool stderr).
 _RULES: tuple[tuple[str, FailureClass], ...] = (
+    (r"outcome is unknown|execution_unknown|may still be running", FailureClass.OUTCOME_UNKNOWN),
     (
         r"not in the (explicit )?allowlist|blocked by scope|out of scope|not authorized|^blocked\b|BLOCKED:",
         FailureClass.SCOPE_BLOCKED,

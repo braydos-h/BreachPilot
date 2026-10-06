@@ -13,9 +13,12 @@ the CLI uses.
 - **Transport:** HTTP/1.1 + WebSocket; loopback-only bind (no public override in v1)
 - **Concurrency:** `api.max_concurrent_runs` (lab default **3**, legacy `1` → HTTP 409 on a second; per-run allowlist snapshot so Run A's target never leaks into Run B's allowlist — `tools/api/run_manager.py:22`, `config.yaml:399`)
 - **Persistence:** `reports/api_runtime.db` (SQLite; Flow B's `research.db` untouched)
-- **Bundled WebUI:** `python main.py --web` builds `webui/dist/` (if needed), sets
-  `api.serve_webui: true` in memory, and serves the SPA at `/` with a deep-link
-  fallback. The SPA is a Vite + React + TypeScript app under `webui/`.
+- **Bundled WebUI:** `python main.py --web` from a source checkout builds
+  `webui/dist/` if missing; release wheels install that build under the Python
+  environment's data prefix, resolved by `tools.paths.get_webui_dist_dir()`.
+  The command sets
+  `api.serve_webui: true` in memory and serves the SPA at `/` with a deep-link
+  fallback. The SPA source is a Vite + React + TypeScript app under `webui/`.
 
 > Source: `app.py` (ASGI factory), `tools/api/` (services + routes), `tools/run_service/` (transport-neutral contracts).
 
@@ -154,22 +157,18 @@ Common `APIError` codes used by the run manager:
 A run moves through these states (`tools/run_service/models.py:RunState`):
 
 ```
-draft ──POST /runs──▶ awaiting_confirmation ──answer start_confirm──▶ queued ──▶ running
-                                       │                                  │
-                                       │                                  ├─▶ awaiting_input ──answer decision──▶ running
-                                       │                                  │
-                                       └─▶ (yes=true) ──▶ queued ──────────┤
-                                                                          │
-                          cancelled ◀──cancel── running/cancelling         │
-                            │                                              │
-                            ├──▶ completed                                 │
-                            ├──▶ failed                                    │
-                            └──▶ interrupted (daemon restarted mid-run)──┘
+POST /runs ──▶ preparing ──prepared, yes=false──▶ awaiting_confirmation ──confirm──▶ queued ──▶ running
+                    ├──── prepared, yes=true ───────────────────────────────────────▶ queued
+                    └──── preparation error ──▶ failed
+running ──decision──▶ awaiting_input ──answer──▶ running
+running/cancelling ──cancel──▶ cancelled
+running ──finish/error/restart──▶ completed/failed/interrupted
 ```
 
 | State | Meaning |
 |-------|---------|
-| `draft` | Row created, not yet confirmed |
+| `draft` | Retained enum/database default; the API creates new run rows directly as `preparing` |
+| `preparing` | Run row persisted; plugins, model, target resolution, and skills prepare in the background |
 | `awaiting_confirmation` | Preview ready, waiting on `start_confirm` decision |
 | `queued` | Confirmed, waiting for execution slot |
 | `running` | Execution in progress |
@@ -180,7 +179,7 @@ draft ──POST /runs──▶ awaiting_confirmation ──answer start_confirm
 | `cancelled` | Cancelled by operator |
 | `interrupted` | Daemon restarted while run was live |
 
-On daemon startup, `persistence.recover_interrupted()` marks any run in a live state (`draft`/`awaiting_confirmation`/`running`/`awaiting_input`/`queued`/`cancelling`) as `interrupted` and expires its pending decisions.
+On daemon startup, `persistence.recover_interrupted()` marks any run in a live state (`draft`/`preparing`/`awaiting_confirmation`/`running`/`awaiting_input`/`queued`/`cancelling`) as `interrupted` and expires its pending decisions.
 
 The **concurrency** invariant is enforced by `RunManager` (`tools/api/run_manager.py:22`): when `api.max_concurrent_runs` concurrent runs are live, the next `POST /runs` returns `409 conflict`. Lab default is `3`; legacy single-run behavior is `max_concurrent_runs: 1` (then cancel the active run first). Each concurrent run carries its own allowlist snapshot.
 
@@ -218,7 +217,9 @@ A browser disconnect does **not** cancel the run — the in-memory ring buffer h
 
 ## System Routes
 
-Source: `tools/api/routes/system.py`. Prefix `/api/v1`, tag `system`.
+Source: `tools/api/routes/system/` package, composed by `system/__init__.py` from `core.py`, `config.py`, `models.py`, `diagnostics.py`, `goals.py`, and `skills.py`. Prefix `/api/v1`, tag `system`.
+The complete status, remediation, and custom-goal route inventory is in
+[System Endpoints](api/endpoints/system.md) and the [endpoint matrix](api/endpoint-matrix.md).
 
 ### `GET /health`
 
@@ -243,6 +244,7 @@ API features, supported run options, constraints, and tool groups.
 ```json
 {
   "api_version": "v1",
+  "browser": {"enabled": false, "backend": "none", "available": false, "capabilities": []},
   "features": ["runs", "decisions", "events", "websocket", "tool_gateway", "config", "secrets"],
   "constraints": {
     "max_concurrent_runs": 3,
@@ -250,8 +252,8 @@ API features, supported run options, constraints, and tool groups.
     "manual_tool_calls": true
   },
   "run_options": {
-    "modes": ["recon", "attack"],
-    "kinds": ["agent", "manual"],
+    "modes": ["recon", "attack", "fast"],
+    "kinds": ["agent"],
     "flags": ["swarm", "parallel_swarm", "critic", "reflection", "adaptive_exploits",
               "long_session", "multi_model_consult", "ultrathink", "recon_first"]
   }
@@ -342,10 +344,10 @@ Invalid → `400 invalid_secrets`.
 
 **Auth:** bearer.
 
-List configured model aliases + metadata (provider-aware). The `provider`
-field is the active chat/generate provider (`ollama` default or `chatgpt`);
-when `chatgpt`, a `chatgpt` block with `default_model` / `context_window` /
-`configured_models` is included.
+List configured model aliases and metadata. The `provider` field is the active
+chat/generate provider. `active_provider` reports its default model and
+configured model ids when that adapter is available. A legacy provider block
+is included for ChatGPT or OpenCode Go when either is active.
 
 **Response:** `200`
 ```json
@@ -354,9 +356,22 @@ when `chatgpt`, a `chatgpt` block with `default_model` / `context_window` /
   "default_alias": "glm",
   "registry": { /* models.registry from config */ },
   "info": { /* models.info from config */ },
-  "chatgpt": { "default_model": "gpt-5.2", "context_window": 128000, "configured_models": [] }
+  "active_provider": {"id": "ollama", "default_model": "glm-5.3:cloud", "configured_models": ["glm-5.3:cloud"]}
 }
 ```
+
+### `POST /models/provider`
+
+**Auth:** bearer.
+
+Set the active chat/generate provider. `provider` must be a registered provider
+id. The route also enables that provider's config block before writing the
+validated config.
+
+**Request body:** `{"provider": "opencode_go"}`
+
+**Response:** `200` — `{ "status": "ok", "provider": "opencode_go", "registered_providers": ["chatgpt", "ollama", "opencode_go"] }`.
+Unknown providers return `400 invalid_provider`.
 
 ---
 
@@ -364,23 +379,15 @@ when `chatgpt`, a `chatgpt` block with `default_model` / `context_window` /
 
 **Auth:** bearer.
 
-Probe live, reachable models. Branches on `models.provider`:
-- `ollama` — queries the Ollama daemon `/api/tags`; on failure (503) returns
-  the configured `registry` models with `source: "registry"` and an `error`.
-- `chatgpt` — **auto-starts** the local openai-oauth proxy via
-  `ChatGptProxyManager.ensure_running` (only when signed in + `auto_start`;
-  idempotent — a pre-existing proxy is reused and never stopped), then queries
-  its `/v1/models`. On failure (not signed in, proxy wouldn't start, or
-  `/v1/models` unreachable) returns a 503 with `source: "registry"` falling back
-  to `chatgpt.models` / `chatgpt.default_model` and a human `error` (e.g.
-  "Not signed in to ChatGPT — sign in via System → Models"). The WebUI model
-  picker + System → Models use this list as the available models for both
-  providers; switching provider invalidates the cache so it refetches
-  immediately.
+Probe live, reachable models through the adapter registered for the active
+`models.provider`. Discovery runs off-thread. On success the response uses the
+provider id as `source`; on discovery failure, the route returns `503` with
+provider-specific fallback models, `source: "registry"`, and an error. Adding
+a provider does not require a route branch.
 
 **Response:** `200` / `503` (fallback body still returned)
 ```json
-{ "models": ["glm-5.2:cloud"], "source": "ollama", "error": null }
+  { "models": ["glm-5.3:cloud"], "source": "ollama" }
 ```
 
 ---
@@ -422,14 +429,17 @@ model picker's refresh button triggers it for Ollama.
 
 **Auth:** bearer.
 
-Return the active provider plus ChatGPT auth/proxy status. **Never includes
-secrets** — `authenticated` is derived from the existence of
-`~/.codex/auth.json` (file existence only, never read).
+Return active provider metadata for every registered adapter, plus legacy
+ChatGPT and OpenCode Go status blocks. **Never includes secrets** — ChatGPT
+`authenticated` is derived from the existence of `~/.codex/auth.json` (file
+existence only, never read).
 
 **Response:** `200`
 ```json
 {
   "provider": "chatgpt",
+  "active": "chatgpt",
+  "providers": [{"id": "chatgpt", "provider": "chatgpt", "display_name": "ChatGPT", "capabilities": {}}],
   "chatgpt": {
     "enabled": true,
     "authenticated": true,
@@ -441,6 +451,23 @@ secrets** — `authenticated` is derived from the existence of
   }
 }
 ```
+
+### Custom goals
+
+All routes require bearer auth. `GET /goals` returns the preset `goals` and
+persisted `custom_goals` in separate arrays. Presets include a `source:"preset"`
+tag; custom entries include their id and timestamps and use
+`source:"custom"`.
+
+- `POST /goals` accepts `{name, objective}` and returns `201` with the new
+  custom goal. Invalid input returns `400`; duplicate names return `409`.
+- `PATCH /goals/{goal_id}` accepts at least one of `name` or `objective` and
+  returns the updated goal. Invalid input returns `400`, missing ids return
+  `404`, and duplicate names return `409`.
+- `DELETE /goals/{goal_id}` returns `{deleted:true, id}` or `404` when missing.
+
+See [System Endpoints](api/endpoints/system.md) for the remaining system,
+sandbox, browser, skills, and diagnostics routes.
 
 ---
 
@@ -553,7 +580,7 @@ Run the environment self-check (`tools.doctor.run_doctor`).
 
 **Response:** `200`
 ```json
-{"exit_code": 0}
+{"exit_code": 0, "output": "..."}
 ```
 
 ---
@@ -566,7 +593,7 @@ Run the safe localhost smoke test (`tools.self_test.run_self_test`).
 
 **Response:** `200`
 ```json
-{"exit_code": 0}
+{"exit_code": 0, "output": "..."}
 ```
 
 ---
@@ -765,14 +792,21 @@ Source: `tools/api/routes/runs.py`. Prefix `/api/v1`, tag `runs`.
 
 **Auth:** bearer.
 
-Create a run. Does **not** execute yet — it prepares a preview and (unless `yes=true`) creates a `start_confirm` decision the WebUI must answer before execution begins.
+Create a run. The server persists the run row and starts preparation in the
+background. The response returns while the run is `preparing`; plugin/model
+setup, target resolution, and skills preparation continue asynchronously. When
+preparation completes, the run enters `awaiting_confirmation` with a preview
+and `start_confirm` decision unless `yes=true`, in which case it enters
+`queued`. While the run is preparing, `preview` and `decision` are null. Poll
+`GET /runs/{run_id}` and `GET /runs/{run_id}/decisions`, or follow run events,
+to observe the transition.
 
 **Request body** (`RunCreateRequest`):
 
 | Field | Type | Default | Notes |
 |-------|------|---------|-------|
 | `target` | string | *required* | Target IP or domain |
-| `mode` | string | `"attack"` | `recon` \| `attack` |
+| `mode` | string | `"attack"` | `recon` \| `attack` \| `fast` |
 | `goal` | string | `""` | Preset goal name |
 | `custom_goal` | string | `""` | Free-text custom goal |
 | `recon_first` | bool\|null | null | null = auto (recon-first when no goal) |
@@ -790,36 +824,23 @@ Create a run. Does **not** execute yet — it prepares a preview and (unless `ye
 | `skills_include` | string[] | `[]` | Force-include skills |
 | `skills_exclude` | string[] | `[]` | Force-exclude skills |
 | `resume` | string | `""` | Run ID to resume from |
-| `kind` | string | `"agent"` | `agent` \| `manual` |
+| `kind` | string | `"agent"` | Only `agent` is currently accepted |
 | `yes` | bool | false | Skip the `start_confirm` gate |
 
-**Response:** `201`
+**Response:** `201` — the create response is returned while preparation runs:
 ```json
 {
   "run_id": "run-abc123def456",
-  "preview": {
-    "run_id": "run-abc123def456",
-    "target_ip": "10.0.0.50",
-    "mode": "attack",
-    "goal_name": "backdoor",
-    "model_alias": "glm",
-    "permission": "full_access",
-    "destructive": true,
-    "required_confirmation_text": "ALLOW 10.0.0.50",
-    "budgets": { /* commands/rounds/duration */ },
-    "swarm": false
-  },
-  "state": "awaiting_confirmation",
-  "decision": {
-    "id": "dec-...",
-    "kind": "start_confirm",
-    "required_text": "ALLOW 10.0.0.50",
-    "prompt_text": "DESTRUCTIVE mode — confirm to proceed."
-  }
+  "preview": null,
+  "state": "preparing"
 }
 ```
 
-When `yes=true`, no `decision` is returned and `state` is `"queued"` (execution starts immediately).
+After preparation, `GET /runs/{run_id}` returns the preview and run state;
+`GET /runs/{run_id}/decisions` returns the pending confirmation when one is
+required. With `yes=true`, no confirmation decision is created and the run
+transitions to `queued`. Preparation failures transition the run to `failed`
+with an error.
 
 **Errors:** `409 conflict` (a run is already active).
 
@@ -1271,7 +1292,7 @@ The transport-neutral description of an assessment the operator wants to run. Bu
 | Field | Type | Default | Notes |
 |-------|------|---------|-------|
 | `target` | str | *required* | IP or domain |
-| `mode` | `recon`\|`attack` | `"attack"` | |
+| `mode` | `recon`\|`attack`\|`fast` | `"attack"` | |
 | `goal_name` | str | `""` | Preset goal |
 | `custom_goal` | str | `""` | Free-text goal |
 | `recon_first` | bool\|None | None | None = auto |
@@ -1296,7 +1317,7 @@ The transport-neutral description of an assessment the operator wants to run. Bu
 | `skills_exclude` | str[] | `[]` | |
 | `skills_no_reselect` | bool | false | |
 | `resume_source` | str | `""` | Run ID |
-| `kind` | `RunKind` | `AGENT` | `agent` \| `manual` |
+| `kind` | `RunKind` | `AGENT` | Only `agent` is currently accepted |
 | `interactive` | bool | false | API-only flag |
 
 ### `RunPreview`
@@ -1312,7 +1333,7 @@ Everything the operator sees at the ready-to-begin gate, computed by `Assessment
 | `original_target` | str | What the operator passed |
 | `resolved_ip` | str\|None | For domain targets |
 | `resolved_domain` | str\|None | For domain targets |
-| `mode` | `recon`\|`attack` | |
+| `mode` | `recon`\|`attack`\|`fast` | |
 | `goal_name` | str | |
 | `goal_description` | str | |
 | `model_alias` | str | |
@@ -1338,7 +1359,7 @@ Sanitized, serializable outcome of a completed/failed run.
 |-------|------|-------|
 | `run_id` | str | |
 | `target_ip` | str | |
-| `mode` | `recon`\|`attack` | |
+| `mode` | `recon`\|`attack`\|`fast` | |
 | `goal_name` | str | |
 | `goal_description` | str | |
 | `total_actions` | int | |
@@ -1501,15 +1522,21 @@ Indexes: `idx_decisions_run_id` on `run_id`.
 
 A typical WebUI session against the API:
 
-1. **Create run** — `POST /runs` with target + mode + flags.
-   - Service prepares a `RunPreview` (resolves target, computes permission/destructive flag, budgets).
-   - If `yes=false` (default): creates a `start_confirm` decision, run enters `awaiting_confirmation`. Response includes the `decision` the WebUI must answer.
-   - If `yes=true`: run enters `queued` and execution starts immediately.
+1. **Create run** — `POST /runs` with target + mode + flags. The API stores the
+   run as `preparing`, then resolves the target and prepares the preview in a
+   background task. The initial response has a run id, `state: "preparing"`,
+   and `preview: null`; poll the run and decisions endpoints or follow its
+   events while preparation completes.
+   - If `yes=false` (default), preparation creates a `start_confirm` decision
+     and the run enters `awaiting_confirmation`.
+   - If `yes=true`, preparation sends the run to `queued` without a
+     confirmation decision.
 
 2. **(Optional) Confirm** — `POST /runs/{id}/decisions/{decision_id}` with the answer.
    - Destructive runs require the exact `required_confirmation_text` (e.g. `"ALLOW 10.0.0.50"`).
    - Non-destructive runs accept `"y"`/`"yes"`.
-   - On success: run transitions `queued` → `running`, the `asyncio.Task` running `AssessmentService.execute` starts.
+   - On success: the queued run transitions to `running` and the
+     `asyncio.Task` running `AssessmentService.execute` starts.
 
 3. **Stream events** — open `WS /ws/v1/runs/{run_id}` with `{"auth": "<token>", "after": 0}`.
    - Replay events with `sequence > after` first, then live events.
@@ -1535,6 +1562,8 @@ A typical WebUI session against the API:
 
 `POST /runs/{id}/resume` creates a new run with `resume_source` set to the original run ID, reusing existing report/session state. The new run goes through the normal confirmation gate (`yes=false`).
 
-### Manual mode
+### Run kind and manual tool calls
 
-`kind: "manual"` runs do **not** run the agent loop — they only expose the MCP tool gateway (`POST /runs/{id}/tools/{tool_name}/calls`). The WebUI drives tool calls directly.
+`kind: "agent"` is the only accepted run kind. Manual-only runs are not
+implemented. The tool gateway supports policy-gated manual MCP calls during an
+active agent run via `POST /runs/{id}/tools/{tool_name}/calls`.

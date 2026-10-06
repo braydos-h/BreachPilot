@@ -1,4 +1,4 @@
-"""Verify-or-it-didn't-happen MCP tool ("machine re-proof").
+"""Repeat a candidate probe and persist a conservative verification result.
 
 ``verify_finding`` reloads a CANDIDATE finding's stored verification probe
 from the run artifacts (``reports/<run_id>/enhanced/enhanced_report.json``)
@@ -8,9 +8,10 @@ target-IP allowlist lock, the JSONL audit trail, and the sandbox funnel apply
 unchanged — sandbox failures surface as ``SANDBOX_*`` text and fail closed to
 ``INCONCLUSIVE`` (never a host fallback).
 
-The verdict comes solely from :class:`tools.verify_oracle.VerifyOracle`
-(N/N ``outcome_truth`` compromise proof); LLM text, OutcomeJudge text, and
-exit codes never decide. Results persist into the EXISTING run artifact JSON
+The generic sandbox executor does not establish target-shell provenance.
+Consequently raw shell/credential markers remain ``INCONCLUSIVE`` and cannot
+produce ``VERIFIED``. A future target-bound verifier must provide structured
+evidence before that verdict is available. Results persist into the existing run artifact JSON
 (``verify_status`` + ``verify_history[]`` on the finding; sibling
 ``.md``/``.html`` regenerated when present). No new DB, no migration.
 """
@@ -218,13 +219,20 @@ def register_verify_tools(mcp: Any, *, ctx: ToolContext) -> None:
     @mcp.tool()
     @require_allowlist()
     def verify_finding(target_ip: str, finding_id: str, run_id: str = "", repeats: int = 2) -> str:
-        """Re-prove a candidate finding N times via its stored verification probe (verify-or-it-didn't-happen). Reloads the finding's verification_probe from reports/<run_id>/enhanced/enhanced_report.json (latest run containing it when run_id is empty) and re-executes ONLY that probe N times via run_exploit_terminal, so the target-IP allowlist, audit trail, and sandbox funnel apply unchanged. Returns VERIFY_VERDICT: with VERIFIED (all N runs show machine compromise proof) | HOLDING (flaky or failing proof — stays a candidate) | INCONCLUSIVE (no probe, blocked/sandbox-failed run, or ambiguous output), and persists the verdict plus the replayable proof capsule into the finding's verify_status/verify_history.
+        """Repeat a candidate probe N times and persist its conservative result.
+
+        Reloads the finding's stored probe and runs only that probe through
+        ``run_exploit_terminal`` so allowlist, audit, and sandbox controls still
+        apply. Worker output is not target-bound proof: shell/credential markers
+        remain INCONCLUSIVE, while repeated explicit failures remain HOLDING.
+        This executor cannot produce VERIFIED; that requires a future trusted,
+        target-bound verifier. A replayable probe capsule is retained for review.
 
         Args:
             target_ip: Current address of the finding's asset (must equal the finding's affected_asset and be allowlisted).
             finding_id: Candidate finding to verify (e.g. ``F-10-0-0-50-run_exploit_terminal``).
             run_id: Run holding the finding; empty = latest run containing it.
-            repeats: Proof runs N (default 2, clamped 1-5); ALL must show compromise proof.
+            repeats: Diagnostic probe runs N (default 2, clamped 1-5).
         """
         if not finding_id or not finding_id.strip():
             return "BLOCKED: finding_id is required."

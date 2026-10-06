@@ -130,6 +130,8 @@ def _summary_payload(rate=0.9, fp=0.02, time=600.0, actions=30.0, cost=1.0, scen
         "trials_total": 10,
         "verified_success_rate": rate,
         "false_positive_rate": fp,
+        "stuck_loop_rate": 0.0,
+        "scope_violation_count": 0,
         "median_solve_time": time,
         "median_tool_actions": actions,
         "estimated_cost": cost,
@@ -157,6 +159,53 @@ def test_regression_hard_on_success_rate_drop(tmp_path):
     assert any(f.severity == "hard" and f.metric == "verified_success_rate" for f in result.findings)
 
 
+def test_regression_unmeasured_current_rates_remain_unknown():
+    current = compute_run_summary([_trial("s1", 0, TrialStatus.INFRASTRUCTURE_ERROR.value)])
+    baseline = _summary_payload(rate=0.9, fp=0.02)
+
+    result = compare_to_baseline(current, baseline)
+
+    assert not result.passed
+    by_metric = {finding.metric: finding for finding in result.findings}
+    assert by_metric["verified_success_rate"].severity == "hard"
+    assert by_metric["verified_success_rate"].current is None
+    assert "unavailable" in by_metric["verified_success_rate"].detail
+    assert by_metric["false_positive_rate"].severity == "hard"
+    assert by_metric["false_positive_rate"].current is None
+    assert "unavailable" in by_metric["false_positive_rate"].detail
+
+
+def test_regression_unmeasured_or_missing_current_scenario_is_not_zero():
+    baseline = _summary_payload(
+        scenarios={"s1": {"scenario_id": "s1", "success_probability": 1.0, "verified": 1, "trials": 1}}
+    )
+    current = compute_run_summary([_trial("s1", 0, TrialStatus.SKIPPED.value)])
+
+    result = compare_to_baseline(current, baseline)
+
+    finding = next(f for f in result.findings if f.metric == "scenario:s1")
+    assert finding.severity == "hard"
+    assert finding.baseline == 1.0
+    assert finding.current is None
+    assert "unavailable" in finding.detail
+
+    # A scenario absent from a filtered run was not evaluated and must not be
+    # fabricated as a zero-probability regression.
+    missing_current = compare_to_baseline(compute_run_summary([]), baseline)
+    assert not any(f.metric == "scenario:s1" for f in missing_current.findings)
+
+
+def test_regression_missing_baseline_scenario_probability_fails_closed():
+    baseline = _summary_payload(scenarios={"s1": {"scenario_id": "s1", "verified": 0, "trials": 1}})
+    current = compute_run_summary([_trial("s1", 0, TrialStatus.FAILED.value)])
+
+    result = compare_to_baseline(current, baseline)
+
+    assert not result.passed
+    assert result.findings[0].metric == "scenario:s1"
+    assert "malformed" in result.findings[0].detail
+
+
 def test_regression_hard_on_false_positive_increase(tmp_path):
     baseline = _summary_payload(fp=0.0)
     current = compute_run_summary(
@@ -176,7 +225,18 @@ def test_regression_hard_on_false_positive_increase(tmp_path):
 def test_regression_warning_on_time_and_cost_increase():
     baseline = _summary_payload(time=100.0, cost=1.0)
     current = compute_run_summary(
-        [_trial("s1", 0, "VERIFIED", oracle_verified_success=True, duration_seconds=100.0, estimated_cost=2.0)]
+        [
+            _trial(
+                "s1",
+                0,
+                "VERIFIED",
+                oracle_verified_success=True,
+                duration_seconds=100.0,
+                estimated_cost=2.0,
+                stuck_loop=False,
+                scope_violations=0,
+            )
+        ]
     )
     result = compare_to_baseline(current, baseline)
     assert result.passed  # warnings do not fail CI
@@ -195,8 +255,8 @@ def test_regression_improvement_detection():
     baseline = _summary_payload(rate=0.8)
     current = compute_run_summary(
         [
-            _trial("s1", 0, "VERIFIED", oracle_verified_success=True),
-            _trial("s1", 1, "VERIFIED", oracle_verified_success=True),
+            _trial("s1", 0, "VERIFIED", oracle_verified_success=True, stuck_loop=False, scope_violations=0),
+            _trial("s1", 1, "VERIFIED", oracle_verified_success=True, stuck_loop=False, scope_violations=0),
         ]
     )
     result = compare_to_baseline(current, baseline)
@@ -238,14 +298,53 @@ def test_compare_summaries_payload_categories():
         },
     )
     payload = compare_summaries_payload(base, current)
-    assert set(payload["categories"]) == {"newly_solved", "regressed", "still_solved", "still_failing"}
+    assert set(payload["categories"]) == {"newly_solved", "regressed", "still_solved", "still_failing", "unknown"}
     assert "s3" in payload["categories"]["newly_solved"]
     assert "s2" in payload["categories"]["regressed"]
     assert "s1" in payload["categories"]["still_solved"]
     by_id = {r["scenario_id"]: r for r in payload["scenarios"]}
-    assert by_id["s4"]["category"] == "newly_solved"
+    assert by_id["s4"]["category"] == "unknown"
     metrics = {m["metric"]: m for m in payload["metrics"]}
     assert metrics["solved"]["direction"] in {"improved", "regressed", "unchanged"}
+
+
+def test_compare_summaries_payload_keeps_missing_scenario_probability_unknown():
+    payload = compare_summaries_payload(
+        {"scenarios": {"s1": {"scenario_id": "s1", "success_probability": None}}},
+        {"scenarios": {"s1": {"scenario_id": "s1", "success_probability": 0.75}}},
+    )
+
+    row = payload["scenarios"][0]
+    assert row["baseline"] is None
+    assert row["current"] == 0.75
+    assert row["delta"] is None
+    assert row["category"] == "unknown"
+    assert payload["categories"]["unknown"] == ["s1"]
+    assert payload["categories"]["still_failing"] == []
+
+
+def test_compare_summaries_payload_keeps_unmeasured_current_rates_unknown():
+    payload = compare_summaries_payload(
+        {
+            "verified_success_rate": 0.75,
+            "false_positive_rate": 0.1,
+            "scenarios": {"s1": {"scenario_id": "s1", "success_probability": 0.75}},
+        },
+        {
+            "verified_success_rate": None,
+            "false_positive_rate": None,
+            "scenarios": {"s1": {"scenario_id": "s1", "success_probability": None}},
+        },
+    )
+
+    metrics = {row["metric"]: row for row in payload["metrics"]}
+    assert metrics["verified_success_rate"]["baseline"] == 0.75
+    assert metrics["verified_success_rate"]["current"] is None
+    assert metrics["verified_success_rate"]["delta"] is None
+    assert metrics["verified_success_rate"]["direction"] == "unknown"
+    assert metrics["false_positive_rate"]["direction"] == "unknown"
+    assert payload["scenarios"][0]["current"] is None
+    assert payload["scenarios"][0]["category"] == "unknown"
 
 
 # ---------------------------------------------------------------------------
@@ -307,6 +406,19 @@ def test_verifier_host_owned_when_all():
     assert not outcome2.verified
 
 
+def test_verifier_negative_control_never_counts_passing_refutation_as_owned():
+    oracle = {
+        "flags": [{"id": "sqli_not_exploitable", "check": {"type": "http_login", "expect_status": 401}}],
+        "host_owned_when": "never",
+    }
+    outcome = IndependentVerifier(
+        _scenario_with_oracle(oracle), executor=lambda _check: (True, "401 Unauthorized")
+    ).verify_sync()
+    assert outcome.flags_captured == 1
+    assert outcome.host_owned is False
+    assert outcome.verified is False
+
+
 def test_verifier_no_flags_means_not_verified():
     """An oracle with no checks cannot be 'verified' — fail closed."""
     scenario = _scenario_with_oracle({"flags": []})
@@ -329,3 +441,36 @@ def test_verifier_uses_eval_check_executor_by_default(tmp_path, monkeypatch):
     outcome = verifier_mod.IndependentVerifier(scenario, workspace=tmp_path).verify_sync()
     assert outcome.verified
     assert captured["workspace"] == tmp_path
+    assert captured["target_host"] == scenario.target_host
+    assert captured["target_ports"] == scenario.target_ports
+
+
+@pytest.mark.parametrize(
+    "check",
+    [
+        {"type": "http_request", "url": "http://127.0.0.1:8082/"},
+        {"type": "tcp_connect", "host": "127.0.0.1", "port": 8082},
+    ],
+)
+def test_benchmark_verifier_rejects_loopback_oracle_ports_outside_scenario_scope(monkeypatch, check):
+    """An oracle cannot probe a local service outside the scenario's declared ports."""
+    import tools.eval_checks as checks
+    from tools.benchmark.models import BenchmarkScenario
+
+    def unexpected_network_call(*_args, **_kwargs):
+        raise AssertionError("out-of-scope loopback probe reached the network sink")
+
+    monkeypatch.setattr(checks, "_http_fetch", unexpected_network_call)
+    monkeypatch.setattr(checks.socket, "create_connection", unexpected_network_call)
+    scenario = BenchmarkScenario(
+        suite="xben",
+        scenario_id="scoped-oracle",
+        target_host="127.0.0.1",
+        target_ports=[8081],
+        oracle={"flags": [{"id": "outside_port", "check": check}]},
+    )
+
+    outcome = IndependentVerifier(scenario).verify_sync()
+
+    assert not outcome.verified
+    assert "outside oracle target" in outcome.flags[0].detail

@@ -8,8 +8,8 @@ the happy path with ``--show`` parsing, and the not-installed friendly message.
 
 from __future__ import annotations
 
-import shutil
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -104,22 +104,22 @@ def _text(result) -> str:
     return "".join(parts)
 
 
-def _patch_pgrp_seq(monkeypatch, returns):
-    """Patch ``_run_with_pgrp_timeout`` to pop successive return tuples.
-
-    ``returns`` is a list of ``(returncode, out, err)``; the crack call gets
-    the first, the ``--show`` call gets the second (if present).
-    """
-    import mcp_exploit_server as mes
-
+def _patch_sandbox_seq(monkeypatch, returns, captured=None):
+    """Stub successive worker executions and record their argv/timeouts."""
     seq = list(returns)
 
-    def _fake(args, timeout, stdout=None, stderr=None, cwd=None, env=None, input_text=None, **popen_kwargs):
+    def _fake(_ctx, argv, **kwargs):
+        if captured is not None:
+            captured.append((list(argv), kwargs))
         if not seq:
-            return 0, "", ""
-        return seq.pop(0)
+            return True, SimpleNamespace(status="completed", exit_code=0, stdout="", stderr="", duration_seconds=0.1)
+        return True, seq.pop(0)
 
-    monkeypatch.setattr(mes, "_run_with_pgrp_timeout", _fake)
+    monkeypatch.setattr("tools.mcp_tools.cracking.run_argv_in_sandbox", _fake)
+
+
+def _result(returncode: int = 0, stdout: str = "", *, status: str = "completed"):
+    return SimpleNamespace(status=status, exit_code=returncode, stdout=stdout, stderr="", duration_seconds=0.1)
 
 
 @pytest.mark.asyncio
@@ -132,15 +132,8 @@ async def test_run_hash_crack_is_registered(tmp_path: Path) -> None:
 @pytest.mark.asyncio
 async def test_run_hash_crack_auto_resolves_ntlm_mode(tmp_path: Path, monkeypatch) -> None:
     mcp = _make_server(tmp_path, wordlist=_make_wordlist(tmp_path))
-    monkeypatch.setattr(shutil, "which", lambda name: f"/usr/bin/{name}")
     captured: list[Any] = []
-    import mcp_exploit_server as mes
-
-    def _fake(args, timeout, stdout=None, stderr=None, cwd=None, env=None, input_text=None, **popen_kwargs):
-        captured.append(list(args))
-        return 0, "", ""
-
-    monkeypatch.setattr(mes, "_run_with_pgrp_timeout", _fake)
+    _patch_sandbox_seq(monkeypatch, [_result(), _result()], captured)
 
     text = _text(
         await mcp.call_tool(
@@ -150,8 +143,8 @@ async def test_run_hash_crack_auto_resolves_ntlm_mode(tmp_path: Path, monkeypatc
     )
     assert "CRACK_RESULT:" in text
     # The crack argv auto-resolved the NTLM mode (hashcat -m 1000).
-    assert captured, "_run_with_pgrp_timeout was not invoked"
-    crack_argv = captured[0]
+    assert captured, "sandbox worker was not invoked"
+    crack_argv = captured[0][0]
     assert "-m" in crack_argv
     assert crack_argv[crack_argv.index("-m") + 1] == "1000"
     assert "HASH_TYPE: NTLM" in text
@@ -160,13 +153,12 @@ async def test_run_hash_crack_auto_resolves_ntlm_mode(tmp_path: Path, monkeypatc
 @pytest.mark.asyncio
 async def test_run_hash_crack_parses_show_output(tmp_path: Path, monkeypatch) -> None:
     mcp = _make_server(tmp_path, wordlist=_make_wordlist(tmp_path))
-    monkeypatch.setattr(shutil, "which", lambda name: f"/usr/bin/{name}")
     hash_val = "b7e4b90b1d8f4a9c3d2e1f0a5b6c7d8e"
-    _patch_pgrp_seq(
+    _patch_sandbox_seq(
         monkeypatch,
         [
-            (0, "Session... completed", ""),
-            (0, f"{hash_val}:password123\n", ""),
+            _result(stdout="Session... completed"),
+            _result(stdout=f"{hash_val}:password123\n"),
         ],
     )
 
@@ -183,7 +175,6 @@ async def test_run_hash_crack_parses_show_output(tmp_path: Path, monkeypatch) ->
 @pytest.mark.asyncio
 async def test_run_hash_crack_blocks_unidentifiable_hash(tmp_path: Path, monkeypatch) -> None:
     mcp = _make_server(tmp_path)
-    monkeypatch.setattr(shutil, "which", lambda name: f"/usr/bin/{name}")
     text = _text(
         await mcp.call_tool(
             "run_hash_crack",
@@ -210,7 +201,7 @@ async def test_run_hash_crack_rejects_unsupported_tool(tmp_path: Path) -> None:
 @pytest.mark.asyncio
 async def test_run_hash_crack_not_installed(tmp_path: Path, monkeypatch) -> None:
     mcp = _make_server(tmp_path)
-    monkeypatch.setattr(shutil, "which", lambda name: None)
+    _patch_sandbox_seq(monkeypatch, [_result(127, "hashcat: not found", status="failed")])
     text = _text(
         await mcp.call_tool(
             "run_hash_crack",
@@ -223,12 +214,11 @@ async def test_run_hash_crack_not_installed(tmp_path: Path, monkeypatch) -> None
 @pytest.mark.asyncio
 async def test_run_hash_crack_john_parses_show(tmp_path: Path, monkeypatch) -> None:
     mcp = _make_server(tmp_path, wordlist=_make_wordlist(tmp_path))
-    monkeypatch.setattr(shutil, "which", lambda name: f"/usr/bin/{name}")
-    _patch_pgrp_seq(
+    _patch_sandbox_seq(
         monkeypatch,
         [
-            (0, "Loaded 1 password hash", ""),
-            (0, "admin:letmein!\n2g 0:00:00:00 DONE\n", ""),
+            _result(stdout="Loaded 1 password hash"),
+            _result(stdout="admin:letmein!\n2g 0:00:00:00 DONE\n"),
         ],
     )
     text = _text(
@@ -244,7 +234,6 @@ async def test_run_hash_crack_john_parses_show(tmp_path: Path, monkeypatch) -> N
 @pytest.mark.asyncio
 async def test_run_hash_crack_rejects_nondigit_hash_mode(tmp_path: Path, monkeypatch) -> None:
     mcp = _make_server(tmp_path, wordlist=_make_wordlist(tmp_path))
-    monkeypatch.setattr(shutil, "which", lambda name: f"/usr/bin/{name}")
     text = _text(
         await mcp.call_tool(
             "run_hash_crack",
@@ -260,50 +249,50 @@ async def test_run_hash_crack_rejects_nondigit_hash_mode(tmp_path: Path, monkeyp
 
 
 @pytest.mark.asyncio
-async def test_run_hash_crack_missing_wordlist(tmp_path: Path, monkeypatch) -> None:
-    mcp = _make_server(tmp_path, wordlist=str(tmp_path / "no-such-wordlist.txt"))
-    monkeypatch.setattr(shutil, "which", lambda name: f"/usr/bin/{name}")
-    text = _text(
-        await mcp.call_tool(
-            "run_hash_crack",
-            {"hash_value": "b7e4b90b1d8f4a9c3d2e1f0a5b6c7d8e", "tool": "hashcat"},
-        )
-    )
-    assert text.startswith("WORDLIST_NOT_FOUND:")
-
-
-@pytest.mark.asyncio
-async def test_run_hash_crack_missing_rules_file(tmp_path: Path, monkeypatch) -> None:
-    mcp = _make_server(tmp_path, wordlist=_make_wordlist(tmp_path))
-    monkeypatch.setattr(shutil, "which", lambda name: f"/usr/bin/{name}")
+async def test_run_hash_crack_relative_wordlist_cannot_escape_workspace(tmp_path: Path, monkeypatch) -> None:
+    mcp = _make_server(tmp_path)
+    called: list[Any] = []
+    _patch_sandbox_seq(monkeypatch, [_result()], called)
     text = _text(
         await mcp.call_tool(
             "run_hash_crack",
             {
                 "hash_value": "b7e4b90b1d8f4a9c3d2e1f0a5b6c7d8e",
                 "tool": "hashcat",
-                "rules": str(tmp_path / "no-such-rule.rule"),
+                "wordlist": "../outside.txt",
             },
         )
     )
-    assert text.startswith("RULES_NOT_FOUND:")
+    assert text.startswith("BLOCKED:")
+    assert "remain inside" in text
+    assert called == []
+
+
+@pytest.mark.asyncio
+async def test_run_hash_crack_missing_rules_file(tmp_path: Path, monkeypatch) -> None:
+    mcp = _make_server(tmp_path, wordlist=_make_wordlist(tmp_path))
+    called: list[Any] = []
+    _patch_sandbox_seq(monkeypatch, [_result()], called)
+    text = _text(
+        await mcp.call_tool(
+            "run_hash_crack",
+            {
+                "hash_value": "b7e4b90b1d8f4a9c3d2e1f0a5b6c7d8e",
+                "tool": "hashcat",
+                "rules": "../outside.rule",
+            },
+        )
+    )
+    assert text.startswith("BLOCKED:")
+    assert "remain inside" in text
+    assert called == []
 
 
 @pytest.mark.asyncio
 async def test_run_hash_crack_clamps_timeout(tmp_path: Path, monkeypatch) -> None:
     mcp = _make_server(tmp_path, wordlist=_make_wordlist(tmp_path))
-    monkeypatch.setattr(shutil, "which", lambda name: f"/usr/bin/{name}")
     captured: list[Any] = []
-    import mcp_exploit_server as mes
-
-    timeouts: list[Any] = []
-
-    def _fake(args, timeout, stdout=None, stderr=None, cwd=None, env=None, input_text=None, **popen_kwargs):
-        captured.append(list(args))
-        timeouts.append(timeout)
-        return 0, "", ""
-
-    monkeypatch.setattr(mes, "_run_with_pgrp_timeout", _fake)
+    _patch_sandbox_seq(monkeypatch, [_result(), _result()], captured)
 
     text = _text(
         await mcp.call_tool(
@@ -316,22 +305,15 @@ async def test_run_hash_crack_clamps_timeout(tmp_path: Path, monkeypatch) -> Non
         )
     )
     assert "CRACK_RESULT:" in text
-    assert captured, "_run_with_pgrp_timeout was not invoked"
-    assert timeouts[0] == 3600
+    assert captured, "sandbox worker was not invoked"
+    assert captured[0][1]["timeout"] == 3600
 
 
 @pytest.mark.asyncio
 async def test_run_hash_crack_john_unmapped_mode_warns(tmp_path: Path, monkeypatch) -> None:
     mcp = _make_server(tmp_path, wordlist=_make_wordlist(tmp_path))
-    monkeypatch.setattr(shutil, "which", lambda name: f"/usr/bin/{name}")
     captured: list[Any] = []
-    import mcp_exploit_server as mes
-
-    def _fake(args, timeout, stdout=None, stderr=None, cwd=None, env=None, input_text=None, **popen_kwargs):
-        captured.append(list(args))
-        return 0, "", ""
-
-    monkeypatch.setattr(mes, "_run_with_pgrp_timeout", _fake)
+    _patch_sandbox_seq(monkeypatch, [_result(), _result()], captured)
 
     text = _text(
         await mcp.call_tool(
@@ -347,7 +329,7 @@ async def test_run_hash_crack_john_unmapped_mode_warns(tmp_path: Path, monkeypat
     assert "WARN:" in text
     assert "auto-detect" in text
     # Unmapped mode: no --format flag reaches john (auto-detect instead).
-    assert not any(a.startswith("--format=") for a in captured[0])
+    assert not any(a.startswith("--format=") for a in captured[0][0])
 
 
 @pytest.mark.asyncio

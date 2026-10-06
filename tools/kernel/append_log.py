@@ -1,8 +1,9 @@
 """Shared append-only log writer (PERF P2-07).
 
 One reusable primitive for every append-only JSONL log in the codebase
-(``tools/kernel/audit.py``, the exploit-policy audit chain,
-``llm_usage.jsonl``, ``decision_log.jsonl``, ``activity.jsonl``). Each log
+(``tools/kernel/audit.py`` and ``tools/kernel/segmented_audit.py``, the
+exploit-policy audit chain, ``llm_usage.jsonl``, ``decision_log.jsonl``,
+``activity.jsonl``). Each log
 keeps its own schema -- only the transport is shared: a single open FD per
 path, serialization in the caller thread, batched background flush, explicit
 ``checkpoint()``/``close()``.

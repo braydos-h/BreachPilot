@@ -333,13 +333,19 @@ def test_consult_hidden_when_multi_model_off():
     assert "check_os" in {t["function"]["name"] for t in off}
 
 
-def test_install_tools_advertised():
+def test_install_tools_hidden_from_agent_phases():
+    from tools.exploit_agent.prompt import build_exploit_system_prompt
     from tools.exploit_agent.tool_catalog import select_tools_for_phase
 
     tools = [_tool("check_os"), _tool("apt_install"), _tool("pip_install")]
-    names = {t["function"]["name"] for t in select_tools_for_phase(tools, "recon")}
-    assert "apt_install" in names
-    assert "pip_install" in names
+    for phase in ("recon", "validation"):
+        names = {t["function"]["name"] for t in select_tools_for_phase(tools, phase)}
+        assert "check_os" in names
+        assert "apt_install" not in names
+        assert "pip_install" not in names
+
+    prompt = build_exploit_system_prompt(attacker_os="Linux", target_ip="10.0.0.5")
+    assert "apt_install, pip_install (allowlist-gated" not in prompt
 
 
 # ── 6. Strict compromise classification ───────────────────────────────────
@@ -353,7 +359,7 @@ def test_legacy_loose_markers_not_compromise_strict():
     r = classify_exploit_outcome("0 hashes recovered\nhashes were not found")
     assert r["outcome"] != "compromise"
     assert r["outcome"] != "cred_dump"
-    assert classify_exploit_outcome("meterpreter session 1 opened")["outcome"] == "compromise"
+    assert classify_exploit_outcome("meterpreter session 1 opened")["outcome"] == "unverified_claim"
 
 
 @pytest.mark.asyncio

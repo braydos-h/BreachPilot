@@ -49,7 +49,7 @@ Data dependencies:
 | Hook | Call site | Use |
 |------|-----------|-----|
 | `useRuns(50, 0)` | `HomePage.tsx:553` | `rows`, `activeRun` (`rows.find(isActiveState)`), `recent` (`rows.slice(0, 5)`), `doneCount` (`filter(isTerminalState)`), `failedCount` (`filter(s === "failed")`) |
-| `useSandboxStatus` + `useSandboxFixPlan` / `useSandboxFix` / `useSandboxFixStatus` | `SandboxBanner` (`HomePage.tsx:448`), `SandboxFixDialog` (`HomePage.tsx:94`) | boot-time sandbox posture (`contained` / `disabled` / `native_fallback` / `blocked`) |
+| `useSandboxStatus` + `useSandboxFixPlan` / `useSandboxFix` / `useSandboxFixStatus` | `SandboxBanner` (`HomePage.tsx:448`), `SandboxFixDialog` (`HomePage.tsx:94`) | boot-time sandbox posture (`contained` / `blocked`); unknown status is shown as a warning |
 
 API calls:
 

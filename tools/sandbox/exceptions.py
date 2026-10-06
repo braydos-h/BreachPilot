@@ -2,14 +2,9 @@
 
 Every failure DURING an active sandbox session is FAIL CLOSED: the tool layer
 catches ``SandboxError`` subclasses and converts them into ``SANDBOX_*`` result
-blocks. Host execution is NEVER a per-command fallback -- a
-sandbox/daemon/policy failure blocks the execution instead. The single
-sanctioned fallback is the boot-time decision in
-``tools/sandbox/manager.py::resolve_manager_with_fallback``: with
-``sandbox.fallback_native`` true (explicit opt-in; default false), a server whose Docker stack is
-unusable degrades wholly to the documented legacy host-execution mode (with a
-warning) BEFORE any tool exists, so no in-session command ever silently
-switches between contained and native execution. See
+blocks. Host execution is never a fallback: a sandbox, daemon, or policy
+failure blocks execution, including during startup. Legacy configuration that
+asks for uncontained execution is rejected. See
 ``tools/sandbox/mcp_bridge.py::sandbox_block`` for the text protocol.
 """
 

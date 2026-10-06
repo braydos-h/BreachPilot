@@ -40,14 +40,18 @@ python -m pip install -e ".[dev]"
 ```
 
 Prerequisites beyond Python: `nmap` on `PATH` (or set `nmap.path` in
-`config.yaml`) and an Ollama endpoint — the default is Ollama Cloud at
-`https://api.ollama.com`, which needs `OLLAMA_API_KEY`.
+`config.yaml`) and credentials for the selected chat provider. The checked-in
+config selects OpenCode Go (`models.provider: opencode_go`), which uses
+`OPENCODE_GO_API_KEY`. Ollama is an alternative chat provider; its cloud
+endpoint at `https://api.ollama.com` needs `OLLAMA_API_KEY`.
 
 ### 1.2 Configure API keys (before `--doctor`)
 
 Keys are read from **process environment variables** or `secr.json` — there
-is no `.env` auto-load. The default cloud path requires `OLLAMA_API_KEY` or
-the doctor's Ollama check will 401. Set it (and optionally the others) with:
+is no `.env` auto-load. Set the key for the active chat provider before
+running the provider-specific `--doctor` check. The checked-in default uses
+`OPENCODE_GO_API_KEY`; `OLLAMA_API_KEY` is needed only if Ollama Cloud is
+selected.
 
 ```powershell
 python main.py --setup-api-keys
@@ -57,12 +61,15 @@ This prompts for each key and writes `secr.json` (gitignored). Alternatively
 set the environment variable in your shell:
 
 ```powershell
+$env:OPENCODE_GO_API_KEY = "..."
+# Only when models.provider is set to ollama:
 $env:OLLAMA_API_KEY = "sk-..."
 ```
 
 | Var | Purpose |
 |-----|---------|
-| `OLLAMA_API_KEY` | **Required** for the default Ollama Cloud path |
+| `OPENCODE_GO_API_KEY` | Required by the checked-in default chat-provider selection |
+| `OLLAMA_API_KEY` | Required when Ollama Cloud is selected for chat |
 | `NVD_API_KEY` | Raises NVD CVE lookup rate limit |
 | `GITHUB_TOKEN` | Raises `cve_to_poc` GitHub Search API limit 60→5000/hr |
 | `SERPAPI_API_KEY` | Optional fallback web research provider |
@@ -98,29 +105,34 @@ A clean run looks like:
 Notes:
 
 - Python must be >= 3.11 (the check rejects 3.10).
-- Cloud models are verified by running a real 1-token generation
-  (`_ping_cloud_model`), so a missing `OLLAMA_API_KEY` surfaces here as a
-  failed `ollama_reachable` / `model_registry` check with the hint
-  "start Ollama, set OLLAMA_API_KEY, or update ollama.host in config.yaml".
+- `--doctor` probes the active chat provider. With the checked-in config,
+  OpenCode Go is active; missing `OPENCODE_GO_API_KEY` affects that provider
+  check. `OLLAMA_API_KEY` affects the Ollama check only when `models.provider`
+  selects Ollama and its host is cloud.
 - `port_8001_free` matters: 8001 is the exploit MCP HTTP port. If something
   holds it, stop it or set `mcp.http_port` in `config.yaml`.
 - On Linux/macOS two informational checks also run: `linux_privilege` and
   `optional_tools` (Kali tooling). They never fail the run.
 
-### 1.4 Swap to a local Ollama (optional)
+### 1.4 Use Ollama locally (optional provider)
 
-Cloud is the default, but the same code path runs against a local daemon —
-just change `ollama.host` in `config.yaml`:
+To use Ollama for chat, set `models.provider: ollama`. Its adapter can use a
+local daemon by setting `ollama.host` in `config.yaml`:
 
 ```yaml
+models:
+  provider: ollama
 ollama:
   host: http://localhost:11434
 ```
 
 No probe or fallback logic: the Ollama client auto-attaches
 `Authorization: Bearer $OLLAMA_API_KEY` only when the key is present, so a
-local daemon ignores it. Embeddings stay local by default via
-`ollama.embed_host` (`nomic-embed-text`).
+local daemon ignores it. Embeddings have their own `embeddings.provider`
+selection: checked-in config disables them for provider-aware Flow A memory
+and skill consumers, while omitted provider config falls back to Ollama. Frozen
+Flow B's legacy agent loop still uses direct Ollama semantic memory when that
+feature is enabled; `embeddings.provider: none` does not disable that path.
 
 ---
 
@@ -291,17 +303,20 @@ The session opens the MCP exploit server (boot checklist — grep-able
   [OK] Booting MCP server (stdio)
 ```
 
-Then recon runs (`tools/recon_assessment_cli.py`): `check_os` (TTL/port
-analysis), `quick_scan` of the top 24 ports, and `search_cve_intel` per
-discovered product/version banner. You get a structured assessment:
+Then recon runs (`tools/recon_assessment_cli.py`): `check_os` uses a
+sandboxed Nmap service-metadata heuristic (no TTL or privileged OS probe),
+`quick_scan` scans the top 24 TCP ports in the sandbox worker, and
+`search_cve_intel` checks each discovered product/version banner. You get a
+structured assessment:
 
 ```text
 ============================================================
   RECONNAISSANCE ASSESSMENT
 ============================================================
   Target:        10.0.0.50
-  OS Verdict:    LINUX (Ubuntu)
-    -> ttl=64, open ports 22/80/443
+  OS Verdict:    LINUX
+    -> Nmap service metadata on port 22 contains a Unix/Linux indicator
+    -> TTL not collected; this is a heuristic, not an OS fingerprint
   Open Ports:    3 (22, 80, 443)
   Services:      3
     - ssh on port 22/tcp [risk:45]
@@ -629,7 +644,7 @@ Everything is under `reports/`, `exploit_workspace/`, and
 | Run JSON | `reports/<run_id>/run.json` | Full structured result (records, messages, outcome) |
 | Live events | `reports/<run_id>/events.jsonl` | The run timeline the WebUI streams |
 | Activity timeline | `reports/<run_id>/activity.jsonl` | ActivityLog events |
-| Audit chain | `exploit_workspace/<ip>/exploit_audit.jsonl` | SHA256 hash-chained record of every action (approved/blocked, code hash) |
+| Audit chain | `reports/<run_id>/exploit_audit.jsonl` | Host-owned SHA256 hash-chained record of every action (approved/blocked, code hash), outside the worker bind |
 | Attempt artifacts | `exploit_workspace/<ip>/<attempt_id>/` | Generated scripts, outputs per attempt |
 | Swarm state | `reports/<run_id>/swarm_workspace/swarm_state.json` | Agents, blackboard snapshot, battle log |
 | Eval reports | `reports/eval/<run_id>/` | `eval_report.{json,md,html}` + workspace |
@@ -644,5 +659,7 @@ Good next stops in the docs: the mission-driven Flow B research loop
 (`--target example.com`, which auto-authorizes discovered subdomains through
 the allowlist), `--long-session` for multi-hour runs, and the WebUI
 reference in [`docs/webui.md`](webui.md). Remember the developer loop: after
-any code change, run `python -m pytest tests/ -v`, `ruff check .`, and
-`python main.py --doctor` + `python main.py --self-test`.
+any code change, run the affected test file as described in
+[`docs/testing-guide.md`](testing-guide.md), `ruff check .`, and
+`python main.py --doctor` + `python main.py --self-test`. Full-suite verification
+belongs to CI.

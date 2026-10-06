@@ -4,22 +4,13 @@ Extracted from :mod:`tools.doctor` (god-file budget: ``tools/doctor.py`` must
 not grow). ``tools.doctor._check_browser`` is a thin shim over
 :func:`check_browser` here.
 
-Canonical contract (pinned by ``tests/test_doctor_browser.py``):
-
-- missing Playwright SDK (with no contained fallback) = **SKIP** with an
-  install hint, NOT a FAIL. ``ok`` is True so ``bp --doctor`` stays green on
-  stock installs; ``skipped``/``status="skip"`` marks the row, and ``hint``
-  names the optional ``browser`` extra. Live-Chromium integration tests skip
-  with the same hint (``tests/test_browser_integration.py``), so the doctor
-  message and the job assertion match exactly.
-- Same SKIP treatment for a missing Chromium runtime and a missing browser
-  worker image when neither host nor contained execution is runnable: the
-  browser capability is optional and stock installs keep working (capabilities
-  report unavailable).
+- The sandbox browser-worker image and Docker daemon are required for browser
+  execution. If they are unavailable the check is **SKIP**, not a failure of
+  the base installation: ``ok`` remains true, ``status="skip"`` marks the
+  optional capability, and the hint explains how to build the worker.
 - Still FAIL (fail closed): ``browser.enabled`` with ``backend: none``,
-  unknown backends, and browser-subsystem import failures. Execution itself
-  always blocks without the SDK (``BrowserBackendUnavailable``) — the SKIP
-  only keeps the *doctor report* green, it never grants execution.
+  unknown backends, invalid sandbox configuration, and browser-subsystem
+  import failures. Host Playwright/Chromium never substitutes for the worker.
 """
 
 from __future__ import annotations
@@ -61,8 +52,8 @@ def worker_skip_hint(image: str) -> str:
 def check_browser(config: dict[str, Any] | None = None) -> dict[str, Any]:
     """Browser-agent readiness: config, SDK, Chromium, worker image.
 
-    Never launches a browser or touches a target — SDK/Chromium presence are
-    file probes and the worker image is a Docker metadata lookup. When
+    Never launches a browser or touches a target — the worker image is a
+    Docker metadata lookup. When
     ``browser.enabled`` is false this is an informational pass (stock installs
     stay green). Distinguishes: disabled / backend none / unknown backend /
     SDK missing (SKIP) / Chromium missing (SKIP) / worker image missing (SKIP)
@@ -89,66 +80,56 @@ def check_browser(config: dict[str, Any] | None = None) -> dict[str, Any]:
         result["hint"] = "Set browser.backend: playwright, or disable with browser.enabled: false."
         return result
     try:
-        from tools.browser._pw_probe import browser_health, chromium_present, playwright_present
-    except Exception as exc:  # noqa: BLE001 -- doctor must never crash on import
+        sandbox_config = _SandboxConfig.from_config(config)
+        sandbox_enabled = bool(sandbox_config.enabled)
+    except (TypeError, ValueError) as exc:
         result["ok"] = False
-        result["error"] = f"browser subsystem import failed: {exc}"
+        result["error"] = f"invalid sandbox configuration: {exc}"
         return result
-    sdk_ok = bool(playwright_present())
-    chromium_ok = bool(chromium_present(executable_path=str(browser_cfg.get("executable_path") or "")))
-    health = browser_health(config)
-    subchecks: list[dict[str, Any]] = [
-        {"name": "playwright_sdk", "ok": sdk_ok},
-        {"name": "chromium_runtime", "ok": chromium_ok},
+    if not sandbox_enabled:  # defensive; SandboxConfig currently rejects this posture
+        result["ok"] = False
+        result["error"] = "browser execution requires sandbox containment"
+        return result
+
+    from tools.browser.sandbox_launcher import browser_worker_image
+
+    worker_image = browser_worker_image(config)
+    if sandbox_config.image != worker_image:
+        result["ok"] = False
+        result["error"] = (
+            f"browser requires sandbox.image={worker_image!r}; "
+            f"the session worker is configured as {sandbox_config.image!r}"
+        )
+        result["hint"] = f"Set sandbox.image: {worker_image} and rebuild that image if needed."
+        return result
+    daemon_ok = False
+    worker_ok = False
+    daemon_reason = "Docker daemon unavailable"
+    try:
+        from tools.sandbox.docker_backend import docker_image_exists, docker_version
+
+        daemon_ok, daemon_reason = docker_version()
+        if daemon_ok:
+            worker_ok = bool(docker_image_exists(worker_image))
+    except Exception as exc:  # noqa: BLE001 -- probe failure means not runnable
+        daemon_reason = str(exc)
+    result["subchecks"] = [
+        {"name": "docker_daemon", "ok": bool(daemon_ok)},
+        {"name": "browser_worker_image", "ok": bool(worker_ok), "value": worker_image},
     ]
-    sandbox_enabled = bool(_SandboxConfig.from_config(config).enabled)
-    worker_image: str | None = None
-    worker_ok: bool | None = None
-    if sandbox_enabled:
-        from tools.browser.sandbox_launcher import browser_worker_image
-
-        worker_image = browser_worker_image(config)
-        try:
-            from tools.sandbox.docker_backend import docker_image_exists, docker_version
-
-            daemon_ok, _reason = docker_version()
-            if daemon_ok:
-                worker_ok = bool(docker_image_exists(worker_image))
-            else:
-                worker_ok = False
-        except Exception:  # noqa: BLE001 -- image probe failure means not runnable
-            worker_ok = False
-        subchecks.append({"name": "browser_worker_image", "ok": bool(worker_ok), "value": worker_image or ""})
-    result["subchecks"] = subchecks
-    result["health"] = health.get("detail", "")
-    host_ready = bool(sdk_ok and chromium_ok)
-    contained_ready = bool(sandbox_enabled and worker_ok)
-    if host_ready or contained_ready:
+    if worker_ok:
         result["ok"] = True
-        result["value"] = worker_image or "host playwright + chromium"
-        if contained_ready and not host_ready:
-            result["note"] = "host SDK/chromium absent — browser runs contained in the sandbox worker"
+        result["value"] = worker_image
+        result["note"] = "browser execution runs inside the sandbox worker"
         return result
-    # Optional-capability SKIP (not FAIL): without the SDK/runtime/worker the
-    # browser simply reports unavailable and execution blocks fail-closed at
-    # the backend; the doctor row stays green with an install hint.
+    # Optional-capability SKIP (not FAIL): base installs work without browser
+    # tooling, while browser execution remains unavailable and fail-closed.
     result["ok"] = True
     result["skipped"] = True
     result["status"] = SKIP_STATUS
-    if not sdk_ok:
-        result["note"] = SDK_SKIP_NOTE
-        result["hint"] = SDK_SKIP_HINT
-    elif not chromium_ok:
-        result["note"] = CHROMIUM_SKIP_NOTE
-        result["hint"] = CHROMIUM_SKIP_HINT
-    elif sandbox_enabled and not worker_ok:
-        result["note"] = WORKER_SKIP_NOTE_TEMPLATE.format(image=worker_image)
-        result["hint"] = worker_skip_hint(str(worker_image))
-    else:  # pragma: no cover - defensive; subchecks above cover the real cases
-        result["ok"] = False
-        result.pop("skipped", None)
-        result.pop("status", None)
-        result["error"] = "browser backend not ready"
-        result["hint"] = str(health.get("detail", ""))
-    result["value"] = worker_image or ""
+    result["note"] = WORKER_SKIP_NOTE_TEMPLATE.format(image=worker_image)
+    result["hint"] = worker_skip_hint(worker_image)
+    if not daemon_ok:
+        result["detail"] = str(daemon_reason)
+    result["value"] = worker_image
     return result

@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import copy
 import os
+import site
+import sys
+import sysconfig
 from pathlib import Path
 from typing import Any
 
@@ -71,27 +74,34 @@ def get_packaged_config_path() -> Path | None:
 
 
 def get_webui_dist_dir() -> Path | None:
+    # Wheel data-files are installed beneath the environment's data prefix,
+    # which is not necessarily on sys.path and cannot be found via resources.
+    data_roots = (Path(sys.prefix), Path(sysconfig.get_path("data")), Path(site.getuserbase()))
+    for root in dict.fromkeys(data_roots):
+        candidate = root / "webui" / "dist"
+        if (candidate / "index.html").is_file():
+            return candidate
     if _resources is not None:
         for pkg in ("webui", "tools.webui"):
             try:
                 traversable = _resources.files(pkg)  # type: ignore
                 candidate = Path(str(traversable))
-                if candidate.is_dir():
-                    return candidate
                 dist = candidate / "dist"
-                if dist.is_dir():
+                if (dist / "index.html").is_file():
                     return dist
+                if (candidate / "index.html").is_file():
+                    return candidate
             except Exception:
                 continue
         try:
             traversable = _resources.files("tools").joinpath("webui/dist")  # type: ignore
             candidate = Path(str(traversable))
-            if candidate.is_dir():
+            if (candidate / "index.html").is_file():
                 return candidate
         except Exception:
             pass
     candidate = _repo_root_from_this_file() / "webui" / "dist"
-    if candidate.is_dir():
+    if (candidate / "index.html").is_file():
         return candidate
     return None
 

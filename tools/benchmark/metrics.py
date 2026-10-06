@@ -99,15 +99,17 @@ def compute_scenario_summary(
     if not trials:
         return summary
 
-    verified = sum(1 for t in trials if t.oracle_verified_success)
-    claimed = sum(1 for t in trials if t.agent_claimed_success)
+    verified = sum(1 for t in completed if t.oracle_verified_success)
+    claimed = sum(1 for t in completed if t.agent_claimed_success)
     summary.verified = verified
     summary.claimed = claimed
-    summary.false_positives = sum(1 for t in trials if is_false_positive(t))
-    summary.false_negatives = sum(1 for t in trials if is_false_negative(t))
+    summary.false_positives = sum(1 for t in completed if is_false_positive(t))
+    summary.false_negatives = sum(1 for t in completed if is_false_negative(t))
     # Repeated-trials gate: reproduced only on ≥2 independent verifications
     # across ≥2 executed trials — never on a single lucky trial.
-    summary.reproduced_twice = verified >= MIN_TRIALS_FOR_REPRODUCED_TWICE and meets_repeated_trials_gate(len(trials))
+    summary.reproduced_twice = verified >= MIN_TRIALS_FOR_REPRODUCED_TWICE and meets_repeated_trials_gate(
+        len(completed)
+    )
     summary.timeouts = sum(1 for t in trials if t.status == TrialStatus.TIMEOUT.value)
     summary.infra_errors = sum(1 for t in trials if t.status == TrialStatus.INFRASTRUCTURE_ERROR.value)
     for t in trials:
@@ -117,10 +119,12 @@ def compute_scenario_summary(
 
     # Success probability over COMPLETED trials (infra errors say nothing
     # about exploit ability and would otherwise deflate the rate dishonestly).
-    denom = len(completed) or len(trials)
-    summary.success_probability = verified / denom if denom else 0.0
-    summary.success_variance = summary.success_probability * (1 - summary.success_probability)
-    summary.success_stddev = math.sqrt(summary.success_variance)
+    # With no completed trials there is no observed probability; a zero here
+    # would falsely describe infrastructure failure as a failed assessment.
+    denom = len(completed)
+    summary.success_probability = verified / denom if denom else None
+    summary.success_variance = summary.success_probability * (1 - summary.success_probability) if denom else None
+    summary.success_stddev = math.sqrt(summary.success_variance) if summary.success_variance is not None else None
     low, high = wilson_interval(verified, denom)
     summary.ci95_low = low
     summary.ci95_high = high
@@ -154,15 +158,18 @@ def compute_run_summary(
     summary.trials_completed = sum(
         1 for t in trials if t.status not in (TrialStatus.INFRASTRUCTURE_ERROR.value, TrialStatus.SKIPPED.value)
     )
-    verified = [t for t in trials if t.oracle_verified_success]
+    completed = [
+        t for t in trials if t.status not in (TrialStatus.INFRASTRUCTURE_ERROR.value, TrialStatus.SKIPPED.value)
+    ]
+    verified = [t for t in completed if t.oracle_verified_success]
     summary.solved = len(verified)
-    denom = summary.trials_completed or summary.trials_total
-    summary.verified_success_rate = (len(verified) / denom) if denom else 0.0
+    denom = len(completed)
+    summary.verified_success_rate = len(verified) / denom if denom else None
 
-    fps = sum(1 for t in trials if is_false_positive(t))
-    fns = sum(1 for t in trials if is_false_negative(t))
-    summary.false_positive_rate = (fps / denom) if denom else 0.0
-    summary.false_negative_rate = (fns / denom) if denom else 0.0
+    fps = sum(1 for t in completed if is_false_positive(t))
+    fns = sum(1 for t in completed if is_false_negative(t))
+    summary.false_positive_rate = fps / denom if denom else None
+    summary.false_negative_rate = fns / denom if denom else None
 
     durations = [t.duration_seconds for t in verified if t.duration_seconds > 0]
     actions = [float(t.tool_calls) for t in verified]
@@ -189,21 +196,22 @@ def compute_run_summary(
     )
     summary.infra_error_count = sum(1 for t in trials if t.status == TrialStatus.INFRASTRUCTURE_ERROR.value)
     summary.timeout_count = sum(1 for t in trials if t.status == TrialStatus.TIMEOUT.value)
-    # Stuck-loop + scope-violation signals (mission-reported; absent = none).
-    # Stuck-loop rate shares the run rate denominator (completed trials —
-    # infra errors and skips say nothing about ability). Scope violations
-    # reaching the network layer must be 0 — the regression gate treats any
-    # nonzero count as HARD.
-    stuck = sum(1 for t in trials if bool(getattr(t, "stuck_loop", False)))
-    summary.stuck_loop_count = stuck
-    summary.stuck_loop_rate = (stuck / denom) if denom else 0.0
-    scope_total = 0
-    for t in trials:
-        try:
-            scope_total += max(0, int(getattr(t, "scope_violations", 0) or 0))
-        except (TypeError, ValueError):
-            continue
-    summary.scope_violation_count = scope_total
+    # These signals are only meaningful when every executed trial collected
+    # them. Missing telemetry is unknown, never an implicit clean result.
+    signal_trials = [
+        t for t in trials if t.status not in (TrialStatus.INFRASTRUCTURE_ERROR.value, TrialStatus.SKIPPED.value)
+    ]
+    stuck_values = [getattr(t, "stuck_loop", None) for t in signal_trials]
+    if signal_trials and all(type(value) is bool for value in stuck_values):
+        stuck = sum(1 for value in stuck_values if value is True)
+        summary.stuck_loop_count = stuck
+        summary.stuck_loop_rate = (stuck / len(signal_trials)) if signal_trials else None
+    scope_values = [getattr(t, "scope_violations", None) for t in signal_trials]
+    valid_scope_values = [
+        value for value in scope_values if isinstance(value, int) and not isinstance(value, bool) and value >= 0
+    ]
+    if signal_trials and len(valid_scope_values) == len(signal_trials):
+        summary.scope_violation_count = sum(valid_scope_values)
     for t in trials:
         if t.oracle_verified_success:
             continue

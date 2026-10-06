@@ -2,8 +2,11 @@
 // a global search, a compact status overview, the active category, and a
 // sticky unsaved-changes bar. Everything edits one shared draft.
 
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { useBlocker, type BlockerFunction } from "react-router-dom";
 import { Settings } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { SettingsDraftProvider, useSettingsDraft } from "./useSettingsDraft";
 import { SettingsNav } from "./SettingsNav";
 import { SettingsSearch } from "./SettingsSearch";
@@ -28,7 +31,23 @@ export function SettingsPage() {
 
 function SettingsPageInner() {
   const [category, setCategory] = useState<SettingCategory>("general");
-  const { savedAt, errors } = useSettingsDraft();
+  const { savedAt, errors, dirtyCount } = useSettingsDraft();
+  const shouldBlockNavigation = useCallback<BlockerFunction>(
+    ({ currentLocation, nextLocation }) =>
+      dirtyCount > 0 && currentLocation.pathname === "/system" && nextLocation.pathname !== "/system",
+    [dirtyCount],
+  );
+  const blocker = useBlocker(shouldBlockNavigation);
+
+  useEffect(() => {
+    if (dirtyCount === 0) return;
+    const warnBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", warnBeforeUnload);
+    return () => window.removeEventListener("beforeunload", warnBeforeUnload);
+  }, [dirtyCount]);
 
   const onSearchSelect = (cat: SettingCategory, section: string, field: string) => {
     setCategory(cat);
@@ -82,6 +101,41 @@ function SettingsPageInner() {
       </div>
 
       <UnsavedChangesBar />
+      <Dialog
+        open={blocker.state === "blocked"}
+        onOpenChange={(open) => {
+          if (!open && blocker.state === "blocked") blocker.reset();
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Discard unsaved settings?</DialogTitle>
+            <DialogDescription>
+              You have unsaved settings changes. Stay here to keep editing, or discard them and continue to the page you selected.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => {
+                if (blocker.state === "blocked") blocker.reset();
+              }}
+            >
+              Stay on settings
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              onClick={() => {
+                if (blocker.state === "blocked") blocker.proceed();
+              }}
+            >
+              Discard changes and leave
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

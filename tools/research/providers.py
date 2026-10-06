@@ -13,6 +13,7 @@ import urllib.request
 from abc import ABC, abstractmethod
 from typing import Any
 
+from tools.research.http_fetch import FetchPolicy, fetch_bytes
 from tools.research.models import (
     RESEARCH_API_KEY_MISSING,
     RESEARCH_FETCH_FAILED,
@@ -26,8 +27,6 @@ from tools.research.models import (
 )
 from tools.research.text_utils import (
     _clean_text,
-    _coerce_links,
-    _coerce_mapping,
     _extract_links,
     _fallback_strip_html,
     _parse_search_payload,
@@ -110,7 +109,13 @@ class ResearchProvider(ABC):
 
 
 class OllamaResearchProvider(ResearchProvider):
-    """Ollama official web_search/web_fetch provider."""
+    """Ollama search provider.
+
+    Page fetching uses :class:`StdlibFetchProvider`, which validates and pins
+    DNS results before connecting. The Ollama ``web_fetch`` API resolves the
+    URL in a separate service, so local scope checks cannot constrain its
+    destination and it is intentionally not used.
+    """
 
     name = "ollama"
 
@@ -136,14 +141,17 @@ class OllamaResearchProvider(ResearchProvider):
                 "Ollama web_fetch is disabled in config",
                 provider=self.name,
             )
-        self._require_api_key()
-        return await asyncio.to_thread(self._fetch_sync, url)
+        raise ResearchProviderError(
+            RESEARCH_PROVIDER_UNAVAILABLE,
+            "Ollama URL fetching is disabled because its remote resolver cannot enforce local destination policy; the scope-checked stdlib fetcher will be tried instead",
+            provider=self.name,
+        )
 
     def _require_api_key(self) -> None:
         if not os.getenv(self.settings.api_key_env):
             raise ResearchProviderError(
                 RESEARCH_API_KEY_MISSING,
-                f"set {self.settings.api_key_env} to use Ollama web search/fetch",
+                f"set {self.settings.api_key_env} to use Ollama web search",
                 provider=self.name,
             )
 
@@ -171,31 +179,6 @@ class OllamaResearchProvider(ResearchProvider):
         except TypeError:
             payload = web_search(query)
         return _parse_search_payload(payload, self.name, max_results)
-
-    def _fetch_sync(self, url: str) -> FetchResult:
-        ollama = self._ollama_module()
-        web_fetch = getattr(ollama, "web_fetch", None)
-        if web_fetch is None:
-            raise ResearchProviderError(
-                RESEARCH_PROVIDER_UNAVAILABLE,
-                "installed ollama package does not expose web_fetch",
-                provider=self.name,
-            )
-        payload = web_fetch(url)
-        data = _coerce_mapping(payload)
-        title = _clean_text(str(data.get("title") or ""))
-        content = _clean_text(str(data.get("content") or ""))
-        links = _coerce_links(data.get("links"))
-        if len(content) > self.max_content_chars:
-            content = content[: self.max_content_chars] + "\n[truncated]"
-        return FetchResult(
-            url=str(data.get("url") or url),
-            title=title,
-            content=content,
-            links=links,
-            provider=self.name,
-            ok=True,
-        )
 
 
 class SerpAPIResearchProvider(ResearchProvider):
@@ -266,9 +249,19 @@ class StdlibFetchProvider(ResearchProvider):
 
     name = "stdlib"
 
-    def __init__(self, *, timeout_seconds: int, max_content_chars: int, user_agent: str) -> None:
+    def __init__(
+        self,
+        *,
+        timeout_seconds: int,
+        max_content_chars: int,
+        user_agent: str,
+        allow_local_fetch: bool = False,
+        allowed_domains: list[str] | None = None,
+        blocked_domains: list[str] | None = None,
+    ) -> None:
         super().__init__(timeout_seconds=timeout_seconds, max_content_chars=max_content_chars)
         self.user_agent = user_agent
+        self.fetch_policy = FetchPolicy(allow_local_fetch, tuple(allowed_domains or ()), tuple(blocked_domains or ()))
 
     async def _search(self, query: str, *, max_results: int) -> list[SearchResult]:
         raise ResearchProviderError(
@@ -281,19 +274,10 @@ class StdlibFetchProvider(ResearchProvider):
         return await asyncio.to_thread(self._fetch_sync, url)
 
     def _fetch_sync(self, url: str) -> FetchResult:
-        req = urllib.request.Request(
-            url,
-            headers={
-                "User-Agent": self.user_agent,
-                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,text/plain;q=0.8,*/*;q=0.5",
-                "Accept-Language": "en-US,en;q=0.5",
-            },
-        )
         try:
-            with urllib.request.urlopen(req, timeout=self.timeout_seconds) as resp:
-                content_type = resp.headers.get("Content-Type", "")
-                body = resp.read()
-                final_url = resp.geturl()
+            body, content_type, final_url = fetch_bytes(
+                url, policy=self.fetch_policy, timeout=self.timeout_seconds, user_agent=self.user_agent
+            )
         except urllib.error.HTTPError as exc:
             return FetchResult(
                 url=url,

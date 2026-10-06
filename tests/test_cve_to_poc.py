@@ -65,18 +65,25 @@ def test_hallucinated_url_is_filtered_to_no_verified_poc(monkeypatch):
         }
     ).encode()
 
+    candidate_url = "https://github.com/zverok/openssh-regreSSHion-exploit"
+
     def fake_urlopen(req, timeout=None):
         url = req.full_url if hasattr(req, "full_url") else str(req)
         if "api.github.com/search" in url:
             return _FakeResp(gh_payload, 200)
-        # existence check on the repo URL -> 404
-        return _FakeResp(b"", 404)
+        raise AssertionError(f"unexpected request through urllib: {url}")
+
+    def fake_probe_url(url, **kwargs):
+        assert url == candidate_url
+        assert "github.com" in kwargs["policy"].allowed_domains
+        return 404, url
 
     # searchsploit not installed -> FileNotFoundError path
     def fake_run(cmd, **kw):
         raise FileNotFoundError("no searchsploit")
 
     monkeypatch.setattr("tools.exploit_search.urllib.request.urlopen", fake_urlopen)
+    monkeypatch.setattr("tools.exploit_search.probe_url", fake_probe_url)
     monkeypatch.setattr("tools.exploit_search.subprocess.run", fake_run)
 
     out = s.cve_to_poc("CVE-2024-6387")
@@ -104,10 +111,16 @@ def test_verified_github_repo_returned(monkeypatch):
     def fake_urlopen(req, timeout=None):
         return _FakeResp(gh_payload, 200)  # both search and existence check 200
 
+    def fake_probe_url(url, **kwargs):
+        assert url == "https://github.com/zverok/openssh-regreSSHion-real"
+        assert "github.com" in kwargs["policy"].allowed_domains
+        return 200, url
+
     def fake_run(cmd, **kw):
         raise FileNotFoundError("no searchsploit")
 
     monkeypatch.setattr("tools.exploit_search.urllib.request.urlopen", fake_urlopen)
+    monkeypatch.setattr("tools.exploit_search.probe_url", fake_probe_url)
     monkeypatch.setattr("tools.exploit_search.subprocess.run", fake_run)
 
     out = s.cve_to_poc("CVE-2024-6387")
@@ -162,10 +175,16 @@ def test_cve_to_poc_result_cached(monkeypatch):
         seen.append(req.full_url if hasattr(req, "full_url") else str(req))
         return _FakeResp(gh_payload, 200)
 
+    def fake_probe_url(url, **kwargs):
+        seen.append(url)
+        assert "github.com" in kwargs["policy"].allowed_domains
+        return 200, url
+
     def fake_run(cmd, **kw):
         raise FileNotFoundError("no searchsploit")
 
     monkeypatch.setattr("tools.exploit_search.urllib.request.urlopen", fake_urlopen)
+    monkeypatch.setattr("tools.exploit_search.probe_url", fake_probe_url)
     monkeypatch.setattr("tools.exploit_search.subprocess.run", fake_run)
     monkeypatch.delenv("GITHUB_TOKEN", raising=False)
     # Age out any unauth throttle so the first call exercises GitHub.
@@ -192,12 +211,18 @@ def test_cve_to_poc_unauth_github_throttled(monkeypatch):
     def fake_urlopen(req, timeout=None):
         url = req.full_url if hasattr(req, "full_url") else str(req)
         seen.append(url)
-        return _FakeResp(b"", 200)  # every existence check verifies
+        raise AssertionError(f"throttled GitHub search made an API request: {url}")
+
+    def fake_probe_url(url, **kwargs):
+        seen.append(url)
+        assert "github.com" in kwargs["policy"].allowed_domains
+        return 200, url
 
     def fake_run(cmd, **kw):
         raise FileNotFoundError("no searchsploit")
 
     monkeypatch.setattr("tools.exploit_search.urllib.request.urlopen", fake_urlopen)
+    monkeypatch.setattr("tools.exploit_search.probe_url", fake_probe_url)
     monkeypatch.setattr("tools.exploit_search.subprocess.run", fake_run)
     monkeypatch.delenv("GITHUB_TOKEN", raising=False)
     s._last_gh_unauth_search = time.monotonic()  # just searched unauth
@@ -206,3 +231,27 @@ def test_cve_to_poc_unauth_github_throttled(monkeypatch):
     assert not any("api.github.com/search" in u for u in seen), "unauth GitHub search must be skipped"
     assert out.startswith("CVE_TO_POC_RESULTS:")
     assert "https://github.com/o/nvd-poc" in out
+
+
+def test_untrusted_nvd_reference_authority_is_never_probed(monkeypatch):
+    s = _make_search()
+    probe_calls: list[str] = []
+
+    def fake_urlopen(req, timeout=None):
+        raise AssertionError("throttled GitHub search made an API request")
+
+    def fake_probe_url(url, **kwargs):
+        probe_calls.append(url)
+        return 200, url
+
+    monkeypatch.setattr("tools.exploit_search.urllib.request.urlopen", fake_urlopen)
+    monkeypatch.setattr("tools.exploit_search.probe_url", fake_probe_url)
+    s._last_gh_unauth_search = float("inf")
+
+    out = s.cve_to_poc(
+        "CVE-2024-6387",
+        nvd_refs=["https://github.com.attacker.example/o/poc", "https://github.com@attacker.example/o/poc"],
+    )
+
+    assert out.startswith("NO_VERIFIED_POC_FOUND:")
+    assert probe_calls == []

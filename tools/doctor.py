@@ -52,7 +52,6 @@ def _check_imports(config: dict[str, Any] | None = None) -> dict[str, Any]:
         "uvicorn",
         "websockets",
         "questionary",
-        "pytest",
     ]
     # Ollama is an optional provider dependency: only required when the Ollama
     # provider is actually selected (``models.provider``, default "ollama").
@@ -599,26 +598,35 @@ def _check_port(host: str, port: int) -> dict[str, Any]:
 def _check_sandbox(config: dict[str, Any] | None = None) -> dict[str, Any]:
     """Sandbox readiness: Docker CLI, daemon reachability, worker image.
 
-    When ``sandbox.enabled`` is true this check COUNTS toward failures: with
-    the sandbox on, attack execution is fail-closed, so a missing daemon or
-    worker image blocks every offensive command. When disabled it is an
-    informational pass with a note (legacy host-execution mode).
+    Agent execution always requires a sandbox. Invalid settings that disable
+    containment or request host fallback are reported as failures, and a
+    missing daemon or worker image also blocks every offensive command.
     """
-    sandbox_cfg = (config or {}).get("sandbox", {}) or {}
-    enabled = bool(_SandboxConfig.from_config(config).enabled)
+    raw_sandbox_cfg = (config or {}).get("sandbox", {})
+    sandbox_cfg = raw_sandbox_cfg if isinstance(raw_sandbox_cfg, dict) else {}
+    try:
+        sandbox = _SandboxConfig.from_config(config)
+    except (TypeError, ValueError) as exc:
+        return {
+            "name": "sandbox",
+            "enabled": True,
+            "ok": False,
+            "error": str(exc),
+            "hint": "Use sandbox.enabled: true and remove sandbox.fallback_native: true; agent execution requires containment.",
+        }
+    enabled = sandbox.enabled
     image = str(sandbox_cfg.get("image", "breachpilot-sandbox:latest") or "breachpilot-sandbox:latest")
     result: dict[str, Any] = {"name": "sandbox", "enabled": enabled, "image": image}
-    if not enabled:
-        result["ok"] = True
-        result["note"] = "sandbox disabled -- legacy host-execution mode (uncontained)"
-        return result
     try:
         from tools.sandbox.docker_backend import docker_image_exists, docker_version
     except Exception as exc:  # noqa: BLE001 -- doctor must never crash on import
         result["ok"] = False
         result["error"] = f"sandbox subsystem import failed: {exc}"
         return result
-    daemon_ok, daemon_reason = docker_version()
+    try:
+        daemon_ok, daemon_reason = docker_version()
+    except Exception as exc:  # noqa: BLE001 -- a diagnostic must report probe failures, not crash
+        daemon_ok, daemon_reason = False, str(exc)
     if not daemon_ok:
         result["ok"] = False
         result["error"] = daemon_reason

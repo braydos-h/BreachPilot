@@ -60,7 +60,7 @@ All tools are synchronous except the server itself; no `@require_allowlist` / `@
 
 ## HTTP Hardening
 
-Delegates to `tools.mcp_shared.run_mcp_http_server` (`mcp_engine_server.py:218`) — same loopback gate (`assert_loopback_bind`) and optional `MCP_HTTP_TOKEN` bearer auth as the other two servers. Non-loopback bind needs both `--allow-public-bind` and `MCP_ALLOW_PUBLIC_BIND=1`.
+Delegates to `tools.mcp_shared.run_mcp_http_server` (`mcp_engine_server.py:218`) — same loopback gate (`assert_loopback_bind`) as the other two servers. Non-loopback binds need both `--allow-public-bind` and `MCP_ALLOW_PUBLIC_BIND=1`, plus `MCP_HTTP_TOKEN` bearer authentication.
 
 ## Foreign Assistant Usage
 

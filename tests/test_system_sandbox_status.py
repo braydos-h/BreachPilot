@@ -2,7 +2,8 @@
 
 The endpoint is the read-only surface behind the WebUI Sandbox/Firewall
 card: it must always return the mode/docker/network/resources keys the card
-renders, whether Docker is up, down, or the sandbox is disabled. All
+renders, whether Docker is up, down, or the configured sandbox posture is
+blocked. All
 subprocess / Docker calls are mocked; no live daemon is touched.
 """
 
@@ -59,7 +60,7 @@ def test_sandbox_status_requires_auth(tmp_path, monkeypatch):
 
 
 def _assert_card_keys(data):
-    assert data["mode"] in ("disabled", "contained", "native_fallback", "blocked")
+    assert data["mode"] in ("contained", "blocked")
     assert isinstance(data["docker_available"], bool)
     assert isinstance(data["docker_error"], str)
     assert data["image_present"] in (True, False, None)
@@ -67,8 +68,8 @@ def _assert_card_keys(data):
         assert key in data["network"], f"network.{key} missing"
     for key in ("memory_mb", "cpus", "pids", "timeout_seconds", "output_max_bytes"):
         assert key in data["resources"], f"resources.{key} missing"
-    assert "fallback_native" in data
-    assert "fallback_reason" in data
+    assert data["fallback_native"] is False
+    assert isinstance(data["fallback_reason"], str)
     assert "backend" in data and "image" in data and "user" in data
     assert "read_only_rootfs" in data
 
@@ -95,3 +96,13 @@ def test_sandbox_status_docker_down_keys(tmp_path, monkeypatch):
     assert data["docker_available"] is False
     assert data["image_present"] is None
     assert data["docker_error"] == "daemon unreachable"
+
+
+def test_sandbox_status_rejects_legacy_disabled_config(tmp_path, monkeypatch):
+    from tools.sandbox.manager import status_report
+
+    report = status_report({"sandbox": {"enabled": False}})
+    assert report["mode"] == "blocked"
+    assert report["enabled"] is True
+    assert report["fallback_native"] is False
+    assert "sandbox.enabled=false is unsafe" in report["fallback_reason"]

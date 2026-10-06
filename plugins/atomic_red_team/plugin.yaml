@@ -3,5 +3,6 @@ version: 0.1.0
 description: Atomic Red Team test YAML generator - maps discovered weaknesses to MITRE ATT&CK techniques for detection validation. Local-only YAML generation (@audit_tool); no execution.
 author: BreachPilot
 capabilities: [mcp_tool]
+provides_mcp_tools: [generate_atomic_tests]
 # Lab build: enabled true. Local-only YAML generation (@audit_tool); no execution.
 enabled: true

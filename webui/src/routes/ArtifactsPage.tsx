@@ -173,7 +173,7 @@ function WorkspacePanel({ runId }: { runId: string }) {
   return (
     <div className="grid gap-4 md:grid-cols-[260px_minmax(0,1fr)]">
       <div className="space-y-2">
-        <Input placeholder="Filter files..." value={filter} onChange={(e) => setFilter(e.target.value)} />
+        <Input aria-label="Filter workspace files" placeholder="Filter files..." value={filter} onChange={(e) => setFilter(e.target.value)} />
         <div className="max-h-[70vh] space-y-1 overflow-auto">
           {workspace.isLoading && <SkeletonRows count={4} />}
           {workspace.error && <div className="text-sm text-destructive">Failed to load workspace.</div>}

@@ -8,17 +8,15 @@ Architecture (see docs/safety-model.md + docs/sandbox.md):
 The sandbox is the security boundary; the legacy application-layer controls
 (ScopeGate, ``@require_allowlist``, destination parsing) remain active as
 defense-in-depth. The worker is a disposable Docker container per attack
-session: cap-dropped (NET_RAW at most, never NET_ADMIN), non-root,
+session: all Linux capabilities dropped, non-root,
 no-new-privileges, bounded resources, read-only rootfs, the run workspace bound
 at ``/workspace`` only, and a default-DROP netns firewall installed by an
 ephemeral NET_ADMIN sidecar that authorizes ONLY the target allowlist (plus pinned research hosts only when `allow_research_hosts` is explicitly enabled; default off). Any
 sandbox failure DURING a session FAILS CLOSED: ``SandboxError`` subclasses
-surface as ``SANDBOX_*`` result blocks and host execution is never a
-per-command fallback. The single sanctioned fallback is the boot-time
-decision in ``resolve_manager_with_fallback``: with ``sandbox.fallback_native``
-true (explicit opt-in; default false, fail-closed) a server whose Docker stack is unusable degrades wholly to the
-documented legacy host-execution mode with a warning (surfaced by the WebUI
-home screen); ``fallback_native: false`` (default, fail-closed) fails closed instead.
+surface as ``SANDBOX_*`` result blocks. Boot-time Docker, image, and policy
+failures also leave execution blocked; neither startup nor an individual tool
+may switch agent-generated commands to host execution. Legacy configuration
+that disables containment or requests native fallback is rejected.
 
 Docker access is seam-mediated (house convention from ``tools/snapshots.py``):
 tests monkeypatch the named wrappers in ``tools.sandbox.docker_backend``,
@@ -43,7 +41,6 @@ from tools.sandbox.manager import (
     BOOT_STATE_FILE,
     SandboxManager,
     boot_state_path,
-    native_fallback_notice,
     read_boot_state,
     resolve_manager,
     resolve_manager_with_fallback,
@@ -57,7 +54,6 @@ __all__ = [
     "DockerLifecycle",
     "resolve_manager",
     "resolve_manager_with_fallback",
-    "native_fallback_notice",
     "status_report",
     "BOOT_STATE_FILE",
     "boot_state_path",

@@ -1,28 +1,9 @@
-"""Tests for the boot-time sandbox native fallback (tools/sandbox/manager.py).
+"""Regression coverage for the sandbox's fail-closed boot contract.
 
-The single sanctioned fallback: with ``sandbox.fallback_native`` true
-(explicit opt-in ONLY -- the default is false/fail-closed), a server whose
-Docker stack is unusable at boot degrades WHOLLY to the documented legacy
-host-execution mode -- ``(None, notice)`` -- instead of failing every
-execution closed. ``false`` (default) restores the strict fail-closed
-contract (a manager is returned either way and blocks at execution time).
-
-Covered invariants:
-- ``fallback_native`` defaults to false; explicit true parses.
-- resolve_manager_with_fallback: docker ok + image ok => manager, no notice.
-- docker ok + image missing => (None, notice) with fallback_native=true,
-  manager (that fail-closes later) by default.
-- docker down => same split.
-- probe exceptions never crash resolution (both the docker and image probes).
-- disabled sandbox stays (None, "") regardless of fallback_native.
-- The boot decision is recorded to the shared boot-state file, and
-  status_report reports THAT decision even when a live Docker probe would
-  say something else (the session posture never flips mid-session).
-- status_report live fallback modes (no boot state): disabled / contained /
-  native_fallback / blocked; probe exceptions never throw.
-- The notice is actionable (names the config key + remediation).
-- Tool-layer ``sandbox_fallback_notice`` renders the SANDBOX_FALLBACK line
-  from ctx.sandbox_notice and stays empty for configured host mode.
+The historical test filename is retained so existing test selection remains
+stable. Native fallback is unsupported: disabling containment or requesting a
+host-execution fallback is rejected, and an unavailable worker is recorded as
+blocked.
 """
 
 from __future__ import annotations
@@ -35,82 +16,66 @@ import pytest
 
 from tools.sandbox import docker_backend as _db
 from tools.sandbox import manager as _mgr
-from tools.sandbox.manager import (
-    NATIVE_CONSENT_ENV,
-    NATIVE_CONSENT_VALUE,
-    native_execution_consent,
-    native_fallback_notice,
-    read_boot_state,
-    resolve_manager_with_fallback,
-    status_report,
-)
+from tools.sandbox.manager import read_boot_state, resolve_manager_with_fallback, status_report
 from tools.sandbox.models import SandboxConfig
 
 
-def _consent(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Explicitly consent to native execution (developer-only path)."""
-    monkeypatch.setenv(NATIVE_CONSENT_ENV, NATIVE_CONSENT_VALUE)
-
-
 def _cfg(**overrides: Any) -> dict[str, Any]:
-    sec: dict[str, Any] = {"enabled": True, "image": "breachpilot-sandbox:latest"}
-    sec.update(overrides)
-    return {"sandbox": sec}
+    section: dict[str, Any] = {"enabled": True, "image": "breachpilot-sandbox:latest"}
+    section.update(overrides)
+    return {"sandbox": section}
 
 
-def _probe(ok: bool, reason: str = "docker down") -> Any:
+def _probe(ok: bool, reason: str = "docker down"):
     return lambda: (ok, reason)
 
 
 @pytest.fixture(autouse=True)
 def _hermetic_boot_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """Route boot-state writes/reads into tmp_path: tests must never read a
-    real session's boot file or write one into the repo (both processes
-    resolve boot_state_path(config) the same way in production; pinning it
-    here keeps the suite hermetic on any box)."""
     boot_path = tmp_path / "sandbox_boot_state.json"
     monkeypatch.setattr(_mgr, "boot_state_path", lambda config=None: boot_path)
     return boot_path
-
-
-# --------------------------------------------------------------- SandboxConfig
 
 
 def test_fallback_native_defaults_false() -> None:
     assert SandboxConfig.from_config(_cfg()).fallback_native is False
 
 
-def test_fallback_native_explicit_true() -> None:
-    cfg = SandboxConfig.from_config(_cfg(fallback_native=True))
-    assert cfg.fallback_native is True
+@pytest.mark.parametrize(
+    ("config", "message"),
+    [
+        ({"sandbox": {"enabled": False}}, "sandbox.enabled=false is unsafe"),
+        (_cfg(fallback_native=True), "sandbox.fallback_native is unsupported"),
+    ],
+)
+def test_unsafe_legacy_modes_are_rejected(config: dict[str, Any], message: str) -> None:
+    with pytest.raises(ValueError, match=message):
+        SandboxConfig.from_config(config)
 
 
-def test_missing_sandbox_section_is_contained() -> None:
-    cfg = SandboxConfig.from_config({})
-    assert cfg.enabled is True
+def test_missing_sandbox_section_uses_contained_defaults() -> None:
+    assert SandboxConfig.from_config({}).enabled is True
 
 
-def test_absent_section_with_fallback_never_returns_none(tmp_path: Path) -> None:
-    # BP-02: a partial config (no sandbox section) must resolve to a
-    # fail-closed manager, never to None (silent host execution).
-    manager, notice = resolve_manager_with_fallback(tmp_path, {}, probe=_probe(False, "no daemon"))
-    assert manager is not None
-    assert notice == ""
-    assert read_boot_state({})["mode"] == "blocked"
+def test_unsafe_legacy_modes_are_rejected_by_direct_construction() -> None:
+    with pytest.raises(ValueError, match="sandbox.enabled=false is unsafe"):
+        SandboxConfig(enabled=False, backend="docker", image="worker", user="sandbox", read_only_rootfs=True)
+    with pytest.raises(ValueError, match="fallback_native is unsupported"):
+        SandboxConfig(
+            enabled=True,
+            backend="docker",
+            image="worker",
+            user="sandbox",
+            read_only_rootfs=True,
+            fallback_native=True,
+        )
 
 
-def test_absent_section_status_report_never_disabled() -> None:
-    report = status_report({})
-    assert report["enabled"] is True
-    assert report["mode"] == "blocked"
-
-
-# --------------------------------------------- resolve_manager_with_fallback
-
-
-def test_docker_ok_image_ok_returns_manager(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_healthy_worker_resolves_contained_manager(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(_db, "docker_image_exists", lambda image: True)
+
     manager, notice = resolve_manager_with_fallback(tmp_path, _cfg(), probe=_probe(True, ""))
+
     assert manager is not None
     assert notice == ""
     state = read_boot_state(_cfg())
@@ -119,268 +84,170 @@ def test_docker_ok_image_ok_returns_manager(tmp_path: Path, monkeypatch: pytest.
     assert state["reason"] == ""
 
 
-def test_docker_ok_image_missing_opt_in_falls_back(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    _consent(monkeypatch)
+def test_missing_docker_resolves_manager_but_records_blocked(tmp_path: Path) -> None:
+    manager, notice = resolve_manager_with_fallback(tmp_path, _cfg(), probe=_probe(False, "daemon unavailable"))
+
+    assert manager is not None
+    assert notice == ""
+    state = read_boot_state(_cfg())
+    assert state is not None
+    assert state["mode"] == "blocked"
+    assert state["reason"] == "daemon unavailable"
+
+
+def test_missing_worker_image_records_blocked(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(_db, "docker_image_exists", lambda image: False)
-    manager, notice = resolve_manager_with_fallback(tmp_path, _cfg(fallback_native=True), probe=_probe(True, ""))
-    assert manager is None
-    assert "SANDBOX" in notice or "sandbox" in notice
-    assert "not built" in notice
-    assert read_boot_state(_cfg())["mode"] == "native_fallback"
 
-
-def test_docker_ok_image_missing_strict_returns_manager(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    # fallback_native=false (default): manager is returned; it fail-closes at execution.
-    monkeypatch.setattr(_db, "docker_image_exists", lambda image: False)
     manager, notice = resolve_manager_with_fallback(tmp_path, _cfg(), probe=_probe(True, ""))
+
     assert manager is not None
     assert notice == ""
-    assert read_boot_state(_cfg())["mode"] == "blocked"
+    state = read_boot_state(_cfg())
+    assert state is not None
+    assert state["mode"] == "blocked"
+    assert "not built" in state["reason"]
 
 
-def test_docker_down_opt_in_falls_back(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    _consent(monkeypatch)
-    manager, notice = resolve_manager_with_fallback(
-        tmp_path, _cfg(fallback_native=True), probe=_probe(False, "docker daemon down")
-    )
-    assert manager is None
-    assert "docker daemon down" in notice
-    assert read_boot_state(_cfg())["mode"] == "native_fallback"
+def test_image_probe_exception_resolves_to_blocked_without_crashing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def broken_image_probe(_image: str) -> bool:
+        raise OSError("image probe failed")
 
-
-def test_opt_in_without_consent_fails_closed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """#07: fallback_native=true without env consent blocks instead of going native."""
-    monkeypatch.delenv(NATIVE_CONSENT_ENV, raising=False)
-    manager, notice = resolve_manager_with_fallback(
-        tmp_path, _cfg(fallback_native=True), probe=_probe(False, "docker daemon down")
-    )
-    assert manager is not None
-    assert notice == ""
-    assert read_boot_state(_cfg())["mode"] == "blocked"
-
-
-def test_docker_down_strict_returns_manager(tmp_path: Path) -> None:
-    manager, notice = resolve_manager_with_fallback(tmp_path, _cfg(), probe=_probe(False, "docker daemon down"))
-    assert manager is not None
-    assert notice == ""
-    # Strict + unusable: recorded as blocked (the manager fail-closes later).
-    assert read_boot_state(_cfg())["mode"] == "blocked"
-
-
-def test_probe_exception_never_crashes(tmp_path: Path) -> None:
-    def boom() -> tuple[bool, str]:
-        raise RuntimeError("cli exploded")
-
-    manager, notice = resolve_manager_with_fallback(tmp_path, _cfg(), probe=boom)
-    assert manager is not None
-    assert notice == ""
-
-
-def test_image_probe_generic_exception_degrades_not_crashes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    # The image seam may raise ANYTHING (it is a documented monkeypatch seam);
-    # boot must still resolve without crashing. Default strict config returns
-    # a manager that fail-closes at execution time.
-    def boom(image: str) -> bool:
-        raise OSError("probe seam exploded")
-
-    monkeypatch.setattr(_db, "docker_image_exists", boom)
+    monkeypatch.setattr(_db, "docker_image_exists", broken_image_probe)
     manager, notice = resolve_manager_with_fallback(tmp_path, _cfg(), probe=_probe(True, ""))
+
     assert manager is not None
     assert notice == ""
-    assert read_boot_state(_cfg())["mode"] == "blocked"
+    state = read_boot_state(_cfg())
+    assert state is not None
+    assert state["mode"] == "blocked"
+    assert "image probe failed" in state["reason"]
 
 
-def test_disabled_returns_none_no_notice(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    _consent(monkeypatch)
-    manager, notice = resolve_manager_with_fallback(tmp_path, {"sandbox": {"enabled": False}}, probe=_probe(False, "x"))
-    assert manager is None
-    assert notice == ""
-    assert read_boot_state({"sandbox": {"enabled": False}})["mode"] == "disabled"
+def test_probe_exceptions_resolve_to_blocked_without_crashing(tmp_path: Path) -> None:
+    def broken_probe() -> tuple[bool, str]:
+        raise OSError("daemon probe failed")
 
+    manager, notice = resolve_manager_with_fallback(tmp_path, _cfg(), probe=broken_probe)
 
-def test_disabled_without_consent_is_blocked(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """#07: sandbox.enabled=false without env consent fail-closes (blocked manager)."""
-    monkeypatch.delenv(NATIVE_CONSENT_ENV, raising=False)
-    manager, notice = resolve_manager_with_fallback(tmp_path, {"sandbox": {"enabled": False}}, probe=_probe(False, "x"))
     assert manager is not None
-    assert read_boot_state({"sandbox": {"enabled": False}}) is not None
-    assert read_boot_state({"sandbox": {"enabled": False}})["mode"] == "blocked"
+    assert notice == ""
+    state = read_boot_state(_cfg())
+    assert state is not None
+    assert state["mode"] == "blocked"
+    assert "daemon probe failed" in state["reason"]
 
 
-def test_native_execution_consent_matrix(monkeypatch: pytest.MonkeyPatch) -> None:
-    """#07 consent gate: contained needs nothing; native needs the exact value."""
-    monkeypatch.delenv(NATIVE_CONSENT_ENV, raising=False)
-    assert native_execution_consent(_cfg())[0] is True  # contained: no consent needed
-    assert native_execution_consent({})[0] is True  # missing section: no explicit request
-    assert native_execution_consent({"sandbox": {"enabled": False}})[0] is False
-    assert native_execution_consent(_cfg(fallback_native=True))[0] is False
-    assert NATIVE_CONSENT_ENV in native_execution_consent(_cfg(fallback_native=True))[1]
-    monkeypatch.setenv(NATIVE_CONSENT_ENV, "yes")
-    assert native_execution_consent(_cfg(fallback_native=True))[0] is False  # wrong value
-    _consent(monkeypatch)
-    assert native_execution_consent({"sandbox": {"enabled": False}})[0] is True
-    assert native_execution_consent(_cfg(fallback_native=True))[0] is True
+@pytest.mark.parametrize(
+    ("config", "reason"),
+    [
+        ({"sandbox": {"enabled": False}}, "sandbox.enabled=false is unsafe"),
+        (_cfg(fallback_native=True), "sandbox.fallback_native is unsupported"),
+    ],
+)
+def test_status_report_invalid_legacy_config_is_blocked(
+    config: dict[str, Any], reason: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(_db, "docker_version", _probe(True, ""))
 
+    report = status_report(config)
 
-def test_notice_is_actionable() -> None:
-    notice = native_fallback_notice("docker daemon down")
-    assert "fallback_native" in notice
-    assert "sandbox.fallback_native: false" in notice
-    assert "NATIVE" in notice or "native" in notice
-
-
-# ---------------------------------------------------------------- status_report
-
-
-def test_status_report_disabled_mode() -> None:
-    report = status_report({"sandbox": {"enabled": False}})
-    assert report["mode"] == "disabled"
+    assert report["mode"] == "blocked"
     assert report["fallback_native"] is False
+    assert reason in report["fallback_reason"]
 
 
-def test_status_report_contained(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(_db, "docker_version", lambda: (True, ""))
-    monkeypatch.setattr(_db, "docker_image_exists", lambda image: True)
+def test_status_report_reports_contained_or_blocked_only(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(_db, "docker_version", _probe(False, "daemon unreachable"))
+
     report = status_report(_cfg())
+
+    assert report["mode"] == "blocked"
+    assert report["fallback_native"] is False
+    assert report["fallback_reason"] == "daemon unreachable"
+
+
+def test_status_report_live_probe_can_report_contained(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(_db, "docker_version", _probe(True, ""))
+    monkeypatch.setattr(_db, "docker_image_exists", lambda _image: True)
+
+    report = status_report(_cfg())
+
     assert report["mode"] == "contained"
     assert report["docker_available"] is True
     assert report["image_present"] is True
-    assert report["fallback_reason"] == ""
 
 
-def test_status_report_native_fallback_when_docker_down(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(_db, "docker_version", lambda: (False, "daemon unreachable"))
-    report = status_report(_cfg(fallback_native=True))
-    assert report["mode"] == "native_fallback"
-    assert report["fallback_reason"] == "daemon unreachable"
-    assert report["fallback_native"] is True
+def test_status_report_live_probe_reports_missing_image_as_blocked(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(_db, "docker_version", _probe(True, ""))
+    monkeypatch.setattr(_db, "docker_image_exists", lambda _image: False)
 
-
-def test_status_report_blocked_when_strict(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(_db, "docker_version", lambda: (False, "daemon unreachable"))
     report = status_report(_cfg())
+
     assert report["mode"] == "blocked"
-    assert report["fallback_native"] is False
-
-
-def test_status_report_native_fallback_when_image_missing(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(_db, "docker_version", lambda: (True, ""))
-    monkeypatch.setattr(_db, "docker_image_exists", lambda image: False)
-    report = status_report(_cfg(fallback_native=True))
-    assert report["mode"] == "native_fallback"
     assert report["image_present"] is False
     assert "not built" in report["fallback_reason"]
 
 
-def test_status_report_blocked_when_image_missing_strict(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(_db, "docker_version", lambda: (True, ""))
-    monkeypatch.setattr(_db, "docker_image_exists", lambda image: False)
-    report = status_report(_cfg())
-    assert report["mode"] == "blocked"
-    assert report["image_present"] is False
-
-
 def test_status_report_probe_exception_never_throws(monkeypatch: pytest.MonkeyPatch) -> None:
-    def boom() -> tuple[bool, str]:
-        raise OSError("status seam exploded")
+    def broken_probe() -> tuple[bool, str]:
+        raise OSError("status probe failed")
 
-    monkeypatch.setattr(_db, "docker_version", boom)
+    monkeypatch.setattr(_db, "docker_version", broken_probe)
+
     report = status_report(_cfg())
-    assert report["docker_available"] is False
+
     assert report["mode"] == "blocked"
-    assert "status seam exploded" in report["fallback_reason"]
+    assert report["docker_available"] is False
+    assert "status probe failed" in report["docker_error"]
 
 
-# --------------------------------------- status_report: boot decision is truth
-
-
-def test_status_report_prefers_boot_decision_over_live_probe(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, _hermetic_boot_state: Path
+def test_status_report_preserves_boot_decision_after_live_probe_changes(
+    _hermetic_boot_state: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # Session booted native_fallback; the operator started Docker after.
-    # The banner must NOT flip green for the running session.
-    _hermetic_boot_state.write_text(
-        json.dumps({"mode": "native_fallback", "reason": "boot-time daemon down", "recorded_at": 1.0}), encoding="utf-8"
-    )
-    monkeypatch.setattr(_db, "docker_version", lambda: (True, ""))
-    monkeypatch.setattr(_db, "docker_image_exists", lambda image: True)
-    report = status_report(_cfg())
-    assert report["mode"] == "native_fallback"
-    assert report["fallback_reason"] == "boot-time daemon down"
-    # Live probe still fills the remediation fields.
-    assert report["docker_available"] is True
-
-
-def test_status_report_boot_contained_survives_later_docker_death(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, _hermetic_boot_state: Path
-) -> None:
-    # Session booted contained; Docker dies mid-session => in-session commands
-    # fail closed, they do NOT silently degrade. The banner must not claim
-    # native execution.
     _hermetic_boot_state.write_text(
         json.dumps({"mode": "contained", "reason": "", "recorded_at": 1.0}), encoding="utf-8"
     )
-    monkeypatch.setattr(_db, "docker_version", lambda: (False, "daemon died"))
+    monkeypatch.setattr(_db, "docker_version", _probe(False, "daemon died"))
+
     report = status_report(_cfg())
+
     assert report["mode"] == "contained"
     assert report["docker_error"] == "daemon died"
 
 
-def test_status_report_ignores_invalid_boot_state(monkeypatch: pytest.MonkeyPatch, _hermetic_boot_state: Path) -> None:
-    _hermetic_boot_state.write_text(json.dumps({"mode": "garbage", "reason": "", "recorded_at": 1.0}), encoding="utf-8")
-    monkeypatch.setattr(_db, "docker_version", lambda: (True, ""))
-    monkeypatch.setattr(_db, "docker_image_exists", lambda image: True)
+def test_status_report_does_not_green_a_blocked_boot_after_docker_recovers(
+    _hermetic_boot_state: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _hermetic_boot_state.write_text(
+        json.dumps({"mode": "blocked", "reason": "worker was absent at boot", "recorded_at": 1.0}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(_db, "docker_version", _probe(True, ""))
+    monkeypatch.setattr(_db, "docker_image_exists", lambda _image: True)
+
     report = status_report(_cfg())
-    assert report["mode"] == "contained"
+
+    assert report["mode"] == "blocked"
+    assert report["fallback_reason"] == "worker was absent at boot"
 
 
-def test_boot_state_round_trip_via_resolver(tmp_path: Path) -> None:
-    resolve_manager_with_fallback(tmp_path, _cfg(), probe=_probe(False, "no daemon"))
-    state = read_boot_state(_cfg())
-    assert state is not None
-    assert state["mode"] == "blocked"
-    assert "no daemon" in state["reason"]
-
-
-# --------------------------------------------- tool-layer SANDBOX_FALLBACK line
-
-
-def test_sandbox_fallback_notice_line_from_ctx() -> None:
-    from tools.mcp_tools.sandbox_exec import sandbox_fallback_notice
-
-    class Ctx:
-        sandbox = None
-        sandbox_notice = "Docker sandbox unavailable (docker daemon down) -- ..."
-
-    line = sandbox_fallback_notice(Ctx())
-    assert line.startswith("SANDBOX_FALLBACK: ")
-    assert line.endswith("\n")
-    assert "docker daemon down" in line
-
-
-def test_read_boot_state_never_raises_on_corrupt_file(_hermetic_boot_state: Path) -> None:
-    # Regression for the narrowed catches in read_boot_state: garbage,
-    # wrong-shaped JSON, and unreadable files all mean "no state" (None),
-    # never an exception on the attack path.
+def test_corrupt_boot_state_is_ignored(_hermetic_boot_state: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _hermetic_boot_state.write_text("{not json", encoding="utf-8")
+    monkeypatch.setattr(_db, "docker_version", _probe(False, "daemon unavailable"))
+
     assert read_boot_state(_cfg()) is None
-    _hermetic_boot_state.write_text(json.dumps([1, 2, 3]), encoding="utf-8")
+    assert status_report(_cfg())["mode"] == "blocked"
+
+
+@pytest.mark.parametrize("raw_state", ["[1, 2, 3]", "null", '{"mode": "unknown"}'])
+def test_wrong_shape_or_unknown_boot_state_is_ignored(
+    _hermetic_boot_state: Path, monkeypatch: pytest.MonkeyPatch, raw_state: str
+) -> None:
+    _hermetic_boot_state.write_text(raw_state, encoding="utf-8")
+    monkeypatch.setattr(_db, "docker_version", _probe(True, ""))
+    monkeypatch.setattr(_db, "docker_image_exists", lambda _image: True)
+
     assert read_boot_state(_cfg()) is None
-    _hermetic_boot_state.write_text(json.dumps({"mode": "bogus"}), encoding="utf-8")
-    assert read_boot_state(_cfg()) is None
-    _hermetic_boot_state.unlink()
-    assert read_boot_state(_cfg()) is None
-
-
-def test_sandbox_fallback_notice_empty_for_configured_host_mode() -> None:
-    from tools.mcp_tools.sandbox_exec import sandbox_fallback_notice
-
-    class Ctx:
-        sandbox = None
-        sandbox_notice = ""  # sandbox disabled as configured, not degraded
-
-    class CtxNoAttr:
-        sandbox = None  # legacy FakeCtx duck-typing: no sandbox_notice at all
-
-    assert sandbox_fallback_notice(Ctx()) == ""
-    assert sandbox_fallback_notice(CtxNoAttr()) == ""
+    assert status_report(_cfg())["mode"] == "contained"

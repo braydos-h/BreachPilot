@@ -14,10 +14,10 @@ import { SkeletonRows } from "@/components/Loading";
 import { useSandboxStatus, type SandboxStatusResponse } from "@/api/hooks";
 import { SandboxFixDialog } from "@/routes/HomePage";
 
-type SandboxMode = "disabled" | "contained" | "native_fallback" | "blocked";
+type SandboxMode = "contained" | "blocked";
 
 function isKnownMode(mode: string): mode is SandboxMode {
-  return mode === "disabled" || mode === "contained" || mode === "native_fallback" || mode === "blocked";
+  return mode === "contained" || mode === "blocked";
 }
 
 function ModeBadge({ mode }: { mode: string }) {
@@ -33,20 +33,6 @@ function ModeBadge({ mode }: { mode: string }) {
       <Badge variant="success" data-testid="sandbox-mode-badge">
         <ShieldCheck className="mr-1 h-3 w-3" />
         Contained
-      </Badge>
-    );
-  }
-  if (mode === "disabled") {
-    return (
-      <Badge variant="muted" data-testid="sandbox-mode-badge">
-        Disabled — host execution
-      </Badge>
-    );
-  }
-  if (mode === "native_fallback") {
-    return (
-      <Badge variant="warn" data-testid="sandbox-mode-badge">
-        Native fallback — NOT contained
       </Badge>
     );
   }
@@ -73,7 +59,7 @@ export function SandboxFirewallCard() {
   const [fixOpen, setFixOpen] = useState(false);
   const data = sandbox.data;
   const reason = (data?.fallback_reason || data?.docker_error || "").trim();
-  const degraded = !!data && isKnownMode(data.mode) && data.mode !== "contained" && data.mode !== "disabled";
+  const degraded = !!data && data.mode !== "contained";
 
   return (
     <Card data-testid="sandbox-firewall-card">
@@ -123,6 +109,11 @@ function SandboxFirewallBody({
       {degraded && reason && (
         <p className="text-xs text-muted-foreground" data-testid="sandbox-fallback-reason">
           Reason: {reason}
+        </p>
+      )}
+      {!isKnownMode(data.mode) && (
+        <p className="rounded-md border border-amber-500/40 bg-amber-500/10 p-2 text-xs" role="status">
+          The server returned an unknown sandbox mode. Refresh status before starting an assessment.
         </p>
       )}
 
@@ -177,7 +168,7 @@ function SandboxFirewallBody({
           <Fact label="Image" value={data.image || "—"} />
           <Fact label="Worker user" value={data.user || "—"} />
           <Fact label="Root filesystem" value={data.read_only_rootfs ? "read-only" : "writable"} />
-          <Fact label="Native fallback" value={data.fallback_native ? "allowed" : "fail closed"} />
+          <Fact label="Host execution fallback" value="unsupported (fail closed)" />
           <Fact label="Memory" value={`${data.resources.memory_mb} MB`} />
           <Fact label="CPUs" value={String(data.resources.cpus)} />
           <Fact label="PIDs" value={String(data.resources.pids)} />

@@ -43,11 +43,17 @@ benchmark provider (XBEN is one; suites plug in via tools/benchmark/registry.py)
   **claimed** success from structured tool-outcome counters, captures token /
   model-call telemetry from the shared `llm_usage.jsonl` delta, converts the
   audit trail into structured events, and extracts sandbox facts.
-- **`verifier.py`** — the ONLY source of `oracle_verified_success`. Reuses the
+- **`verifier.py`** — independently evaluates each target condition using the
   graded eval's declarative check executors (`tools/eval_checks.py`): HTTP
   login/request probes, `file_contains` (incl. `loot://`), and `shell_command`
   through a dedicated soft-fail MCP session. A missing session degrades shell
-  checks to UNVERIFIED (fail-closed).
+  checks to UNVERIFIED (fail-closed). HTTP and TCP oracle probes are pinned to
+  the scenario's literal loopback target host and declared ports; missing
+  ports or a host/port mismatch fail closed before a request or connection.
+  The runner preserves every flag result
+  as an observation, and counts mission success only when a flag condition is
+  met and at least one mission tool action completed; pre-existing target
+  conditions cannot turn a no-op or failed mission into a success.
 - **`runner.py`** — orchestrates trials: provision → mission → verify →
   classify → persist → teardown. Async-safe, cancellable, and one failing
   trial never aborts the suite.
@@ -63,14 +69,18 @@ This is the core contract:
 
 - `agent_claimed_success` — what the agent thought (from structured tool-outcome
   counts, **not** LLM prose, exit codes, or tool output text).
-- `oracle_verified_success` — what the independent verifier confirmed on the
-  target.
+- `oracle_verified_success` — a target condition independently confirmed after
+  the mission and attributable to a mission with at least one completed tool
+  action. Individual flag results remain visible even when the mission did no
+  work or all its tool actions failed.
 
-A trial is **solved only when the oracle confirms**. When the agent claims
-success and the oracle disagrees, the trial is a `FALSE_POSITIVE` — its own
-status and failure category, surfaced prominently in reports and the WebUI.
-The inverse (oracle verified, agent undersold) is recorded as
-`false_negative` where determinable.
+A trial is **solved only when the oracle confirms and at least one mission tool
+action completed**. A target condition that predates the mission remains
+visible in its flag results, but does not make a no-op or failed mission a
+success. When the agent claims success and the oracle disagrees, the trial is a
+`FALSE_POSITIVE` — its own status and failure category, surfaced prominently in
+reports and the WebUI. The inverse (oracle verified, agent undersold) is
+recorded as `false_negative` where determinable.
 
 ## Running benchmarks
 
@@ -113,14 +123,16 @@ python main.py --benchmark xben
 > (`sandbox.network.map_host_loopback:false`), so sandboxed exploit execution
 > cannot reach the lab by construction. Loopback trials fail fast as
 > `INFRASTRUCTURE_ERROR/SANDBOX_FAILED` instead of burning the mission budget.
-> For the loopback lab, rerun with the explicit lab opt-out
-> (`sandbox.enabled:false` + `benchmark.sandbox_required:false`), or set
-> `sandbox.network.map_host_loopback:true` (dev-lab localhost only, never for
-> production runs).
+> For a loopback lab, use the sandbox's explicit development-only host-loopback
+> mapping (`sandbox.network.map_host_loopback:true`). Do not disable the
+> sandbox: `sandbox.enabled:false` is rejected, and
+> `benchmark.sandbox_required:false` never enables uncontained attack execution.
 
 A manifest can also declare `target_type: "docker"` + `target_image`, in which
 case the benchmark provisions one container per trial itself (reset strategy
 `recreate` or `restart`).
+Published container ports bind to the manifest's literal loopback IP; Docker
+benchmark targets reject hostname aliases and non-loopback bind addresses.
 
 ## Reproducibility
 
@@ -142,11 +154,23 @@ probability, variance/standard deviation, and a Wilson 95% confidence
 interval, plus a `reproduced_twice` flag (verified on ≥2 independent trials
 — the repeated-trials gate; rolled up to `reproduced_twice_rate` over
 verified scenarios). Runs also aggregate `stuck_loop_rate` (mission-reported
-stuck-loop signals over completed trials) and `scope_violation_count`
-(violations observed reaching the network layer — must be 0; sandbox blocks
-are counted separately as containment working, not violations). A single
-lucky trial never reads as reliable — with one trial the CI spans most of
-the range and `reproduced_twice` stays false.
+stuck-loop signals over executed trials) and `scope_violation_count`
+(violations observed reaching the network layer; when measured, this must be
+0. Sandbox blocks are counted separately as containment working, not
+violations). These two safety signals are nullable. `TrialResult.stuck_loop`
+and `TrialResult.scope_violations` use `null` when the runner did not collect
+the signal; this is unknown, not a clean trial. The run summary aggregates a
+signal only when every executed trial has a valid measurement for it, so one
+missing trial makes that summary field `null`. `SKIPPED` and
+`INFRASTRUCTURE_ERROR` trials are excluded from the completeness check. A
+single lucky trial never reads as reliable — with one trial the CI spans most
+of the range and `reproduced_twice` stays false.
+
+`--check-regression` fails closed for these safety metrics: a missing or
+malformed baseline measurement, or an unavailable current measurement,
+produces a hard regression finding. Any measured nonzero scope-violation
+count is also hard. The benchmark CLI returns non-zero for a hard finding;
+`null` is never converted to zero for these checks.
 
 ## Failure classification
 
@@ -174,11 +198,11 @@ Writes are atomic; a killed run never leaves a half-written JSON.
 
 ## Sandbox behavior
 
-All benchmark attack execution funnels through the existing sandbox
-(`tools/sandbox/`). With `benchmark.sandbox_required: true` (the default), a
-run without `sandbox.enabled` marks every trial
-`INFRASTRUCTURE_ERROR/SANDBOX_FAILED` — **there is no host-execution
-fallback**. Runs record sandbox enabled state, image + digest, container id,
+All benchmark attack execution funnels through the required sandbox
+(`tools/sandbox/`). `benchmark.sandbox_required` controls whether a benchmark
+run requires sandbox availability for its trial gate; it does not disable
+sandboxing or permit host execution. Invalid `sandbox.enabled:false`
+configuration is rejected. Runs record sandbox enabled state, image + digest, container id,
 network-policy fingerprint, authorized destinations, and blocked/failure
 counts. `tools/sandbox/family_audit.py` is the enforceable registry of every
 MCP tool family's containment status (sandboxed vs documented host exception);
@@ -202,14 +226,17 @@ links. Historical runs survive restarts (everything is on disk).
   mission, fake verifier, fake docker seams) — no model API keys, no live
   targets, plus the deterministic `fake` suite smoke path
   (`.github/workflows/benchmark.yml`).
-- **Live benchmarks** run only via manual dispatch (`workflow_dispatch`) with
-  secrets and the lab target suite up — no schedule trigger is configured
-  (`.github/workflows/benchmark.yml` has none; adding one is benchmark-gating
-  work). `--check-regression` exits non-zero on
+- **Live benchmarks** run on the main branch daily at 03:17 UTC and by manual dispatch
+  (`workflow_dispatch`) with the OpenCode Go provider. The workflow checks for
+  `OPENCODE_GO_API_KEY` before starting the loopback-only lab targets; without
+  it, the run is recorded as `SKIPPED`, uploaded as a report, and no target
+  containers start (`.github/workflows/benchmark.yml`). `--check-regression` exits non-zero on
   hard regressions so it can gate CI: verified-success drop, false-positive
   rise, any scope violation reaching the network layer, stuck-loop rise
   beyond `benchmark.regression.stuck_loop_tolerance`, and any scenario solved
-  in the baseline but unsolved now.
+  in the baseline but unsolved now. Missing/malformed stuck-loop or
+  network-layer scope telemetry in either the baseline or current run is a
+  hard regression; safety metrics are not treated as zero when absent.
 
 ## Repeated baseline (TODO 001) + XBEN (TODO 017)
 
@@ -238,7 +265,9 @@ from a clean checkout:
 
 ```bash
 docker compose -f eval_targets/docker-compose.yml up -d
-bp --benchmark xben --repeat 5
+cp config.yaml config.loopback-lab.yaml
+# Set sandbox.network.map_host_loopback: true in this dedicated local config.
+bp --config config.loopback-lab.yaml --benchmark xben --trials 5
 ```
 
 Publish `reports/eval/xben-<date>/` with per-challenge results + provenance +

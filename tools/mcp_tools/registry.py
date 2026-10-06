@@ -52,15 +52,16 @@ class ToolContext:
     researcher: WebResearcher
     audit_tool: Any
     require_allowlist: Any
-    # Disposable execution sandbox (tools/sandbox/) — None when disabled
-    # (documented legacy host-execution mode). Optional at the END so positional
-    # construction and test FakeCtx duck-typing keep working.
+    # Disposable execution sandbox (tools/sandbox/). Optional at the end for
+    # compatibility with callers constructing contexts for non-execution tools;
+    # execution helpers reject an absent manager.
     sandbox: Any | None = None
-    # Non-empty when the server degraded to legacy host-execution via the
-    # boot-time native fallback (sandbox enabled, Docker unusable,
-    # sandbox.fallback_native=true as explicit opt-in): tools embed this in results so the agent
-    # (and the audit trail) knows execution is UNCONTAINED. "" otherwise.
+    # Compatibility field retained for older tool-context constructors. The
+    # current server never selects host fallback, so this remains empty.
     sandbox_notice: str = ""
+    # Host-owned audit JSONL path; production always keeps it outside the
+    # worker's writable workspace bind.
+    audit_path: Path | None = None
 
 
 def _run_with_pgrp_timeout(*args: Any, **kwargs: Any) -> Any:

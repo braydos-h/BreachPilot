@@ -12,11 +12,12 @@ from __future__ import annotations
 import ipaddress
 import os
 import re
+from pathlib import Path
 from typing import Any
 
 from tools.command_analyzer import _endpoint_ips as _cmd_endpoint_ips
 from tools.command_analyzer import _extract_destinations as _cmd_extract_destinations
-from tools.sandbox.exceptions import SandboxError, SandboxWorkspaceError
+from tools.sandbox.exceptions import SandboxError, SandboxUnsupportedError, SandboxWorkspaceError
 from tools.sandbox.mcp_bridge import manager_from_ctx, sandbox_block
 from tools.validation_utils import extract_ips_from_command
 
@@ -24,6 +25,8 @@ __all__ = [
     "collect_command_targets",
     "run_command_in_sandbox",
     "run_argv_in_sandbox",
+    "run_tool_argv_in_sandbox",
+    "sandbox_workspace_path",
     "sandbox_error_block",
     "sandbox_fallback_notice",
     "loopback_hint",
@@ -105,8 +108,7 @@ def loopback_hint(target_ip: str, config: Any) -> str:
         "(sandbox.network.map_host_loopback:false). All commands run inside the disposable "
         "worker -- there is no host-execution fallback, do not claim you switched. Do not "
         "retry the same loopback probe; treat as TARGET_UNREACHABLE and report the operator "
-        "prerequisite (sandbox.network.map_host_loopback:true for dev-lab localhost, or "
-        "sandbox.enabled:false).\n"
+        "prerequisite (sandbox.network.map_host_loopback:true for dev-lab localhost).\n"
     )
 
 
@@ -184,28 +186,8 @@ def sandbox_error_block(exc: Exception, *, tool_name: str = "") -> str:
 
 
 def sandbox_fallback_notice(ctx: Any) -> str:
-    """``SANDBOX_FALLBACK:`` result line for the legacy host-execution path.
-
-    Non-empty only when this server process degraded to native execution via
-    the boot-time native fallback (``ctx.sandbox_notice`` set by
-    ``mcp_exploit_server``); empty when the sandbox is disabled as
-    configured -- degraded-mode executions must be loud, configured host mode
-    stays quiet.
-
-    Args:
-        ctx: Tool context carrying the optional ``sandbox_notice`` string.
-
-    Returns:
-        The ``SANDBOX_FALLBACK:`` line, or "" when not in fallback mode.
-
-    Gates:
-        None (labels the execution mode -- the boot decision already fired).
-
-    Side-effects:
-        None.
-    """
-    notice = getattr(ctx, "sandbox_notice", "") or ""
-    return f"SANDBOX_FALLBACK: {notice}\n" if notice else ""
+    """Compatibility helper retained for old integrations; native fallback is unsupported."""
+    return ""
 
 
 def _validate_timeout(timeout: Any) -> int:
@@ -302,6 +284,101 @@ def _container_path_for_caller(manager: Any, cwd_host: Any, *, tool_name: str) -
         raise SandboxWorkspaceError(f"{tool_name}: workspace path mapping failed: {exc}") from exc
 
 
+def sandbox_workspace_path(ctx: Any, path: Any, *, tool_name: str = "sandbox.execute") -> str:
+    """Map an artifact path into the worker's shared ``/workspace`` bind.
+
+    The path must be inside the session workspace. An absent manager is a
+    denial: target-facing tools may not quietly interpret a host path as a
+    worker path or execute against the host.
+    """
+    manager = manager_from_ctx(ctx)
+    if manager is None:
+        raise SandboxUnsupportedError(f"{tool_name} requires an active sandbox")
+    _validate_cwd_host(path)
+    mapped = _container_path_for_caller(manager, path, tool_name=tool_name)
+    if mapped is None:
+        raise SandboxWorkspaceError(f"{tool_name}: workspace path is required")
+    return mapped
+
+
+def run_tool_argv_in_sandbox(
+    ctx: Any,
+    argv: list[str],
+    *,
+    target_ip: str,
+    timeout: int,
+    tool_name: str,
+    targets: list[str] | None = None,
+    cwd_host: Any = None,
+    env: dict[str, str] | None = None,
+    input_text: str = "",
+    max_chars: int = 4000,
+) -> tuple[str, int | None, str, float]:
+    """Run an MCP tool command only in the configured worker.
+
+    Unlike the lower-level compatibility funnel, this adapter does not
+    permit a missing manager to select host execution. Sandbox failures are
+    returned as structured blocked output so MCP callers can preserve their
+    result contract without swallowing the denial.
+    """
+    import time
+
+    started = time.monotonic()
+    try:
+        manager = manager_from_ctx(ctx)
+        if manager is None:
+            raise SandboxUnsupportedError(f"{tool_name} requires an active sandbox")
+        # Structured MCP tools historically built output arguments from host
+        # workspace paths. Translate only paths contained by this session's
+        # mounted workspace. Other absolute paths refer to worker-image paths
+        # and remain worker-local; they are never opened on the host.
+        mapped_argv = list(argv)
+        map_path = getattr(manager, "container_path", None)
+        if callable(map_path):
+            for index, arg in enumerate(mapped_argv):
+                if not Path(arg).is_absolute():
+                    continue
+                try:
+                    mapped_argv[index] = str(map_path(Path(arg)))
+                except SandboxError:
+                    continue
+            mapped_env = dict(env or {})
+            for key, value in mapped_env.items():
+                if not Path(value).is_absolute():
+                    continue
+                try:
+                    mapped_env[key] = str(map_path(Path(value)))
+                except SandboxError:
+                    continue
+        else:
+            mapped_env = dict(env or {})
+        ran, result = run_argv_in_sandbox(
+            ctx,
+            mapped_argv,
+            target_ip=target_ip,
+            timeout=timeout,
+            cwd_host=cwd_host,
+            tool_name=tool_name,
+            targets=targets,
+            env=mapped_env,
+            input_text=input_text,
+        )
+        if not ran or result is None:
+            raise SandboxUnsupportedError(f"{tool_name} requires an active sandbox")
+        output = "\n".join(part for part in (result.stdout, result.stderr) if part)
+        output = output[-max_chars:] if max_chars > 0 else output
+        return result.status, result.exit_code, output, result.duration_seconds
+    except SandboxError as exc:
+        return "blocked", None, sandbox_error_block(exc, tool_name=tool_name), time.monotonic() - started
+    except Exception as exc:  # ponytail: unexpected contained-execution errors still fail closed
+        return (
+            "blocked",
+            None,
+            sandbox_error_block(exc, tool_name=tool_name),
+            time.monotonic() - started,
+        )
+
+
 def run_command_in_sandbox(
     ctx: Any,
     command: str,
@@ -333,10 +410,9 @@ def run_command_in_sandbox(
     Returns:
         ``(True, SandboxResult)`` on a contained execution (the sandbox
         itself is the boundary; exit codes are the agent's problem).
-        ``(False, None)`` means no sandbox manager is attached
-        (sandbox disabled => documented legacy host-execution mode).
-        Raises ``SandboxError`` on sandbox/policy/scope/entry failure
-        (caller renders the SANDBOX_* block).
+        Raises ``SandboxUnsupportedError`` when no manager is attached and
+        ``SandboxError`` on sandbox/policy/scope/entry failure (caller renders
+        the SANDBOX_* block). A missing manager never selects host execution.
 
     Gates:
         Entry validation (non-empty command, positive timeout, safe user,
@@ -349,7 +425,7 @@ def run_command_in_sandbox(
     """
     manager = manager_from_ctx(ctx)
     if manager is None:
-        return False, None
+        raise SandboxUnsupportedError(f"{tool_name or 'sandbox.execute'} requires an active sandbox worker")
     if not isinstance(command, str) or not command.strip():
         raise SandboxError("sandbox execution requires a non-empty command")
     timeout_value = _validate_timeout(timeout)
@@ -381,6 +457,8 @@ def run_argv_in_sandbox(
     cwd_host: Any = None,
     tool_name: str = "",
     targets: list[str] | None = None,
+    env: dict[str, str] | None = None,
+    input_text: str = "",
 ) -> tuple[bool, Any]:
     """Argv-list variant for structured tools (web_scan, impacket, msfvenom...).
 
@@ -400,12 +478,14 @@ def run_argv_in_sandbox(
         targets: Pre-parsed command-derived destination list (single-parse
             threading: skips ``collect_command_targets`` on ``command``;
             ``target_ip`` is still merged at the head). None = parse here.
+        env: Explicit process environment for the worker only; never inherited
+            from the MCP host.
 
     Returns:
         ``(True, SandboxResult)`` on a contained execution;
-        ``(False, None)`` when no sandbox manager is attached (documented
-        legacy host-execution mode). Raises ``SandboxError`` on
-        sandbox/policy/scope/entry failure.
+        Raises ``SandboxUnsupportedError`` when no manager is attached and
+        ``SandboxError`` on sandbox/policy/scope/entry failure. A missing
+        manager never selects host execution.
 
     Gates:
         Entry validation (non-empty argv, positive timeout, string
@@ -419,7 +499,7 @@ def run_argv_in_sandbox(
     """
     manager = manager_from_ctx(ctx)
     if manager is None:
-        return False, None
+        raise SandboxUnsupportedError(f"{tool_name or 'sandbox.execute'} requires an active sandbox worker")
     if not isinstance(argv, list) or not argv or not all(isinstance(a, str) and a for a in argv):
         raise SandboxError("sandbox execution requires a non-empty argv list of strings")
     if target_ip is None:
@@ -443,11 +523,14 @@ def run_argv_in_sandbox(
     primary = targets[0] if targets else target_text
     _enforce_full_scope(manager, targets)
     cwd = _container_path_for_caller(manager, cwd_host, tool_name=tool_value or "sandbox.execute")
-    result = manager.execute_argv(
-        argv,
-        timeout=timeout_value,
-        cwd=cwd,
-        target_ip=primary,
-        tool_name=tool_value,
-    )
+    execute_kwargs: dict[str, Any] = {
+        "timeout": timeout_value,
+        "cwd": cwd,
+        "env": env,
+        "target_ip": primary,
+        "tool_name": tool_value,
+    }
+    if input_text:
+        execute_kwargs["input_text"] = input_text
+    result = manager.execute_argv(argv, **execute_kwargs)
     return True, result

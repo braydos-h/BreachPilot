@@ -12,9 +12,9 @@ target-safe (private/internal hosts are blocked by default).
 | Component | Purpose | Input | Output |
 |---|---|---|---|
 | `tools/web_researcher.py` — `WebResearcher` (tools/web_researcher.py:545) | Provider-backed web search/fetch facade; ranks, dedupes, caches, and summarizes sources | query string or URL | `WEB_SEARCH_RESULTS:` text, `FETCHED:` text, or `ResearchBrief` JSON (tools/web_researcher.py:147) |
-| `tools/web_researcher.py` — `OllamaResearchProvider` (tools/web_researcher.py:309) | Primary search/fetch via Ollama's `web_search`/`web_fetch` (needs `OLLAMA_API_KEY`) | query / URL | `SearchResult` / `FetchResult` |
+| `tools/web_researcher.py` — `OllamaResearchProvider` | Primary search via Ollama's `web_search` (needs `OLLAMA_API_KEY`); direct URL fetching is disabled because its remote resolver cannot enforce local destination policy | query | `SearchResult` |
 | `tools/web_researcher.py` — `SerpAPIResearchProvider` (tools/web_researcher.py:398) | Fallback search via SerpAPI (DuckDuckGo engine); fetch unsupported | query | `SearchResult` list |
-| `tools/web_researcher.py` — `StdlibFetchProvider` (tools/web_researcher.py:459) | Last-resort URL fetch with stdlib HTML→text extraction | URL | `FetchResult` |
+| `tools/web_researcher.py` — `StdlibFetchProvider` | Scope-checked URL fetch with DNS-pinned connections and stdlib HTML→text extraction | URL | `FetchResult` |
 | `tools/web_researcher.py` — `validate_url` (tools/web_researcher.py:1252) | URL allow/block-list gate; blocks private/internal hosts | URL | normalized URL or `BLOCKED:` string |
 | `tools/web_researcher.py` — `source_quality_score` (tools/web_researcher.py:1328) | Ranks sources (primary hosts like nvd.nist.gov, github.com, exploit-db.com score higher) | url/title/content | int score + label |
 | `tools/exploit_search.py` — `ExploitSearch` (tools/exploit_search.py:105) | Local exploit-db search (`searchsploit --json`) + web-search delegation + CVE→verified-PoC resolution | query / CVE ID | `SEARCHSPLOIT_RESULTS:` / `CVE_TO_POC_RESULTS:` / `NO_VERIFIED_POC_FOUND:` text |
@@ -61,9 +61,9 @@ pages → extract key facts (CVE/exploit/patch sentences, web_researcher.py:947)
 
 ## Web Research
 
-- **Providers**: `ollama` (default, uses the Ollama client's `web_search` /
-  `web_fetch`, web_researcher.py:357-395), `serpapi` (search only,
-  web_researcher.py:408), `stdlib` (fetch only, web_researcher.py:475).
+- **Providers**: `ollama` (default, uses the Ollama client's `web_search`;
+  remote URL fetching is disabled), `serpapi` (search only), `stdlib` (the
+  scope-checked fetch transport with DNS-pinned connections).
   Chains are built from `provider` + `fallback_provider` (+ `stdlib` for
   fetch) in web_researcher.py:824-844; the first provider that returns
   results wins, and `fallback_used` is reported.
@@ -77,11 +77,13 @@ pages → extract key facts (CVE/exploit/patch sentences, web_researcher.py:947)
   (web_researcher.py:1055). `deep_research` produces the structured
   `ResearchBrief` with `key_facts`, `confidence`, `reliability_notes`,
   `relevant_cves`, and `suggested_next_queries`.
-- **Safety**: every URL passes `validate_url` (web_researcher.py:1252) —
-  private/internal hosts (RFC1918, localhost, `.internal`, metadata IPs)
-  are blocked unless `allow_local_fetch` is set; `allowed_domains` /
-  `blocked_domains` filters apply; queries are sanitized against shell
-  metacharacters (web_researcher.py:756). Providers carry exponential
+- **Safety**: every URL passes `validate_url` and the stdlib fetch transport's
+  DNS-pinned destination policy — private/internal hosts (RFC1918, localhost,
+  `.internal`, metadata IPs) are blocked unless `allow_local_fetch` is set;
+  `allowed_domains` / `blocked_domains` filters apply. Ollama's remote
+  `web_fetch` is disabled because local DNS validation cannot constrain the
+  separate service's connection destination. Queries are sanitized against
+  shell metacharacters (web_researcher.py:756). Providers carry exponential
   backoff after failures (web_researcher.py:290-306).
 - **Caching**: in-memory LRU `OrderedDict` caches for search and fetch,
   keyed by `provider|max_results|query` and `provider|max_content_chars|url`
@@ -262,7 +264,7 @@ contradictions/unknowns/recommended_next_tests/warnings/sources).
 | `research.min_source_quality` | medium | fetch-candidate quality threshold |
 | `research.require_api_key_for_mcp_tools` | true | gate web MCP tools on API keys |
 | `research.allow_local_fetch` | false | allow private/internal fetch targets |
-| `research.ollama.api_key_env` / `use_web_search` / `use_web_fetch` | `OLLAMA_API_KEY` / true / true | Ollama provider |
+| `research.ollama.api_key_env` / `use_web_search` / `use_web_fetch` | `OLLAMA_API_KEY` / true / true | Ollama search; `use_web_fetch` enables the local scope-checked fetch fallback |
 | `research.serpapi.api_key_env` / `endpoint` / `engine` / `region` | `SERPAPI_API_KEY` / serpapi.com / duckduckgo / us-en | SerpAPI provider |
 | `research.assistant.enabled` | true | sidecar assistant |
 | `research.assistant.model_alias` | "" | "" = active model |

@@ -19,6 +19,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 import tools.eval_harness as eh
 from tools.eval import baseline as _baseline
 from tools.eval import graded as _graded
@@ -91,16 +93,24 @@ def test_score_against_oracle_service_match():
     }
     result = eh.score_against_oracle(
         [
-            {"type": "service", "value": "http"},
-            {"type": "cve", "value": "cve-2021-44228"},
-            {"type": "service", "value": "telnet"},
+            {"type": "service", "value": "http", "evidence": "port 80 returned an HTTP response"},
+            {"type": "cve", "value": "cve-2021-44228", "evidence_refs": ["reports/scan.json"]},
+            {"type": "service", "value": "telnet", "evidence": "no matching service response"},
         ],
         oracle,
+        evidence_validator=lambda _finding: True,
     )
     assert result.true_positives == 2
     assert result.false_positives == 1
     assert result.expected_total == 2
     assert result.target_id == "t1"
+
+
+def test_score_against_oracle_does_not_reward_unsupported_matching_label():
+    oracle = {"target_id": "t1", "expected_findings": {"services": ["http"]}}
+    result = eh.score_against_oracle([{"type": "service", "value": "http"}], oracle)
+    assert result.true_positives == 0
+    assert result.false_positives == 1
 
 
 def test_score_against_oracle_negative_control():
@@ -136,6 +146,9 @@ def test_host_owned_when_conditions():
     assert eh._host_owned_when_met(good + bad, "all") is False
     assert eh._host_owned_when_met(good, ["a"]) is True
     assert eh._host_owned_when_met(good, ["zzz"]) is False
+    assert eh._host_owned_when_met(good, "never") is False
+    with pytest.raises(ValueError, match="host_owned_when"):
+        eh._host_owned_when_met(good, "bogus")
 
 
 def test_verify_flag_check_uses_executor_truth():
@@ -153,7 +166,9 @@ def test_target_score_composite_math():
     )
     score = _graded._build_target_score("t9", oracle, flags, suite_result, findings_claimed=1)
     assert score.flags_captured == 1 and score.flags_total == 1
-    assert score.hosts_owned == 1 and score.success is True
+    assert score.hosts_owned == 1 and score.success is False
+    assert score.details["oracle_target_conditions_met"] is True
+    assert score.details["positive_success_attribution"] == "unavailable"
     assert score.score == 1.0
 
 
@@ -161,11 +176,13 @@ def test_baseline_save_and_regression(tmp_path: Path):
     report = eh.EvalReport(run_id="base", timestamp="t")
     baseline = tmp_path / "baseline.json"
     eh.save_baseline(report, baseline)
-    passed, _messages = eh.check_regression(report, baseline)
-    assert passed is True
-    worse = eh.EvalReport(run_id="worse", timestamp="t")
+    passed, messages = eh.check_regression(report, baseline)
+    assert passed is False
+    assert any("no usable execution signal" in message for message in messages)
+    measured = eh.ReliabilityMetrics(live_outcome="PASS", targets_run=1, stuck_loop_rate=0.0, scope_violation_count=0)
+    worse = eh.EvalReport(run_id="worse", timestamp="t", live_outcome="PASS", reliability=measured)
     worse.targets.append(eh.TargetScore(target_id="t1", score=0.9, flags_total=1, hosts_total=1, findings_claimed=1))
-    first = eh.EvalReport(run_id="first", timestamp="t")
+    first = eh.EvalReport(run_id="first", timestamp="t", live_outcome="PASS", reliability=measured)
     first.targets.append(eh.TargetScore(target_id="t1", score=0.1, flags_total=1, hosts_total=1, findings_claimed=1))
     eh.save_baseline(worse, baseline)
     passed, messages = eh.check_regression(first, baseline)

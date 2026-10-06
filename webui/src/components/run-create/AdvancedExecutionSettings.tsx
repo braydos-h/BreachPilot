@@ -85,6 +85,7 @@ export function AdvancedExecutionSettings({
         <div className="space-y-2">
           <Label className="text-sm font-semibold">Observer mode</Label>
           <SegmentedControl
+            label="Observer mode"
             value={observerMode}
             onChange={(v) => setObserverMode(v as ObserverMode)}
             options={OBSERVER_OPTIONS.map((o) => ({ value: o, label: o.charAt(0).toUpperCase() + o.slice(1) }))}
@@ -95,7 +96,7 @@ export function AdvancedExecutionSettings({
         </div>
         <div className="space-y-2">
           <Label className="text-sm font-semibold">Recon first</Label>
-          <TriStateToggle value={reconFirst} onChange={setReconFirst} labels={{ true: "On", false: "Off", null: "Auto" }} />
+          <TriStateToggle label="Recon first" value={reconFirst} onChange={setReconFirst} labels={{ true: "On", false: "Off", null: "Auto" }} />
           <p className="text-xs text-muted-foreground">
             Run a reconnaissance phase before the goal phase. Auto = only when no goal is selected.
           </p>

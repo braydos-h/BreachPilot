@@ -38,7 +38,7 @@ body: <SettingsNav> (sidebar 44 on desktop, segmented on mobile) + <ActiveCatego
 
 | Component | File | Role |
 |-----------|------|------|
-| `SettingsNav` | `features/settings/SettingsNav.tsx` | 4 categories `general|ai|features|advanced` (icons from `settingMeta.ts`) |
+| `SettingsNav` | `features/settings/SettingsNav.tsx` | 6 categories `general|ai|runs|features|integrations|advanced` (icons from `settingMeta.ts`) |
 | `SettingsSearch` | `features/settings/SettingsSearch.tsx` | global search across all `SECTIONS`; `onSearchSelect(cat,section,field) → setCategory(cat) + requestAnimationFrame scrollIntoView #setting-${section}-${field}` |
 | `StatusOverview` | `features/settings/StatusOverview.tsx` | compact read-only chips from `capabilities/config/secrets/models/providers` |
 | `UnsavedChangesBar` | `features/settings/UnsavedChangesBar.tsx` | appears when draft dirty; Save → `usePatchConfig` (`api/hooks.ts:142`), Discard → revert |
@@ -68,7 +68,7 @@ Provider card as in `docs/webui.md: System Page` — segmented `Ollama` / `ChatG
 | ChatGPT status | `GET /providers` (`hooks.ts:248`) | `host:port`, `default_model`, badges signed-in/proxy-running/we_started |
 | OAuth | `useChatgptLogin` (`hooks.ts:294` → `POST /providers/chatgpt/login`) | surfaces URL link, tokens never reach SPA |
 | Proxy lifecycle | `useChatgptProxyStart/Stop` (`hooks.ts:302` → `POST /providers/chatgpt/proxy/{start,stop}`) | Stop gated `we_started` |
-| Ollama note | static | embeddings stay on Ollama under either provider |
+| Ollama note | static copy in `ProviderSettings.tsx` / `ProviderSetup.tsx` | says “Use Ollama for local chat models; configure embeddings separately.” Chat and embeddings have independent provider settings. The checked-in config selects `embeddings.provider: none` for provider-aware Flow A consumers; frozen Flow B's legacy agent loop still uses direct Ollama semantic memory when enabled. |
 | Secrets | `useSecrets / usePutSecrets` (`hooks.ts:169` → `GET/PUT /secrets`) | write-only inputs, `configured/missing` status |
 
 ## Features (`FeatureSettings.tsx`)

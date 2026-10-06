@@ -192,21 +192,23 @@ class TestHallucinationMatrix:
         for txt in ["meterpreter", "root cause analysis", "hashes were not found", "<html>"]:
             assert classify_exploit_outcome(txt)["outcome"] != "compromise", f"false positive on {txt!r}"
 
-    def test_strong_markers_required_for_compromise(self):
+    def test_strong_text_markers_remain_unverified_claims(self):
         from tools.exploit_agent.outcome_truth import classify_exploit_outcome
 
-        assert classify_exploit_outcome("meterpreter session 1 opened")["outcome"] == "compromise"
-        assert classify_exploit_outcome("uid=0(root) id=0")["outcome"] == "compromise"
-        assert classify_exploit_outcome("NT AUTHORITY\\SYSTEM")["outcome"] == "compromise"
-        assert classify_exploit_outcome("COMPROMISE: shell obtained via CVE-2023-1234")["outcome"] == "compromise"
+        assert classify_exploit_outcome("meterpreter session 1 opened")["outcome"] == "unverified_claim"
+        assert classify_exploit_outcome("uid=0(root) id=0")["outcome"] == "unverified_claim"
+        assert classify_exploit_outcome("NT AUTHORITY\\SYSTEM")["outcome"] == "unverified_claim"
+        assert classify_exploit_outcome("COMPROMISE: shell obtained via CVE-2023-1234")["outcome"] == "unverified_claim"
 
     def test_cred_dump_requires_strong_syntax(self):
         from tools.exploit_agent.outcome_truth import classify_exploit_outcome
 
-        assert classify_exploit_outcome("credentials: admin:password123")["outcome"] == "cred_dump"
+        assert classify_exploit_outcome("credentials: admin:password123")["outcome"] == "unverified_claim"
         assert classify_exploit_outcome("no credentials found")["outcome"] != "cred_dump"
         # Real hash hex (16+ hex chars after colon)
-        assert classify_exploit_outcome("hashes: aad3b435b51404eeaad3b435b51404ee")["outcome"] == "cred_dump"
+        assert classify_exploit_outcome("hashes: aad3b435b51404eeaad3b435b51404ee")["outcome"] == "unverified_claim"
+        assert classify_exploit_outcome("No credentials: admin:password123")["outcome"] != "unverified_claim"
+        assert classify_exploit_outcome("Expected credentials: admin:password123")["outcome"] != "unverified_claim"
 
     @pytest.mark.asyncio
     async def test_hallucinated_success_vs_oracle(self, tmp_path: Path):

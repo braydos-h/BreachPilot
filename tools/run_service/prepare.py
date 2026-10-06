@@ -103,17 +103,10 @@ def _build_campaign_result_from_records(
     # as the finding's stored verification probe (same shell_command vocabulary
     # as the killchain verify specs). retest_finding re-executes ONLY this.
     exploit_probes: dict[str, dict[str, Any]] = {}
-    # ponytail: the verified-compromise signal lives in outcome_summary, not
-    # in per-record ``status == "completed"``. A completed exploit-tool call
-    # only means the tool ran -- the tightened outcome-truth classifier must
-    # confirm a shell/root/SYSTEM/cred-dump marker for it to count as a
-    # successful exploit. The old code counted any completed exploit action
-    # as successful, inflating ``successful_exploits`` and the WebUI attack
-    # graph with runs that never got a shell.
-    summary = str(result.get("outcome_summary", "") or "")
-    _run_verified_compromise = ("compromises: " in summary and "compromises: 0" not in summary) or (
-        "cred dumps: " in summary and "cred dumps: 0" not in summary
-    )
+    # Success and its re-verification probe must come from the same audit row.
+    # A run-level summary only says that *some* action found access; applying
+    # it to all completed exploit calls misattributes both success and proof.
+    verified_records: list[dict[str, Any]] = []
     for rec in records:
         if not isinstance(rec, dict):
             continue
@@ -123,7 +116,15 @@ def _build_campaign_result_from_records(
         ts = str(rec.get("timestamp", "") or "")
         detail = str(rec.get("detail", "") or rec.get("command", "") or "")
         is_exploit = action in _EXPLOIT_TOOL_ACTIONS
-        if status in {"blocked", "analyzer_error", "SCOPE_DENIED"} or (exit_code is not None and int(exit_code) != 0):
+        has_verified_outcome = (
+            is_exploit
+            and rec.get("exploit_outcome") in {"compromise", "cred_dump"}
+            and isinstance(rec.get("outcome_evidence"), list)
+            and bool(rec.get("outcome_evidence"))
+        )
+        if status in {"blocked", "analyzer_error", "SCOPE_DENIED"} or (
+            exit_code is not None and int(exit_code) != 0 and not has_verified_outcome
+        ):
             failed.setdefault(action, []).append(detail[:200] or status)
             timeline.append(
                 {
@@ -133,8 +134,9 @@ def _build_campaign_result_from_records(
                     "metadata": {"module": action},
                 }
             )
-        elif status == "completed" and is_exploit and _run_verified_compromise:
+        elif has_verified_outcome:
             successful.append(action)
+            verified_records.append(rec)
             probe_cmd = str(rec.get("command", "") or detail or "")
             if action not in exploit_probes and probe_cmd.strip():
                 exploit_probes[action] = {"type": "shell_command", "exec": probe_cmd[:4000]}
@@ -155,11 +157,15 @@ def _build_campaign_result_from_records(
                     "metadata": {"module": action},
                 }
             )
-    # Heuristic privilege level from the outcome summary string if present.
-    for label in ("root", "SYSTEM", "system", "admin", "NT AUTHORITY"):
-        if label.lower() in summary.lower():
-            privilege_level = label.lower() if label != "NT AUTHORITY" else "system"
+    # Privilege belongs to the specific verified action. The aggregate
+    # summary is deliberately not used to infer or transfer it between rows.
+    for rec in verified_records:
+        level = str(rec.get("privilege_level", "") or "").strip().casefold()
+        if level == "root":
+            privilege_level = "root"
             break
+        if level in {"system", "nt authority\\system"}:
+            privilege_level = "system"
     return {
         "states": {
             target_ip: {

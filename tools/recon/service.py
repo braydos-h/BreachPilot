@@ -2,11 +2,11 @@
 
 Before this module, recon lived in two parallel orchestrations:
 
-- **Full** (``tools/recon/pipeline.py`` ``ReconPipeline``): direct-subprocess
+- **Full library profile** (``tools/recon/pipeline.py`` ``ReconPipeline``): direct-subprocess
   Nmap/RustScan/Masscan primary scan + ``SecondaryEnumerator`` deep
   enumeration (HTTP/SSH/SMB/LDAP/FTP/Redis/ES/Docker/RDP + opt-in TLS/SMTP/
-  DB/spider/OSINT + extended depth enumerators). Used by MCP
-  ``run_full_recon`` / ``run_udp_recon``, the swarm recon agent, and legacy.
+  DB/spider/OSINT + extended depth enumerators). This direct Python API is
+  separate from the sandbox-backed MCP recon, campaign, and swarm entrypoints.
 - **Fast / budget-limited** (``tools/fast_recon.py`` ``FastReconCoordinator``):
   dependency-aware parallel preset over the MCP session tools (``check_os``,
   ``quick_scan``, ``get_service_fingerprint``, ``search_cve_intel``,
@@ -32,10 +32,11 @@ plus ``assessment`` for the legacy sequential MCP path) while sharing:
 ``tools/fast_recon.py`` and ``tools/recon_assessment_cli.py`` are thin
 wrappers re-exporting this module; their public signatures are unchanged.
 
-Safety: this module adds NO new network paths and NO host-subprocess
-execution of agent commands. Target-touching goes through either the
-existing ``ReconPipeline`` (invoked by already-gated callers) or the
-MCP session tools (gated by ``require_allowlist`` at the MCP layer).
+Safety: the direct ``full`` library profile retains its host scanner behavior
+and must not be used as a fallback for agent-requested target recon. The MCP
+recon, campaign, and swarm entrypoints use the shared sandbox worker adapter;
+worker failures remain fail-closed. Session-based fast and assessment paths
+continue to use gated MCP tools.
 """
 
 from __future__ import annotations

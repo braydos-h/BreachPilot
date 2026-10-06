@@ -268,6 +268,12 @@ export function Layout() {
 
   return (
     <div className="flex min-h-dvh flex-col bg-background text-foreground md:flex-row xl:h-dvh xl:overflow-hidden">
+      <a
+        href="#main-content"
+        className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-[100] focus:rounded-md focus:bg-background focus:px-4 focus:py-2 focus:text-sm focus:font-medium focus:text-foreground focus:shadow-lg focus:ring-2 focus:ring-ring"
+      >
+        Skip to main content
+      </a>
       <aside className="hidden w-56 shrink-0 border-r bg-card/30 md:flex md:flex-col">
         <div className="relative flex items-center gap-2 overflow-hidden border-b px-4 py-4">
           <div className="absolute inset-0 bg-grid-sm bg-radial-fade opacity-40" aria-hidden />
@@ -357,7 +363,7 @@ export function Layout() {
         </SheetContent>
       </Sheet>
 
-      <main className="flex min-h-0 min-w-0 flex-1 flex-col xl:overflow-hidden">
+      <main id="main-content" tabIndex={-1} className="flex min-h-0 min-w-0 flex-1 flex-col xl:overflow-hidden">
         <WindowsPerformanceWarning />
         <div className="flex items-center gap-2 border-b px-4 py-1.5">
           <div className="ml-auto flex items-center gap-1">

@@ -74,19 +74,20 @@ def test_registry_split_still_separates_real_statuses():
         assert entry.status == "planned"
 
 
-def test_sandbox_opt_out_returns_in_process_launcher():
-    """sandbox.enabled:false is the explicit operator opt-out (host execution)."""
+def test_disabled_sandbox_config_is_rejected():
+    """Browser execution cannot opt out of the sandbox into host execution."""
     import types
 
     import tools.browser.sandbox_launcher as _launcher_mod
 
     launcher, block = _launcher_mod.resolve_browser_launcher(types.SimpleNamespace(), {"sandbox": {"enabled": False}})
-    assert block == ""
-    assert getattr(launcher, "kind", "") == "in_process"
+    assert launcher is None
+    assert "SANDBOX_UNAVAILABLE" in block
+    assert "invalid sandbox configuration" in block
 
 
-def test_no_manager_blocks_even_with_native_fallback():
-    """Browser never inherits sandbox.fallback_native — no manager means BLOCKED."""
+def test_native_fallback_config_is_rejected():
+    """Legacy native-fallback configuration is rejected for browser execution."""
     import types
 
     import tools.browser.sandbox_launcher as _launcher_mod
@@ -95,7 +96,40 @@ def test_no_manager_blocks_even_with_native_fallback():
     launcher, block = _launcher_mod.resolve_browser_launcher(types.SimpleNamespace(), config)
     assert launcher is None
     assert "SANDBOX_UNAVAILABLE" in block
+    assert "invalid sandbox configuration" in block
+
+
+def test_no_manager_blocks_without_host_fallback():
+    """A missing worker manager blocks browser execution."""
+    import types
+
+    import tools.browser.sandbox_launcher as _launcher_mod
+
+    config = {"sandbox": {"enabled": True, "image": "breachpilot-sandbox:browser"}}
+    launcher, block = _launcher_mod.resolve_browser_launcher(types.SimpleNamespace(), config)
+    assert launcher is None
+    assert "SANDBOX_UNAVAILABLE" in block
     assert "fail closed" in block.lower()
+
+
+def test_mismatched_session_worker_image_blocks_browser_execution():
+    """A shared non-browser image cannot satisfy the browser worker requirement."""
+    import types
+
+    import tools.browser.sandbox_launcher as _launcher_mod
+
+    config = {
+        "sandbox": {"enabled": True, "image": "breachpilot-sandbox:latest"},
+        "browser": {"enabled": True, "backend": "playwright"},
+    }
+    ctx = types.SimpleNamespace(
+        sandbox=types.SimpleNamespace(cfg=types.SimpleNamespace(image="breachpilot-sandbox:latest"))
+    )
+    launcher, block = _launcher_mod.resolve_browser_launcher(ctx, config)
+    assert launcher is None
+    assert "SANDBOX_UNAVAILABLE" in block
+    assert "sandbox.image='breachpilot-sandbox:browser'" in block
+    assert "session worker uses 'breachpilot-sandbox:latest'" in block
 
 
 def test_worker_without_playwright_blocks_with_build_hint(monkeypatch):
@@ -113,7 +147,10 @@ def test_worker_without_playwright_blocks_with_build_hint(monkeypatch):
         def execute_argv(argv, **kwargs):  # noqa: ARG004
             return types.SimpleNamespace(stdout="No module named playwright", stderr="", exit_code=1)
 
-    config = {"sandbox": {"enabled": True}, "browser": {"worker_image": "pw-missing-test:latest"}}
+    config = {
+        "sandbox": {"enabled": True, "image": "pw-missing-test:latest"},
+        "browser": {"worker_image": "pw-missing-test:latest"},
+    }
     ctx = types.SimpleNamespace(sandbox=_NoPlaywrightManager())
     launcher, block = _launcher_mod.resolve_browser_launcher(ctx, config)
     assert launcher is None

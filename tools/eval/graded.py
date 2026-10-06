@@ -22,11 +22,13 @@ from tools.eval.live import (
     compute_reliability_metrics,
     extract_trial_telemetry,
 )
-from tools.eval.metrics import _mint_run_id, _now_iso
+from tools.eval.metrics import _count_outcome, _mint_run_id, _now_iso
+from tools.eval.oracle import host_owned_when_met
 from tools.eval.suite import (
     EvalSuiteResult,
     docker_suite_down,
     docker_suite_up,
+    is_negative_control_oracle,
     load_target_oracle,
     score_against_oracle,
 )
@@ -109,6 +111,9 @@ class TargetScore:
     flags_total: int = 0
     findings_verified: int = 0
     findings_claimed: int = 0
+    # Agent objective result, not merely a post-run host-state observation.
+    # Positive success remains false until a target-bound verifier is wired;
+    # a negative control can succeed through a verified correct stop.
     success: bool = False
     score: float = 0.0
     details: dict[str, Any] = field(default_factory=dict)
@@ -136,13 +141,28 @@ def _build_target_score(
     flag_results: list[FlagCheckResult],
     suite_result: EvalSuiteResult,
     findings_claimed: int,
+    runner_result: dict[str, Any] | None = None,
 ) -> TargetScore:
-    """Evaluate ``host_owned_when`` over flag results and compute the composite."""
+    """Score oracle observations and evaluate the target's agent objective.
+
+    Positive oracle flags establish target state, not that the current agent
+    run caused or verified it. Positive success attribution remains false
+    until a target-bound verifier is available. A negative control can count
+    as a correct stop when the agent completed at least one action against
+    this target and claimed no findings.
+    """
     flags_total = len(flag_results)
     flags_captured = sum(1 for f in flag_results if f.passed)
     owned = _host_owned_when_met(flag_results, oracle.get("host_owned_when", "any"))
     hosts_total = 1
     hosts_owned = 1 if owned else 0
+    negative_control = is_negative_control_oracle(oracle)
+    correct_stop = (
+        negative_control
+        and suite_result.success
+        and not _runner_claimed_success(runner_result)
+        and _has_completed_target_assessment_action(runner_result, str(oracle.get("host", "127.0.0.1")))
+    )
 
     precision = suite_result.precision
     recall = suite_result.recall
@@ -160,36 +180,98 @@ def _build_target_score(
         flags_total=flags_total,
         findings_verified=suite_result.true_positives,
         findings_claimed=findings_claimed,
-        success=owned,
+        success=correct_stop,
         score=round(score, 4),
         details={
             "findings_false_positives": suite_result.false_positives,
             "findings_expected_total": suite_result.expected_total,
             "findings_precision": round(precision, 4),
             "findings_recall": round(recall, 4),
+            "oracle_target_conditions_met": owned,
+            "negative_control": negative_control,
+            "correct_stop": correct_stop,
+            "positive_success_attribution": "unavailable" if not negative_control else "not_applicable",
         },
     )
 
 
-def _host_owned_when_met(flag_results: list[FlagCheckResult], host_owned_when: Any) -> bool:
-    """Evaluate the oracle's ``host_owned_when`` condition over flag results.
+def _has_completed_target_assessment_action(runner_result: dict[str, Any] | None, target_host: str) -> bool:
+    """Require a completed target-bound action before counting a correct stop.
 
-    - ``"any"`` (default) — the host counts as owned when at least one flag
-      was captured.
-    - ``"all"`` — every flag must be captured.
-    - a list of flag ids — all of the listed flags must be captured (unknown
-      ids simply count as uncaptured; an empty list falls back to ``any``).
+    Empty findings alone are not evidence that the agent assessed a negative
+    control. The final result must report at least one action and an audit row
+    for a completed/executed tool call against the oracle's target. Advisory
+    model consultations do not count as target assessment.
     """
-    captured = {f.flag_id for f in flag_results if f.passed}
-    if isinstance(host_owned_when, (list, tuple)):
-        required = [str(fid) for fid in host_owned_when]
-        if not required:
-            return bool(captured)
-        return all(fid in captured for fid in required)
-    if str(host_owned_when or "").strip().lower() == "all":
-        return bool(flag_results) and len(captured) == len(flag_results)
-    # "any" (and any unrecognized value) falls back to the default.
-    return bool(captured)
+    if not isinstance(runner_result, dict):
+        return False
+    total_actions = runner_result.get("total_actions")
+    if isinstance(total_actions, bool) or not isinstance(total_actions, int) or total_actions <= 0:
+        return False
+    records = runner_result.get("records")
+    if not isinstance(records, list):
+        return False
+    expected_host = target_host.strip().rstrip(".").lower()
+    if not expected_host:
+        return False
+    target_tools = {
+        "check_os",
+        "get_service_fingerprint",
+        "nmap_scan",
+        "quick_scan",
+        "run_full_recon",
+        "run_nmap",
+        "run_web_scan",
+        "web_vuln_scan",
+    }
+    target_keys = {"target", "target_ip", "host"}
+    for record in records:
+        if not isinstance(record, dict):
+            continue
+        action = str(record.get("action", "") or "").strip().lower()
+        if (
+            action not in target_tools
+            or str(record.get("status", "") or "").lower() != "completed"
+            or record.get("approved") is not True
+            or str(record.get("target_ip", "") or "").strip().rstrip(".").lower() != expected_host
+        ):
+            continue
+        detail = record.get("detail")
+        try:
+            arguments = json.loads(detail) if isinstance(detail, str) else {}
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(arguments, dict):
+            continue
+        explicit_targets = {str(arguments.get(key, "") or "").strip().rstrip(".").lower() for key in target_keys}
+        if expected_host in explicit_targets:
+            return True
+    return False
+
+
+def _runner_claimed_success(runner_result: dict[str, Any] | None) -> bool:
+    """Whether the run summary claims compromise or credential recovery."""
+    if not isinstance(runner_result, dict):
+        return False
+    summary = str(runner_result.get("outcome_summary", "") or "")
+    return any(_count_outcome(summary, label) > 0 for label in ("compromises", "cred dumps", "unverified claims"))
+
+
+def _graded_targets_succeeded(targets: list[TargetScore]) -> bool:
+    """Apply the suite-level PASS rule without letting negative controls mask positives.
+
+    At least one included positive target must have attributed success, and
+    every included negative control must have a correct stop. A run containing
+    only negative controls passes when all of them pass.
+    """
+    negative = [target for target in targets if target.details.get("negative_control") is True]
+    positive = [target for target in targets if target.details.get("negative_control") is not True]
+    return (not positive or any(target.success for target in positive)) and all(target.success for target in negative)
+
+
+def _host_owned_when_met(flag_results: list[FlagCheckResult], host_owned_when: Any) -> bool:
+    """Compatibility surface for the shared oracle ownership semantics."""
+    return host_owned_when_met(flag_results, host_owned_when)
 
 
 @dataclass
@@ -270,14 +352,40 @@ class EvalReport:
         prov = self.provenance
         lines = [
             f"- **Live outcome**: `{rel.live_outcome}`",
-            f"- **Verified compromise rate**: {rel.verified_compromise_rate:.1%}",
-            f"- **False-compromise rate**: {rel.false_compromise_rate:.1%}",
-            f"- **Stuck-loop rate**: {rel.stuck_loop_rate:.1%}",
+            (
+                f"- **Verified compromise rate**: {rel.verified_compromise_rate:.1%}"
+                if rel.verified_compromise_rate is not None
+                else "- **Verified compromise rate**: unknown (target-bound attribution unavailable)"
+            ),
+            (
+                f"- **False-compromise rate**: {rel.false_compromise_rate:.1%}"
+                if rel.false_compromise_rate is not None
+                else "- **False-compromise rate**: unknown (some claims lack target-bound attribution)"
+            ),
+            f"- **Unverified claims**: {rel.unverified_claim_count} ({rel.unverified_claim_rate:.1%})"
+            if rel.unverified_claim_rate is not None
+            else f"- **Unverified claims**: {rel.unverified_claim_count} (rate unavailable)",
+            (
+                f"- **Correct-stop rate (negative controls)**: {rel.correct_stop_count}/"
+                f"{rel.negative_control_count} "
+                f"({rel.correct_stop_rate:.1%})"
+                if rel.correct_stop_rate is not None
+                else "- **Correct-stop rate (negative controls)**: not applicable"
+            ),
+            (
+                f"- **Stuck-loop rate**: {rel.stuck_loop_rate:.1%}"
+                if rel.stuck_loop_rate is not None
+                else "- **Stuck-loop rate**: unknown (stopping telemetry unavailable)"
+            ),
             f"- **Duplicate actions**: {rel.duplicate_action_count}",
             f"- **Mean actions to verified objective**: {rel.mean_actions_to_verified_objective}",
             f"- **Timeout rate**: {rel.timeout_rate:.1%}",
             f"- **Scope-rejection rate**: {rel.scope_rejection_rate:.3%}",
-            f"- **Scope violations reaching network layer**: {rel.scope_violation_count} (must be 0)",
+            (
+                f"- **Scope violations reaching network layer**: {rel.scope_violation_count} (must be 0)"
+                if rel.scope_violation_count is not None
+                else "- **Scope violations reaching network layer**: unknown (network-layer telemetry unavailable)"
+            ),
             f"- **Tool error rate**: {rel.tool_error_rate:.1%}",
             f"- **Tokens per verified scenario**: {rel.tokens_per_verified_scenario}",
             f"- **Findings reproduced twice**: {rel.findings_reproduced_twice_count}"
@@ -303,7 +411,8 @@ class EvalReport:
         if rel.success_rate_by_family:
             lines += ["", "## Success rate by vulnerability family", ""]
             for family in sorted(rel.success_rate_by_family):
-                lines.append(f"- `{family}`: {rel.success_rate_by_family[family]:.1%}")
+                rate = rel.success_rate_by_family[family]
+                lines.append(f"- `{family}`: {rate:.1%}" if rate is not None else f"- `{family}`: unknown")
         return lines
 
     def render_markdown(self) -> str:
@@ -425,6 +534,33 @@ def _oracle_target_ids(oracle_dir: Path) -> list[str]:
     return sorted(p.name[: -len(".oracle.json")] for p in oracle_dir.glob("*.oracle.json"))
 
 
+def _oracle_target_ports(value: Any) -> set[int]:
+    """Extract declared target ports for binding oracle HTTP checks."""
+    candidates: Any
+    if isinstance(value, dict):
+        candidates = value.values()
+    elif isinstance(value, (list, tuple)):
+        candidates = value
+    else:
+        return set()
+    ports: set[int] = set()
+    for candidate in candidates:
+        if isinstance(candidate, (list, tuple)):
+            values = candidate
+        else:
+            values = (candidate,)
+        for item in values:
+            if isinstance(item, int) and not isinstance(item, bool):
+                port = item
+            elif isinstance(item, str) and item.strip().isdecimal():
+                port = int(item.strip())
+            else:
+                continue
+            if 1 <= port <= 65535:
+                ports.add(port)
+    return ports
+
+
 async def _open_verify_session(host: str, config: dict[str, Any]) -> "tuple[Any, Any, Any]":
     """Open a soft-fail MCP session used only for independent flag verification.
 
@@ -508,7 +644,7 @@ async def default_agent_runner(target_id: str, oracle: dict[str, Any], config: d
     registry = cfg.get("models", {}).get("registry")
     provider = get_ai_provider(cfg)
     if provider == "chatgpt":
-        router = build_router(
+        router = _eval_shim("build_router", build_router)(
             registry,
             host=ollama_host,
             provider="chatgpt",
@@ -516,7 +652,7 @@ async def default_agent_runner(target_id: str, oracle: dict[str, Any], config: d
             config=cfg,
         )
     elif provider == "opencode_go":
-        router = build_router(
+        router = _eval_shim("build_router", build_router)(
             registry,
             host=ollama_host,
             provider="opencode_go",
@@ -524,10 +660,10 @@ async def default_agent_runner(target_id: str, oracle: dict[str, Any], config: d
             config=cfg,
         )
     else:
-        router = build_router(registry, host=ollama_host)
-    model_alias = cfg.get("models", {}).get("default_alias", "glm")
-    if provider == "opencode_go":
-        model_alias = str(get_opencode_go_config(cfg).get("default_model") or "muse-spark-1.2-contributor")
+        router = _eval_shim("build_router", build_router)(registry, host=ollama_host)
+    from tools.config_manager import resolve_default_model_alias
+
+    model_alias = resolve_default_model_alias(cfg)
     try:
         model_client = router.get_client(model_alias)
     except KeyError:
@@ -556,7 +692,7 @@ async def default_agent_runner(target_id: str, oracle: dict[str, Any], config: d
 
     result: dict[str, Any] = {}
     try:
-        result = await run_exploit_session(
+        result = await _eval_shim("run_exploit_session", run_exploit_session)(
             client=model_client,
             model=model_alias,
             target_ip=host,
@@ -713,9 +849,13 @@ async def run_graded_eval(
         flag_results: list[FlagCheckResult] = []
         cm: Any = None
         try:
-            cm, session, loop = await _open_verify_session(host, cfg)
+            cm, session, loop = await _eval_shim("_open_verify_session", _open_verify_session)(host, cfg)
             executor = _eval_shim("default_check_executor", default_check_executor)(
-                session=session, workspace=workspace_root, loop=loop
+                session=session,
+                workspace=workspace_root,
+                loop=loop,
+                target_host=host,
+                target_ports=_oracle_target_ports(oracle.get("ports")),
             )
             for flag in oracle.get("flags", []) or []:
                 if not isinstance(flag, dict):
@@ -729,7 +869,14 @@ async def run_graded_eval(
             status = "PASS" if fr.passed else "FAIL"
             print(f"  [{status}] {fr.flag_id}: {fr.detail}")
 
-        target_score = _build_target_score(target_id, oracle, flag_results, suite_result, len(findings))
+        target_score = _build_target_score(
+            target_id,
+            oracle,
+            flag_results,
+            suite_result,
+            len(findings),
+            runner_result=runner_result,
+        )
         report.targets.append(target_score)
         if runner_crashed:
             infra_failures += 1
@@ -741,10 +888,19 @@ async def run_graded_eval(
                 if isinstance(values, list) and values:
                     family = str(key)
                     break
+        negative_control = is_negative_control_oracle(oracle)
         telemetry = extract_trial_telemetry(
             target_id,
             runner_result if isinstance(runner_result, dict) else {},
-            verified_success=bool(target_score.success),
+            # Post-run oracle flags reveal current target state, but cannot
+            # attribute it to this run. Positive target-bound verification is
+            # not wired into graded eval yet, so they never mark a compromise.
+            # Negative-control oracles independently establish that any
+            # compromise claim is false. Positive targets currently lack a
+            # run-attributable verifier, so their attribution remains unknown.
+            verified_success=False if negative_control else None,
+            negative_control=negative_control,
+            correct_stop=bool(target_score.details.get("correct_stop", False)),
             vulnerability_family=family or str(oracle.get("target_id", target_id) or target_id),
         )
         report.trials.append(telemetry)
@@ -760,7 +916,7 @@ async def run_graded_eval(
     elif infra_failures >= len(executed):
         live_outcome = LiveOutcome.INFRA_ERROR
     else:
-        live_outcome = classify_live_outcome(success=any(t.success for t in executed))
+        live_outcome = classify_live_outcome(success=_graded_targets_succeeded(executed))
     report.live_outcome = live_outcome
     # Lifecycle aggregation (metrics #9 reproduced-twice + #11 FIXED
     # timing): best-effort scan of this run's stored enhanced reports for

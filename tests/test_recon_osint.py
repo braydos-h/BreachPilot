@@ -1,6 +1,10 @@
 """Tests for tools.recon_osint — all fakes injected, no real network."""
 
+import pytest
+
 from tools.recon_osint import (
+    _MAX_RESPONSE_BYTES,
+    _default_fetch,
     crtsh_cert_transparency,
     passive_ipv6_lookup,
     reverse_dns,
@@ -87,6 +91,48 @@ def test_crtsh_bad_json_returns_error():
     assert res["certs"] == []
     assert res["count"] == 0
     assert "parse failed" in res["error"]
+
+
+def test_default_fetch_reads_at_most_response_limit_plus_one(monkeypatch):
+    class FakeResponse:
+        def __init__(self):
+            self.remaining = b"x" * (_MAX_RESPONSE_BYTES * 2)
+            self.read_sizes = []
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self, size=-1):
+            self.read_sizes.append(size)
+            data, self.remaining = self.remaining[:size], self.remaining[size:]
+            return data
+
+    response = FakeResponse()
+    monkeypatch.setattr("tools.recon_osint.urllib.request.urlopen", lambda *_args, **_kwargs: response)
+
+    with pytest.raises(ValueError, match="response exceeds"):
+        _default_fetch("https://crt.sh/")
+
+    assert response.read_sizes == [_MAX_RESPONSE_BYTES + 1]
+    assert response.remaining
+
+
+def test_crtsh_rejects_oversized_injected_response_before_json_parse(monkeypatch):
+    oversized = " " * (_MAX_RESPONSE_BYTES + 1)
+
+    def unexpected_parse(_text):
+        pytest.fail("oversized response reached json.loads")
+
+    monkeypatch.setattr("tools.recon_osint.json.loads", unexpected_parse)
+    res = crtsh_cert_transparency("example.com", fetch_fn=lambda _url: oversized)
+
+    assert res["certs"] == []
+    assert res["count"] == 0
+    assert "fetch failed" in res["error"]
+    assert "byte limit" in res["error"]
 
 
 # --- shodan_lookup ---------------------------------------------------------

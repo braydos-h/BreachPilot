@@ -59,7 +59,7 @@ describe("SandboxTab", () => {
 
   it("shows an empty state when the run had no sandbox activity", () => {
     renderTab({ loading: false, error: null, data: { ...sandboxData(), found: false } });
-    expect(screen.getByText(/No sandbox activity recorded/)).toBeInTheDocument();
+    expect(screen.getByText(/No sandbox activity is recorded/)).toBeInTheDocument();
   });
 
   it("renders the container identity, execution stats, and network policy", () => {

@@ -21,6 +21,23 @@ import urllib.request
 
 from tools.opsec import process_user_agent
 
+_MAX_RESPONSE_BYTES = 2 * 1024 * 1024
+
+
+def _bounded_response_text(data):
+    """Validate a fetched response size before decoding or parsing it."""
+    if isinstance(data, bytes):
+        if len(data) > _MAX_RESPONSE_BYTES:
+            raise ValueError("response exceeds %d byte limit" % _MAX_RESPONSE_BYTES)
+        return data.decode("utf-8", errors="replace")
+    if isinstance(data, str):
+        # Any UTF-8 encoding uses at least one byte per character, so reject
+        # obviously oversized strings before allocating an encoded copy.
+        if len(data) > _MAX_RESPONSE_BYTES or len(data.encode("utf-8")) > _MAX_RESPONSE_BYTES:
+            raise ValueError("response exceeds %d byte limit" % _MAX_RESPONSE_BYTES)
+        return data
+    return data
+
 
 def _default_ipv6_resolver(host: str) -> list[str]:
     """Default AAAA resolver using socket.getaddrinfo(AF_INET6)."""
@@ -94,13 +111,11 @@ def reverse_dns(ip: str, *, resolver_fn=None) -> str:
 
 
 def _default_fetch(url: str) -> str:
-    """Default HTTP GET via urllib returning text."""
+    """Default HTTP GET via urllib returning text capped to a small response."""
     req = urllib.request.Request(url, headers={"User-Agent": process_user_agent("BreachPilot-OSINT/1.0")})
     with urllib.request.urlopen(req, timeout=15) as resp:  # noqa: S310 - passive OSINT
-        data = resp.read()
-    if isinstance(data, bytes):
-        return data.decode("utf-8", errors="replace")
-    return str(data)
+        data = resp.read(_MAX_RESPONSE_BYTES + 1)
+    return _bounded_response_text(data)
 
 
 def crtsh_cert_transparency(domain: str, *, fetch_fn=None) -> dict:
@@ -117,7 +132,7 @@ def crtsh_cert_transparency(domain: str, *, fetch_fn=None) -> dict:
     fetch = fetch_fn if fetch_fn is not None else _default_fetch
     url = "https://crt.sh/?q=%25" + domain + "&output=json"
     try:
-        text = fetch(url)
+        text = _bounded_response_text(fetch(url))
     except Exception as exc:
         return {"domain": domain, "certs": [], "count": 0, "error": "fetch failed: %s" % exc}
     try:
@@ -145,7 +160,7 @@ def shodan_lookup(ip: str, api_key: str = "", *, fetch_fn=None) -> dict:
     fetch = fetch_fn if fetch_fn is not None else _default_fetch
     url = "https://api.shodan.io/shodan/host/%s?key=%s" % (ip, api_key)
     try:
-        text = fetch(url)
+        text = _bounded_response_text(fetch(url))
     except Exception as exc:
         return {"enabled": True, "error": "fetch failed: %s" % exc}
     try:

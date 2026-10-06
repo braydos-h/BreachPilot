@@ -86,17 +86,18 @@ loop uses:
 negative outcomes never exclude a skill (advisory invariant: safety-relevant
 methodology must not be hidden because it once underperformed).
 
-### 4. Semantic matching (default-on, graceful fallback)
+### 4. Semantic matching (provider-dependent, graceful fallback)
 
 `tools/skill_embeddings.py::SkillEmbedder` wraps
 `SemanticMemoryManager.embed` with a per-process text→vector cache. When
-`skills.semantic_matching` is true (default) and an embedder is available,
-`semantic_rank` embeds the query + each skill's search text and ranks by
-cosine similarity. When embeddings are unavailable (Ollama down, model
-missing, offline), it emits one
-`[WARN] skills: embeddings unavailable, falling back to tag matching` and
-returns `[]` — deterministic tag matching remains the floor. Attack-only
-gating applies to semantic hits too.
+`skills.semantic_matching` is true (default) and the selected embedding
+provider is available, `semantic_rank` embeds the query and each skill's
+search text and ranks by cosine similarity. The checked-in config selects
+`embeddings.provider: none`, so a default install uses deterministic tag
+matching without making embedding requests. When an enabled provider is
+unavailable (for example, Ollama is down or the model is missing), the
+selector emits one warning and falls back to tags; explicitly disabled
+embeddings stay quiet. Attack-only gating applies to semantic hits too.
 
 ## Adding a skill
 

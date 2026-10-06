@@ -1,7 +1,7 @@
 """Docker sandbox remediation: plan + execution.
 
 This module implements the host-level fix flow for the sandbox warning shown on
-the Home page (mode native_fallback / blocked). It runs entirely server-side
+the Home page (blocked mode). It runs entirely server-side
 (Browser -> enum job, not arbitrary commands) and is localhost/auth protected
 via the existing API conventions.
 
@@ -172,27 +172,13 @@ def build_plan(config: dict[str, Any] | None = None) -> dict[str, Any]:
       platform, reason, docker_cli_present, docker_daemon_running,
       image_present, requires_admin, steps[]
     }
-    Plus mode/disabled metadata for frontend gating.
+    The disabled-sandbox posture is rejected by configuration parsing.
     """
     from tools.sandbox.models import SandboxConfig
 
     platform_name = _platform()
     cfg = SandboxConfig.from_config(config)
-    image = _image_name_from_config(config)
-
-    # If sandbox intentionally disabled, no fix is offered.
-    if not cfg.enabled:
-        return {
-            "platform": platform_name,
-            "reason": "Sandbox is intentionally disabled (sandbox.enabled: false). Enable it in config.yaml to use containment.",
-            "docker_cli_present": bool(_which("docker")),
-            "docker_daemon_running": False,
-            "image_present": None,
-            "requires_admin": False,
-            "steps": [],
-            "mode": "disabled",
-            "manual": False,
-        }
+    image = cfg.image or IMAGE_NAME
 
     docker_cli_present = bool(_which("docker"))
     docker_daemon_running = False
@@ -498,7 +484,7 @@ def build_plan(config: dict[str, Any] | None = None) -> dict[str, Any]:
         PlanStep(
             id="verify_sandbox",
             title="Verify the sandbox image exists and Docker is usable",
-            description="Final verification: 'docker version' and 'docker image inspect' must both succeed before the sandbox can be used (a BreachPilot restart will still be required to switch from native fallback to contained mode).",
+            description="Final verification: 'docker version' and 'docker image inspect' must both succeed before the sandbox can be used. Restart BreachPilot after Docker or the worker image changes.",
             command_preview=f"docker version && docker image inspect {image}",
             requires_admin=False,
         )
@@ -615,15 +601,6 @@ def create_job_sync(config: dict[str, Any] | None = None) -> Job:
         ],
         status="pending",
     )
-    # Refuse if disabled
-    from tools.sandbox.models import SandboxConfig
-
-    cfg = SandboxConfig.from_config(config)
-    if not cfg.enabled:
-        job.status = "failed"
-        job.error = "Sandbox is intentionally disabled (sandbox.enabled: false). No fix is needed."
-        for s in job.steps:
-            s.status = "skipped"
     with _JOBS_LOCK:
         _JOBS[job_id] = job
     return job

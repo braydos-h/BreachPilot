@@ -6,14 +6,17 @@ files: [service.py, models.py, prepare.py, execute.py, tasks.py, providers.py, w
 
 # Run Service — Overview (`tools/run_service/`)
 
-Transport-neutral preparation + execution engine shared by the CLI
-(`main.async_main`) and the WebUI API daemon (`tools/api/run_manager.py`).
-`AssessmentService` resolves a `RunRequest` into a `RunPreview` (`prepare`,
-no side effects beyond config reads + `reports/<run_id>/` mkdir), then runs
-the assessment (`execute`: MCP session, agent loop, swarm, reports) and
-returns a `RunResult`. The service never calls `AttackUi` directly — operator
-interaction flows through `DecisionProvider` / `EventSink` /
-`ApprovalProvider` (terminal vs API adapters in `providers.py`).
+Preparation and execution code shared by the CLI (`main.async_main`) and the
+WebUI API daemon (`tools/api/run_manager.py`). `AssessmentService` resolves a
+`RunRequest` into a `RunPreview` (`prepare`, no side effects beyond config
+reads + `reports/<run_id>/` mkdir), then runs the assessment (`execute`: MCP
+session, agent loop, swarm, reports) and returns a `RunResult`.
+`DecisionProvider`, `EventSink`, and `ApprovalProvider` route operator
+decisions and structured events through terminal or API adapters, but service
+modules also call the singleton `AttackUi` directly for status, progress,
+errors, and completion output. An API run can therefore write terminal output
+alongside its persisted/WebSocket events; the API event sink does not carry all
+service messages.
 
 ## Package map
 

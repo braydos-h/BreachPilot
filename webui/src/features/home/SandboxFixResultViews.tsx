@@ -9,10 +9,10 @@ export function FixSuccessView({ job }: { job: SandboxFixJobResponse }) {
         Docker is ready
       </div>
       <p className="text-sm text-muted-foreground">
-        The BreachPilot sandbox can now be used, but the current server was started in native fallback mode. Restart BreachPilot to activate containment.
+        Docker is ready. Restart BreachPilot so the next session can verify the sandbox and enable contained execution.
       </p>
       <p className="text-xs text-muted-foreground">
-        Current boot mode remains <span className="font-mono">native_fallback</span> until restart – the UI will not falsely claim this process is now contained.
+        The current session remains blocked until restart; this status will not claim containment before it is verified.
       </p>
       <div className="rounded-md border border-emerald-500/20 bg-emerald-500/5 px-3 py-2 text-xs">
         To apply the fix: stop the current BreachPilot daemon and start it again (e.g., close the terminal and run <code className="font-mono">python main.py</code> again). After restart, the banner should show <span className="font-medium text-emerald-300">Sandbox active</span>.

@@ -145,6 +145,9 @@ export function EventViewer({
             arguments={g.arguments}
             result={g.result}
             error={g.error}
+            operational_status={g.operational_status}
+            exploit_outcome={g.exploit_outcome}
+            verified_success={g.verified_success}
             started={g.started}
             completed={g.completed}
             timestamp={g.timestamp}

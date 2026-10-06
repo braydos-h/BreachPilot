@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import json
 import re
-from pathlib import Path
 from typing import Any
 
 from tools.attack_modules import ModuleContext, get_module, list_modules
 from tools.exceptions import _EXC_GROUP_CATCH, _log_nested_exceptions
+from tools.kernel.workspace import write_workspace_script
 from tools.mcp_tools.modules.hash import _identify_hash_modes
 from tools.mcp_tools.registry import ToolContext
 from tools.validation_utils import validate_target_or_ip
@@ -191,22 +191,14 @@ def register_attack_module_tools(mcp: Any, *, ctx: ToolContext) -> None:
             script_path = ""
             script_text = result.get("script", "")
             if script_text:
-                modules_dir = workspace / "modules"
-                modules_dir.mkdir(parents=True, exist_ok=True)
-                safe_name = re.sub(r"[^A-Za-z0-9_.-]", "_", f"{module_name}_{target_ip}.py")
-                script_path = str(modules_dir / safe_name)
-                Path(script_path).write_text(script_text, encoding="utf-8")
+                script_path = str(write_workspace_script(workspace, f"{module_name}_{target_ip}", script_text))
 
             # Also try generate_python_script if run didn't produce one
             if not script_text:
                 try:
                     script_text = module.generate_python_script(ctx)
                     if script_text:
-                        modules_dir = workspace / "modules"
-                        modules_dir.mkdir(parents=True, exist_ok=True)
-                        safe_name = re.sub(r"[^A-Za-z0-9_.-]", "_", f"{module_name}_{target_ip}.py")
-                        script_path = str(modules_dir / safe_name)
-                        Path(script_path).write_text(script_text, encoding="utf-8")
+                        script_path = str(write_workspace_script(workspace, f"{module_name}_{target_ip}", script_text))
                 except Exception:  # ponytail: bare except intentional
                     pass
 

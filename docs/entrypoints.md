@@ -103,9 +103,11 @@ python main.py --eval --target 10.0.0.50    # legacy single-target harness
 | 130 | `KeyboardInterrupt` | `main.main`, `main._run_daemon` |
 
 `_run_daemon` (`main.py:955-1057`) refuses any `--api-host` outside
-`127.0.0.1` / `localhost` / `::1` with exit `2`, builds `webui/dist/` for
-`--web` via `_ensure_webui_build`, and serves `create_app` from `app.py`
-with `uvicorn`.
+`127.0.0.1` / `localhost` / `::1` with exit `2`. For `--web`,
+`_ensure_webui_build` first accepts the packaged SPA resolved by
+`tools.paths.get_webui_dist_dir()`; in a source checkout it builds
+`webui/dist/` when missing. The daemon then serves `create_app` from `app.py`
+with `uvicorn`. `--rebuild` requires the source checkout and Node/npm.
 
 ### Console script
 

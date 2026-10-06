@@ -7,15 +7,13 @@ screenshot/discover/close, plus the mutating Phase 2 surface (``browser_submit``
 
 Containment: every target-touching tool carries ``@require_allowlist`` (the
 target-IP lock) and funnels Chromium execution through ``BrowserManager`` +
-a launcher resolved per call — ``SandboxPlaywrightLauncher`` (one Chromium op
-per docker exec inside the worker netns) when the sandbox is enabled, the
-in-process launcher only for the documented ``sandbox.enabled: false``
-opt-out. When the sandbox is enabled but unusable the tools return
-``SANDBOX_*`` blocks and NEVER fall back to host execution.
+``SandboxPlaywrightLauncher`` (one Chromium op per docker exec inside the
+worker netns). When the worker is unavailable the tools return ``SANDBOX_*``
+blocks and never fall back to host execution.
 
 Conditional registration (the killchain/snapshots precedent): nothing
-registers unless ``browser.enabled`` + ``backend: playwright`` + the runtime
-is actually available (host SDK or a configured sandbox worker).
+registers unless ``browser.enabled`` + ``backend: playwright`` + a sandbox
+worker is configured. The worker image is checked when execution starts.
 """
 
 from __future__ import annotations

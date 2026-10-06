@@ -15,6 +15,7 @@ vi.mock("@/api/hooks", () => ({
   useCreateRun: vi.fn(),
   useAnswerDecision: vi.fn(),
   useRun: vi.fn(),
+  useSandboxStatus: vi.fn(),
   useLiveModels: vi.fn(),
   useSyncModels: vi.fn(),
   useConfig: vi.fn(),
@@ -39,6 +40,7 @@ import {
   useLiveModels,
   usePatchConfig,
   useRun,
+  useSandboxStatus,
   useSkills,
   useSyncModels,
 } from "@/api/hooks";
@@ -51,6 +53,7 @@ const skillsMock = vi.mocked(useSkills);
 const createRunMock = vi.mocked(useCreateRun);
 const answerDecisionMock = vi.mocked(useAnswerDecision);
 const runMock = vi.mocked(useRun);
+const sandboxStatusMock = vi.mocked(useSandboxStatus);
 const runEventsMock = vi.mocked(useRunEvents);
 const liveModelsMock = vi.mocked(useLiveModels);
 const syncModelsMock = vi.mocked(useSyncModels);
@@ -116,6 +119,26 @@ function setup({
   createRunMock.mockReturnValue({ mutate: vi.fn(), isPending: false, error: null } as never);
   answerDecisionMock.mockReturnValue({ mutate: vi.fn(), isPending: false, error: null } as never);
   runMock.mockReturnValue({ data: undefined, isLoading: false, error: null } as never);
+  sandboxStatusMock.mockReturnValue({
+    data: {
+      enabled: true,
+      backend: "docker",
+      image: "breachpilot-sandbox:latest",
+      user: "sandbox",
+      read_only_rootfs: true,
+      mode: "contained",
+      fallback_native: false,
+      fallback_reason: "",
+      docker_available: true,
+      docker_error: "",
+      image_present: true,
+      network: { enforce: true, fail_closed: true, allow_dns: "controlled", map_host_loopback: false, extra_allow_cidrs: [] },
+      resources: { memory_mb: 1024, cpus: 1, pids: 128, timeout_seconds: 300, output_max_bytes: 1000000 },
+      cleanup: { remove_on_exit: true, remove_stale_on_startup: true },
+    },
+    isLoading: false,
+    error: null,
+  } as never);
   runEventsMock.mockReturnValue({ events: [], status: "idle" } as never);
   liveModelsMock.mockReturnValue({
     data: { models: [], source: "ollama" },
@@ -238,6 +261,74 @@ describe("RunWizard", () => {
     expect(next).toBeEnabled();
   });
 
+  it("describes target validation as syntax-only and leaves scope enforcement to the server", async () => {
+    const { user } = setup({ path: "attack" });
+    await goToReview(user);
+
+    expect(screen.getByText(/Syntax valid .*server enforces allowlist and scope at launch/)).toBeInTheDocument();
+    expect(screen.queryByText(/Authorized and in scope/)).not.toBeInTheDocument();
+  });
+
+  it("blocks launch when the sandbox is unavailable", async () => {
+    const { user, rerender } = setup({ path: "attack" });
+    sandboxStatusMock.mockReturnValue({
+      data: {
+        mode: "blocked",
+        docker_available: false,
+        docker_error: "Docker is unavailable",
+        image_present: null,
+        fallback_reason: "Docker daemon is unavailable",
+      },
+      isLoading: false,
+      error: null,
+    } as never);
+    rerender();
+    await goToReview(user);
+
+    expect(screen.getByText("Docker daemon is unavailable")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Launch Attack/i })).toBeDisabled();
+  });
+
+  it("blocks launch when a sandbox refresh fails despite cached ready data", async () => {
+    const { user, rerender } = setup({ path: "attack" });
+    sandboxStatusMock.mockReturnValue({
+      data: {
+        enabled: true,
+        backend: "docker",
+        image: "breachpilot-sandbox:latest",
+        user: "sandbox",
+        read_only_rootfs: true,
+        mode: "contained",
+        fallback_native: false,
+        fallback_reason: "",
+        docker_available: true,
+        docker_error: "",
+        image_present: true,
+        network: { enforce: true, fail_closed: true, allow_dns: "controlled", map_host_loopback: false, extra_allow_cidrs: [] },
+        resources: { memory_mb: 1024, cpus: 1, pids: 128, timeout_seconds: 300, output_max_bytes: 1000000 },
+        cleanup: { remove_on_exit: true, remove_stale_on_startup: true },
+      },
+      isLoading: false,
+      isFetching: false,
+      error: new Error("sandbox status refresh failed"),
+    } as never);
+    rerender();
+    await goToReview(user);
+
+    expect(screen.getByText("Sandbox status could not be verified")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Launch Attack/i })).toBeDisabled();
+  });
+
+  it("keeps launch disabled until sandbox readiness can be verified", async () => {
+    const { user, rerender } = setup({ path: "attack" });
+    sandboxStatusMock.mockReturnValue({ data: undefined, isLoading: true, error: null } as never);
+    rerender();
+    await goToReview(user);
+
+    expect(screen.getByText("Checking Docker and the worker image")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Launch Attack/i })).toBeDisabled();
+  });
+
   it("sends the expected request body (critic gated on swarm, yes flag via approval policy) on launch", async () => {
     const { user } = setup({ path: "attack" });
     const mutate = vi.fn();
@@ -325,6 +416,32 @@ describe("RunWizard", () => {
     expect(screen.getByText("Resolving target")).toBeInTheDocument();
     // Earlier steps show as done (check marks).
     expect(screen.getByText("Preparing runtime")).toBeInTheDocument();
+  });
+
+  it("offers a status retry when a failed refresh retains cached preparing detail", async () => {
+    const { user, rerender } = setup({ path: "attack" });
+    const mutate = vi.fn((_body, opts) => {
+      opts?.onSuccess?.({ run_id: "r1", state: "preparing", preview: null });
+    });
+    createRunMock.mockReturnValue({ mutate, isPending: false, error: null } as never);
+
+    await goToReview(user);
+    await user.click(screen.getByRole("button", { name: /Launch Attack/i }));
+
+    const refetch = vi.fn();
+    runMock.mockReturnValue({
+      data: runDetailFixture({ state: "preparing" }),
+      isLoading: false,
+      isFetching: false,
+      isError: true,
+      error: new Error("status request failed"),
+      refetch,
+    } as never);
+    rerender();
+
+    expect(screen.getByRole("alert")).toHaveTextContent(/progress above may be stale/i);
+    await user.click(screen.getByRole("button", { name: "Retry status check" }));
+    expect(refetch).toHaveBeenCalledOnce();
   });
 
   it("shows the confirmation gate after successful preparation", async () => {

@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import base64
+import binascii
+import functools
 import json
 import re
 import time
-from typing import Any
+from typing import Any, Literal
 
 from tools.attack_modules.modules.auth_creds import PasswordSpray as PasswordSprayModule
 from tools.attack_modules.modules.crypto_jwt import JWTTamper as JWTTamperModule
@@ -27,6 +30,8 @@ from tools.attack_modules.modules.web import (
     TimingOracle as TimingOracleModule,
 )
 from tools.mcp_tools.registry import ToolContext
+from tools.mcp_tools.sandbox_exec import run_tool_argv_in_sandbox, sandbox_error_block
+from tools.sandbox.exceptions import SandboxError
 from tools.validation_utils import validate_target_or_ip
 
 _MIN_PORT = 1
@@ -132,16 +137,152 @@ def _http_host(target_ip: str) -> str:
     return t
 
 
-def _open_connection(host: str, port: int, timeout: float) -> Any:
-    """Open a TCP connection usable as a context manager (IPv4/IPv6/domain).
+_MAX_RESPONSE_BYTES = 65_536
+_TCP_EXCHANGE_SCRIPT = r"""
+import base64, json, socket, sys, time
+request = json.load(sys.stdin)
+try:
+    timeout = float(request["timeout"])
+    limit = int(request["limit"])
+    data = bytearray()
+    with socket.create_connection((request["host"], int(request["port"])), timeout=timeout) as conn:
+        conn.settimeout(timeout)
+        conn.sendall(base64.b64decode(request["payload"], validate=True))
+        deadline = time.monotonic() + timeout
+        while len(data) < limit:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            conn.settimeout(min(remaining, 0.25 if data else remaining))
+            try:
+                chunk = conn.recv(min(4096, limit - len(data)))
+            except TimeoutError:
+                break
+            if not chunk:
+                break
+            data.extend(chunk)
+    response = bytes(data)
+except Exception as exc:
+    response = b"\x00BPEXCEPTION:" + str(exc).encode("utf-8", "replace")[:1000]
+sys.stdout.write(base64.b64encode(response).decode("ascii"))
+"""
 
-    ``socket.create_connection`` resolves domains and tries each resolved
-    address, so IPv6 literals and FQDNs work (plain ``AF_INET`` + ``connect``
-    did not). Callers must use ``with`` so the socket always closes.
-    """
-    import socket as _sock
 
-    return _sock.create_connection((host, port), timeout=timeout)
+class _SandboxProbeError(Exception):
+    """An operation failed before contained target traffic could be sent."""
+
+    def __init__(self, result: str) -> None:
+        super().__init__(result)
+        self.result = result
+
+
+def _surface_sandbox_probe_error(fn):
+    """Preserve structured sandbox failures at the MCP tool boundary."""
+
+    @functools.wraps(fn)
+    def wrapped(*args, **kwargs):
+        try:
+            return fn(*args, **kwargs)
+        except _SandboxProbeError as exc:
+            return exc.result
+
+    return wrapped
+
+
+class _SandboxSocket:
+    """Small socket-shaped adapter that performs TCP I/O inside the worker."""
+
+    def __init__(self, host: str, port: int, timeout: float, *, ctx: ToolContext, tool_name: str) -> None:
+        self.host = host
+        self.port = port
+        self.timeout = timeout
+        self.ctx = ctx
+        self.tool_name = tool_name
+        self.sent = bytearray()
+        self._received = b""
+        self._executed = False
+        self.closed = False
+
+    def __enter__(self) -> "_SandboxSocket":
+        return self
+
+    def __exit__(self, *_args: Any) -> Literal[False]:
+        self.close()
+        return False
+
+    def sendall(self, data: bytes) -> None:
+        self.sent.extend(data)
+
+    def _exchange(self) -> None:
+        if self._executed:
+            return
+        self._executed = True
+        request = {
+            "host": self.host,
+            "port": self.port,
+            "timeout": max(0.1, float(self.timeout)),
+            "limit": _MAX_RESPONSE_BYTES,
+            "payload": base64.b64encode(bytes(self.sent)).decode("ascii"),
+        }
+        status, returncode, output, _elapsed = run_tool_argv_in_sandbox(
+            self.ctx,
+            ["python3", "-c", _TCP_EXCHANGE_SCRIPT],
+            target_ip=self.host,
+            targets=[self.host],
+            timeout=max(1, int(self.timeout + 0.999)),
+            tool_name=self.tool_name,
+            input_text=json.dumps(request, separators=(",", ":")),
+            max_chars=100_000,
+        )
+        if status == "blocked" or "SANDBOX_" in output:
+            block = (
+                output
+                if "SANDBOX_" in output
+                else sandbox_error_block(
+                    SandboxError(f"{self.tool_name} sandbox transport failed"), tool_name=self.tool_name
+                )
+            )
+            raise _SandboxProbeError(block)
+        if status == "timed_out":
+            raise _SandboxProbeError(
+                sandbox_error_block(
+                    SandboxError(f"{self.tool_name} sandbox command timed out"), tool_name=self.tool_name
+                )
+            )
+        if returncode != 0:
+            raise OSError(output or f"{self.tool_name} worker command exited with {returncode}")
+        try:
+            self._received = base64.b64decode(output.strip(), validate=True)
+        except (ValueError, binascii.Error) as exc:
+            raise _SandboxProbeError(
+                sandbox_error_block(
+                    SandboxError(f"{self.tool_name} worker returned malformed transport data"), tool_name=self.tool_name
+                )
+            ) from exc
+        if self._received.startswith(b"\x00BPEXCEPTION:"):
+            detail = self._received[len(b"\x00BPEXCEPTION:") :].decode("utf-8", "replace")
+            raise OSError(detail)
+
+    def recv(self, size: int) -> bytes:
+        self._exchange()
+        chunk, self._received = self._received[:size], self._received[size:]
+        return chunk
+
+    def close(self) -> None:
+        # Probe requests may contain credentials. Drop both directions as
+        # soon as the socket-shaped context ends; do not retain instances.
+        self.sent.clear()
+        self._received = b""
+        self.closed = True
+
+
+def _open_connection(host: str, port: int, timeout: float, *, ctx: ToolContext, tool_name: str) -> _SandboxSocket:
+    """Return a socket-shaped adapter whose network I/O runs in the worker."""
+    if getattr(ctx, "sandbox", None) is None:
+        raise _SandboxProbeError(
+            sandbox_error_block(SandboxError(f"{tool_name} requires an active sandbox"), tool_name=tool_name)
+        )
+    return _SandboxSocket(host, port, timeout, ctx=ctx, tool_name=tool_name)
 
 
 def _sock_budget(default: float, deadline: float) -> float:
@@ -178,6 +319,7 @@ def register_web_tools(mcp: Any, *, ctx: ToolContext) -> None:
 
     @mcp.tool()
     @require_allowlist()
+    @_surface_sandbox_probe_error
     def jwt_tamper(target_ip: str, jwt_token: str = "", timeout: int = 90) -> str:
         """Test JWT tokens for algorithm confusion (alg:none), HMAC key confusion, and weak secret brute-force.
 
@@ -242,7 +384,7 @@ def register_web_tools(mcp: Any, *, ctx: ToolContext) -> None:
                     if budget <= 0:
                         result_lines.append("Discovery stopped at tool deadline (partial coverage).")
                         break
-                    with _open_connection(host, 80, budget) as s:
+                    with _open_connection(host, 80, budget, ctx=ctx, tool_name="jwt_tamper") as s:
                         s.sendall(f"GET {path} HTTP/1.0\r\nHost: {host_hdr}\r\n\r\n".encode())
                         resp = s.recv(8192).decode(errors="replace")
                         match = re.search(r"[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}", resp)
@@ -250,7 +392,9 @@ def register_web_tools(mcp: Any, *, ctx: ToolContext) -> None:
                             token = match.group(0)
                             result_lines.append(f"Discovered JWT at {path}: {_preview(token, 60)}")
                             break
-                except Exception:  # ponytail: bare except intentional
+                except _SandboxProbeError:
+                    raise
+                except Exception:  # ponytail: best-effort probe failure
                     pass
 
         if not token:
@@ -362,6 +506,7 @@ def register_web_tools(mcp: Any, *, ctx: ToolContext) -> None:
 
     @mcp.tool()
     @require_allowlist()
+    @_surface_sandbox_probe_error
     def ssti_probe(target_ip: str, port: int = 80, timeout: int = 90) -> str:
         """Probe for Server-Side Template Injection (SSTI) across Jinja2, Twig, Freemarker, Velocity, Smarty, and Mako engines.
 
@@ -466,7 +611,7 @@ def register_web_tools(mcp: Any, *, ctx: ToolContext) -> None:
                         if budget <= 0:
                             stopped_early = True
                             break
-                        with _open_connection(host, dport, budget) as s:
+                        with _open_connection(host, dport, budget, ctx=ctx, tool_name="ssti_probe") as s:
                             path = f"{ep}?{param}={_urlparse.quote(payload)}"
                             s.sendall(f"GET {path} HTTP/1.0\r\nHost: {host_hdr}\r\n\r\n".encode())
                             resp = s.recv(8192).decode(errors="replace")
@@ -475,7 +620,9 @@ def register_web_tools(mcp: Any, *, ctx: ToolContext) -> None:
                                 result_lines.append(f"  Payload: {payload} -> reflected {expected}")
                                 found_engine = engine
                                 break
-                    except Exception:  # ponytail: bare except intentional
+                    except _SandboxProbeError:
+                        raise
+                    except Exception:  # ponytail: best-effort probe failure
                         pass
                 if found_engine or stopped_early:
                     break
@@ -495,6 +642,7 @@ def register_web_tools(mcp: Any, *, ctx: ToolContext) -> None:
 
     @mcp.tool()
     @require_allowlist()
+    @_surface_sandbox_probe_error
     def graphql_introspect(target_ip: str, port: int = 80, timeout: int = 90) -> str:
         """Extract GraphQL schema via introspection query.
 
@@ -555,7 +703,7 @@ def register_web_tools(mcp: Any, *, ctx: ToolContext) -> None:
         found = None
 
         def _post(ep: str, body: bytes, budget: float) -> str:
-            with _open_connection(host, dport, budget) as s:
+            with _open_connection(host, dport, budget, ctx=ctx, tool_name="graphql_introspect") as s:
                 req = (
                     f"POST {ep} HTTP/1.0\r\n"
                     f"Host: {host_hdr}\r\n"
@@ -588,7 +736,9 @@ def register_web_tools(mcp: Any, *, ctx: ToolContext) -> None:
                     break
                 elif "graphql" in resp.lower() or "query" in resp.lower():
                     result_lines.append(f"[?] Possible GraphQL at {ep} (introspection may be disabled)")
-            except Exception:  # ponytail: bare except intentional
+            except _SandboxProbeError:
+                raise
+            except Exception:  # ponytail: best-effort probe failure
                 pass
 
         if not found:
@@ -615,7 +765,7 @@ def register_web_tools(mcp: Any, *, ctx: ToolContext) -> None:
                 if budget <= 0:
                     result_lines.append("Batching test skipped at tool deadline.")
                     return _finish(result_lines)
-                with _open_connection(host, dport, budget) as s:
+                with _open_connection(host, dport, budget, ctx=ctx, tool_name="graphql_introspect") as s:
                     req = (
                         f"POST {found} HTTP/1.0\r\n"
                         f"Host: {host_hdr}\r\n"
@@ -629,13 +779,16 @@ def register_web_tools(mcp: Any, *, ctx: ToolContext) -> None:
                     result_lines.append("[+] Batching ENABLED! Multiple queries processed in one request.")
                 else:
                     result_lines.append("[-] Batching blocked or not supported.")
-            except Exception:  # ponytail: bare except intentional
+            except _SandboxProbeError:
+                raise
+            except Exception:  # ponytail: best-effort probe failure
                 result_lines.append("Batching test failed.")
 
         return _finish(result_lines)
 
     @mcp.tool()
     @require_allowlist()
+    @_surface_sandbox_probe_error
     def race_request(
         target_ip: str,
         port: int = 80,
@@ -700,7 +853,7 @@ def register_web_tools(mcp: Any, *, ctx: ToolContext) -> None:
                     with lock:
                         results["failure"] += 1
                     return {"error": "tool deadline reached"}
-                with _open_connection(host, dport, budget) as s:
+                with _open_connection(host, dport, budget, ctx=ctx, tool_name="race_request") as s:
                     body = json.dumps({"code": "TEST100", "user": "attacker"}).encode()
                     req = (
                         f"POST {path} HTTP/1.0\r\n"
@@ -719,7 +872,9 @@ def register_web_tools(mcp: Any, *, ctx: ToolContext) -> None:
                             results["failure"] += 1
                         results["statuses"].append(status_line[:100])
                     return {"status": status_line[:100]}
-            except Exception as e:  # ponytail: bare except intentional
+            except _SandboxProbeError:
+                raise
+            except Exception as e:  # ponytail: best-effort probe failure
                 with lock:
                     results["failure"] += 1
                 return {"error": str(e)}
@@ -734,6 +889,11 @@ def register_web_tools(mcp: Any, *, ctx: ToolContext) -> None:
             for fut in futures:
                 if not fut.done():
                     fut.cancel()
+            for fut in futures:
+                if fut.done() and not fut.cancelled():
+                    exc = fut.exception()
+                    if isinstance(exc, _SandboxProbeError):
+                        raise exc
 
         elapsed = time.monotonic() - start
         result_lines.append(f"Completed in {elapsed:.1f}s")
@@ -749,6 +909,7 @@ def register_web_tools(mcp: Any, *, ctx: ToolContext) -> None:
 
     @mcp.tool()
     @require_allowlist()
+    @_surface_sandbox_probe_error
     def timing_oracle(target_ip: str, port: int = 80, timeout: int = 90) -> str:
         """Detect timing side-channels in login, password reset, and token validation endpoints.
 
@@ -793,7 +954,7 @@ def register_web_tools(mcp: Any, *, ctx: ToolContext) -> None:
                     budget = _sock_budget(8.0, deadline)
                     if budget <= 0:
                         break
-                    with _open_connection(host, dport, budget) as s:
+                    with _open_connection(host, dport, budget, ctx=ctx, tool_name="timing_oracle") as s:
                         data = body.encode()
                         req = (
                             f"POST {endpoint} HTTP/1.0\r\n"
@@ -807,7 +968,9 @@ def register_web_tools(mcp: Any, *, ctx: ToolContext) -> None:
                         s.recv(4096)
                         elapsed = (time.perf_counter() - t0) * 1000
                         times.append(elapsed)
-                except Exception:  # ponytail: bare except intentional
+                except _SandboxProbeError:
+                    raise
+                except Exception:  # ponytail: best-effort probe failure
                     pass
                 time.sleep(0.15)
             return times
@@ -850,6 +1013,7 @@ def register_web_tools(mcp: Any, *, ctx: ToolContext) -> None:
 
     @mcp.tool()
     @require_allowlist()
+    @_surface_sandbox_probe_error
     def request_smuggling_probe(target_ip: str, port: int = 80, timeout: int = 90) -> str:
         """Test for HTTP request smuggling (CL.TE, TE.CL, TE.TE).
 
@@ -888,7 +1052,7 @@ def register_web_tools(mcp: Any, *, ctx: ToolContext) -> None:
                 budget = _sock_budget(10.0, deadline)
                 if budget <= 0:
                     return b"ERROR: tool deadline reached"
-                with _open_connection(host, dport, budget) as s:
+                with _open_connection(host, dport, budget, ctx=ctx, tool_name="request_smuggling_probe") as s:
                     s.sendall(payload)
                     time.sleep(0.5)
                     resp = b""
@@ -901,7 +1065,9 @@ def register_web_tools(mcp: Any, *, ctx: ToolContext) -> None:
                     except OSError:
                         pass
                     return resp
-            except Exception as e:  # ponytail: bare except intentional
+            except _SandboxProbeError:
+                raise
+            except Exception as e:  # ponytail: best-effort probe failure
                 return f"ERROR: {e}".encode()
 
         # Baseline
@@ -978,6 +1144,7 @@ def register_web_tools(mcp: Any, *, ctx: ToolContext) -> None:
 
     @mcp.tool()
     @require_allowlist()
+    @_surface_sandbox_probe_error
     def password_spray(target_ip: str, port: int = 80, password: str = "Password1", timeout: int = 90) -> str:
         """Spray one password across many common usernames.
 
@@ -1080,7 +1247,7 @@ def register_web_tools(mcp: Any, *, ctx: ToolContext) -> None:
                 if budget <= 0:
                     stopped_early = True
                     break
-                with _open_connection(host, dport, budget) as s:
+                with _open_connection(host, dport, budget, ctx=ctx, tool_name="password_spray") as s:
                     body = json.dumps({"username": username, "password": password}).encode()
                     req = (
                         f"POST /api/login HTTP/1.0\r\n"
@@ -1098,7 +1265,9 @@ def register_web_tools(mcp: Any, *, ctx: ToolContext) -> None:
                         found.append(username)
                     else:
                         result_lines.append(f"  [-] {username} — {status_line[:60]}")
-            except Exception as e:  # ponytail: bare except intentional
+            except _SandboxProbeError:
+                raise
+            except Exception as e:  # ponytail: best-effort probe failure
                 result_lines.append(f"  [!] {username} — error: {e}")
             time.sleep(1.5)  # Delay to avoid lockout
 

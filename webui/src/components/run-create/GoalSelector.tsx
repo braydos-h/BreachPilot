@@ -70,6 +70,7 @@ export function GoalSelector({
       <div className="flex flex-wrap items-center gap-2.5">
         <Label className="text-sm font-semibold">Goal</Label>
         <SegmentedControl
+            label="Goal source"
           value={goalMode}
           onChange={(v) => setGoalMode(v as "preset" | "custom")}
           options={[

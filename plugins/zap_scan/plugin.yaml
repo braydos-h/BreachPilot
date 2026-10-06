@@ -3,6 +3,8 @@ version: 0.1.0
 description: OWASP ZAP REST integration - spider + active scan for authenticated web targets. Correlated with the AI's hypothesis loop. Target-touching tools are allowlist-locked; plugin default-off.
 author: BreachPilot
 capabilities: [mcp_tool]
+target_touching: true
+provides_mcp_tools: [zap_active_scan, zap_alerts, zap_scan_status, zap_spider]
 enabled: false
 config_section:
   zap_scan:

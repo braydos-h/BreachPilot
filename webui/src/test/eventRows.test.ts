@@ -63,6 +63,29 @@ describe("buildEventRows", () => {
     if (row?.kind === "tool") expect(row.group.error).toBe("connection refused");
   });
 
+  it("preserves optional normalized outcome fields from the tool result event", () => {
+    const rows = build([
+      event(1, "tool_request", { name: "run_exploit_terminal", action: 3 }),
+      event(2, "tool_result", {
+        action: 3,
+        result: "COMPROMISE: uid=0",
+        success: true,
+        operational_status: "completed",
+        exploit_outcome: "unverified_claim",
+        verified_success: false,
+      }),
+    ]);
+    const row = rows[0];
+    expect(row?.kind).toBe("tool");
+    if (row?.kind === "tool") {
+      expect(row.group).toMatchObject({
+        operational_status: "completed",
+        exploit_outcome: "unverified_claim",
+        verified_success: false,
+      });
+    }
+  });
+
   it("skips boot/ok and renders only pending approvals with a known decision", () => {
     const pending: DecisionListRow = { id: "d1", kind: "tool_approval", status: "pending", answer: "" };
     const answered: DecisionListRow = { id: "d2", kind: "tool_approval", status: "answered", answer: "y" };

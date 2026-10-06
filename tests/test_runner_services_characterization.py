@@ -263,8 +263,25 @@ def test_telemetry_payload_keys():
     assert assistant_payload("hi", 1, "recon")["round"] == 1
     assert tool_request_payload("n", {"a": 1}, 2, 1, "recon")["action"] == 2
     assert tool_start_payload("n", 2, "10.0.0.1", "recon")["target"] == "10.0.0.1"
-    result = tool_result_payload("n", 2, True, 0, "ok", "recon")
+    result = tool_result_payload("n", 2, True, 0, "ok", "recon", attempt_id="attempt-1")
     assert result["success"] is True and result["exit_code"] == 0
+    assert result["attempt_id"] == "attempt-1"
+    assert result["operational_status"] == "unknown"
+    assert result["exploit_outcome"] == "unknown"
+    assert result["verified_success"] is False
+    claim = tool_result_payload(
+        "run_exploit_terminal",
+        3,
+        True,
+        0,
+        "COMPROMISE: shell target=10.0.0.1\\nuid=0(root)",
+        "validation",
+        operational_status="completed",
+        exploit_outcome="unverified_claim",
+    )
+    assert claim["success"] is True
+    assert claim["exploit_outcome"] == "unverified_claim"
+    assert claim["verified_success"] is False
     assert phase_change_payload("validation", "recon", 2, 5)["previous"] == "recon"
     snap = snapshot_taken_payload("n", 1, "10.0.0.1", "snap-1", "prov", "lbl")
     assert snap["snapshot_id"] == "snap-1"
@@ -419,6 +436,7 @@ def test_build_final_result_shape(tmp_path):
     assert result["target_ip"] == "10.0.0.1"
     assert result["total_actions"] == 0
     assert "outcome_summary" in result
+    assert result["stuck_loop"] is False
     assert result["cancelled_by_operator"] is False
     assert "verdict_mismatch" not in result
     assert result["research_assistant"]["enabled"] is False
@@ -670,7 +688,10 @@ def test_loopback_breaker_trips_and_resets():
     assert breaker.should_stop() is False
     breaker.note_result("x map_host_loopback:false y", is_loopback_target=True, success=False)
     assert breaker.should_stop() is True
-    assert "sandbox.enabled:false" in breaker.stop_message("127.0.0.1")
+    message = breaker.stop_message("127.0.0.1")
+    assert "host-execution fallback" in message
+    assert "sandbox.enabled:false" not in message
+    assert "reachable host IP" in message
     breaker.note_result("clean ok", is_loopback_target=True, success=True)
     assert breaker.should_stop() is False
 

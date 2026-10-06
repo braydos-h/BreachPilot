@@ -21,7 +21,7 @@ Legacy scope-enforced scanner at `mcp_server.py:1-374`. Mirrors `mcp_exploit_ser
 - Transports: `stdio` (default) or `http` (`mcp_server.py:345-349`, `mcp_server.py:362-369`)
 - Default HTTP port: `8000` (`mcp_server.py:348`)
 - CLI: `python mcp_server.py --transport stdio|http --config config.yaml --host 127.0.0.1 --port 8000 [--allow-public-bind]`
-- HTTP serving delegates to `tools.mcp_shared.run_mcp_http_server` (`mcp_server.py:369`) — loopback gate + optional `MCP_HTTP_TOKEN` bearer auth
+- HTTP serving delegates to `tools.mcp_shared.run_mcp_http_server` (`mcp_server.py:369`) — loopback gate; non-loopback binds require the two public-bind opt-ins and `MCP_HTTP_TOKEN` bearer auth
 
 ## Factory
 

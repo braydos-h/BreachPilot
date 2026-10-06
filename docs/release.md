@@ -19,20 +19,28 @@ Observable green HEAD + §52 rows evidenced: `branch-rules-applied`
 (API-verified ruleset per `docs/branch-protection.md`),
 `sandbox-image-published` (GHCR digest recorded), Python/WebUI/sandbox SBOMs,
 Trivy with no unacceptable high/critical, SHA-locked actions (CI guard
-green), coverage ≥80. Release workflow publishes installer + `.sha256` +
-attestation (TODO 013), SBOMs + Trivy + digests. Verify:
+green), coverage ≥80. On GO, the release workflow publishes installer +
+`.sha256` + attestations (TODO 013), SBOMs, Trivy results, and Python
+distributions as GitHub Release assets. It also retains a workflow artifact.
+The scheduled/manual sandbox workflow publishes only the `nightly` GHCR
+channel; it does not run for release tags. Verify:
 
 ```bash
 gh run list --branch main   # HEAD health, link from release notes
 gh api repos/OWNER/REPO/rulesets > branch-rules.json
-python scripts/release_gate.py --branch-rules-file branch-rules.json --sandbox-digest-file worker-digests.txt --eval-dir reports/eval/2026-09-15-baseline --json
+python scripts/release_gate.py --branch-rules-file branch-rules.json \
+  --sandbox-digest-file sandbox-artifacts/DIGESTS.md --eval-dir eval-artifacts \
+  --benchmark-dir benchmark-artifacts --json
 ```
 
 ## Gate first
 
 ```bash
 python scripts/release_gate.py
-python scripts/release_gate.py --eval-dir reports/eval/2026-09-15 --sandbox-digest-file worker-digests.txt --branch-rules-file branch-rules.json --json
+python scripts/release_gate.py --eval-dir eval-artifacts \
+  --benchmark-dir benchmark-artifacts \
+  --sandbox-digest-file sandbox-artifacts/DIGESTS.md \
+  --branch-rules-file branch-rules.json --json
 ```
 
 `GO` requires every local box green and no EXTERNAL box outstanding. Each
@@ -41,47 +49,66 @@ when the file is missing; present-but-invalid fails closed):
 
 | Gate box | Artifact | Contract |
 |---|---|---|
-| `live-eval-backend` | `--eval-dir DIR/*.json` | >=1 JSON with a `provenance` object carrying all 16 `RunProvenance` fields (see `scripts/release_gate.py:check_provenance_fields` + TODO 018); mtime <90d |
-| `repeated-trials` | same `--eval-dir` | >=5 valid provenance files, or any file with `provenance.trials >= 5` (TODO 001: 5–10×/scenario) |
-| `branch-rules-applied` | `--branch-rules-file rules.json` | JSON from `gh api repos/OWNER/REPO/rulesets` naming `main`, active enforcement, requiring CI checks (see `docs/branch-protection.md`) |
-| `sandbox-image-published` | `--sandbox-digest-file digests.txt` | text containing `sha256:<hex>` (e.g. `worker-digests.txt` from `release.yml`); local digest mismatch fails |
+| `live-eval-backend` | `--eval-dir DIR` | At least one `report.json` with `live_outcome` `PASS` or `FAIL`, complete provenance, a full 40-character `code_revision` exactly matching the release checkout, and a report timestamp within 90 days. `SKIPPED` and `INFRA_ERROR` do not count. |
+| `repeated-trials` | `--benchmark-dir DIR` | A completed benchmark `run.json` and matching `summary.json`; every listed scenario has at least five distinct persisted trial indices, the run requires the sandbox, the source tree is clean, its full `git_sha` exactly matches the release checkout, and the summary timestamp is within 90 days. |
+| `branch-rules-applied` | `--branch-rules-file rules.json` | `gh api repos/OWNER/REPO/rulesets` JSON containing an active ruleset matching the full contract in `docs/governance/ruleset-main.json`: exact `main` scope, no bypass actors, deletion/non-fast-forward protection, the required pull-request rule, and all documented strict status checks. |
+| `sandbox-image-published` | `sandbox-artifacts/DIGESTS.md`, downloaded from the `sandbox-digests` artifact | Base and browser GHCR digests, a full source revision exactly matching the release checkout, and UTC creation time within 90 days. Before gate evaluation, CI verifies both signatures with cosign against the exact identity `https://github.com/<owner>/<repo>/.github/workflows/sandbox-image.yml@refs/heads/main` and GitHub Actions OIDC issuer. |
+
+When run by GitHub Actions, the release gate downloads `eval-reports` and
+`benchmark-reports` from the latest successful scheduled Eval run on `main`,
+and `sandbox-digests` from the latest successful scheduled sandbox-image run
+into `sandbox-artifacts/DIGESTS.md`. Before invoking the gate, the workflow
+extracts both immutable image references and verifies their signatures with
+cosign; the digest file itself records the image tags, source revision, and
+UTC creation time. `workflow_dispatch` accepts explicit source run IDs for
+recovery. The gate checks report age and requires benchmark source revisions
+to be clean; eval provenance must identify the current release checkout.
+Missing artifacts stay EXTERNAL, while malformed or insufficient reports
+fail. A local invocation of `release_gate.py` checks the supplied digest
+metadata but does not perform the workflow's cosign verification step.
 
 Without flags the gate keeps the 4 EXTERNALs (no silent green). With valid
 artifacts it can reach `GO` (exit 0). Stale/invalid evidence is a `FAIL`,
 not EXTERNAL, so bad provenance cannot be mistaken for missing provenance.
 
-## What `release.yml` publishes per tag
+## What `release.yml` publishes per tag after GO
 
 - Python sdist + wheel (`dist/*`) with `SHA256SUMS`.
 - CycloneDX SBOMs: Python (`sbom-python.json`), npm (`sbom-webui.json`),
-  sandbox OS packages (`sbom-sandbox.json`, from the built worker image).
+  sandbox base packages (`sbom-sandbox.json`) and browser-worker packages
+  (`sbom-sandbox-browser.json`). Both sandbox inventories come from the exact
+  cosign-verified base/browser digests published by `sandbox-image.yml` and
+  listed in `sandbox-image-refs.txt`.
+- Trivy SARIF reports for both pinned sandbox images; HIGH/CRITICAL findings
+  fail the release gate.
+- Versioned Linux and Windows installers (`install-<tag>.sh` and
+  `install-<tag>.ps1`), each with a SHA-256 file and GitHub build attestation.
 - SLSA-style provenance via `actions/attest-build-provenance` (Sigstore,
-  no maintainer keys to manage) for `dist/*` and all SBOMs.
-- Sandbox image digests: the workflow resolves the base (`debian:12-slim`)
-  to its digest at build time and records the built worker digest; both land
-  in the release notes and in `docker/sandbox/DIGESTS.md` for that tag.
-  Evaluation must run the pinned `breachpilot-sandbox@sha256:...` digest —
-  never a floating tag — so benchmarks reproduce exactly.
+  no maintainer keys to manage) for distributions, SBOMs, image-reference
+  metadata, and both installers.
 
 ## Prebuilt sandbox image (#55)
 
-`sandbox-image.yml` builds `breachpilot-sandbox:<version>` (+ `:browser`
-variant) on release tags and pushes to GHCR with keyless cosign signing:
+`sandbox-image.yml` builds and signs the `nightly` channel (+ `:nightly-browser`)
+on its weekly schedule or a maintainer dispatch from `main`:
 
 ```text
-ghcr.io/<owner>/breachpilot-sandbox:v0.69.0
-ghcr.io/<owner>/breachpilot-sandbox:v0.69.0-browser
+ghcr.io/<owner>/breachpilot-sandbox:nightly
+ghcr.io/<owner>/breachpilot-sandbox:nightly-browser
 ```
 
 Installer verify path: pull → verify cosign signature → record digest →
-run with `sandbox.image` set to the digest. Until the first push lands,
-`scripts/release_gate.py` keeps `sandbox-image-published` EXTERNAL.
+run with `sandbox.image` set to the digest. Until a successful scheduled
+image artifact is supplied, `scripts/release_gate.py` keeps
+`sandbox-image-published` EXTERNAL.
 
 ## Container scanning (#43)
 
-The release workflow scans all three SBOMs plus the worker image
-(Trivy, HIGH/CRITICAL fail the gate). Findings ship alongside the release
-notes; the assessment metadata keeps the image digest with every run
+The release workflow verifies the sandbox workflow's signed base and browser
+digests, pulls those immutable references, and runs Syft/Trivy against those
+same images. It does not rebuild a different local image for the scan.
+Findings and both image references ship alongside the release assets;
+assessment metadata keeps the sandbox image digest with every run
 (`sandbox_image_digest` in benchmark/eval provenance).
 
 ## Rollback

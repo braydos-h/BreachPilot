@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-import shutil
 import time
 from pathlib import Path
 from typing import Any
 
 from tools.credential_store import CredentialRecord, CredentialStore
 from tools.mcp_shared import _attempt_dir, check_targets_allowlist
-from tools.mcp_tools.registry import ToolContext, run_argv_captured
+from tools.mcp_tools.registry import ToolContext
+from tools.mcp_tools.sandbox_exec import run_tool_argv_in_sandbox
 from tools.validation_utils import validate_ntlm_hash, validate_target_or_ip
 
 
@@ -26,10 +26,9 @@ def register_credential_tools(mcp: Any, *, ctx: ToolContext) -> None:
     # Stable per-target store (NOT per-attempt, so creds persist across the
     # engagement). target_ip is IPv4-validated before use so the path can't
     # traverse out of the workspace. The secret field is Fernet-encrypted at
-    # rest by CredentialStore; ``password`` args are also redacted in the audit
-    # log by ``_redact_args``. ``confirmed`` is only ever set True via
-    # ``cred_store_confirm`` (a deliberate post-reuse signal) -- ``add`` stores
-    # unconfirmed records.
+    # rest by CredentialStore; free-text notes are encrypted too. ``password``
+    # args are redacted in the audit log. Agent-callable tools cannot promote a
+    # credential to confirmed; that remains an authenticated operator action.
     def _cred_store_dir(target_ip: str) -> Path:
         return workspace / "credentials" / target_ip
 
@@ -44,7 +43,7 @@ def register_credential_tools(mcp: Any, *, ctx: ToolContext) -> None:
         target_host: str = "",
         notes: str = "",
     ) -> str:
-        """Store a harvested or known credential for a target in the encrypted credential vault. The secret (password/hash/token/key) is Fernet-encrypted at rest under exploit_workspace/credentials/<target_ip>/credentials.jsonl and is never written to the audit log in cleartext. Records are added UNCONFIRMED (confirmed=False); use cred_store_confirm only after validating the credential by successfully reusing it against the target. credential_type: password | hash | token | key."""
+        """Store a harvested or known credential for a target in the encrypted credential vault. Secrets and free-text notes are Fernet-encrypted at rest under exploit_workspace/credentials/<target_ip>/credentials.jsonl and are never written to the audit log in cleartext. Records are added UNCONFIRMED (confirmed=False); only an authenticated operator can confirm a credential after reviewing successful reuse evidence. credential_type: password | hash | token | key."""
         if not target_ip or not target_ip.strip():
             return "BLOCKED: target_ip is required."
         if not validate_target_or_ip(target_ip):
@@ -57,7 +56,7 @@ def register_credential_tools(mcp: Any, *, ctx: ToolContext) -> None:
         if not (password or "").strip():
             return "BLOCKED: password/secret is required (use credential_type='hash' with an NTLM/Kerberos hash if that is what you have)."
 
-        store = CredentialStore(_cred_store_dir(target_ip))
+        store = CredentialStore(_cred_store_dir(target_ip), workspace_root=workspace)
         try:
             store.assert_writable()
         except RuntimeError as exc:
@@ -83,7 +82,7 @@ def register_credential_tools(mcp: Any, *, ctx: ToolContext) -> None:
             f"TARGET: {target_ip}\n"
             f"USERNAME: {rec.username}\n"
             f"TYPE: {rec.credential_type}\n"
-            f"CONFIRMED: False (run cred_store_confirm after a validated reuse)\n"
+            f"CONFIRMED: False (operator confirmation required after reviewing successful reuse evidence)\n"
             f"ENCRYPTION_AT_REST: {enc}\n"
             f"STORE: {store.store_path}"
         )
@@ -96,8 +95,10 @@ def register_credential_tools(mcp: Any, *, ctx: ToolContext) -> None:
             return "BLOCKED: target_ip is required."
         if not validate_target_or_ip(target_ip):
             return "ERROR: Invalid target (IP or domain)."
+        if include_secret and (config or {}).get("exploit", {}).get("permission") != "full_access":
+            return "CRED_STORE_GET: BLOCKED -- revealing credential secrets requires exploit.permission=full_access."
 
-        store = CredentialStore(_cred_store_dir(target_ip))
+        store = CredentialStore(_cred_store_dir(target_ip), workspace_root=workspace)
         recs = store.all_credentials()
         if target_host.strip():
             recs = [r for r in recs if r.target_host == target_host.strip()]
@@ -120,7 +121,7 @@ def register_credential_tools(mcp: Any, *, ctx: ToolContext) -> None:
                 lines.append(f"  SECRET: {r.password}")
             else:
                 lines.append("  SECRET: <masked -- set include_secret=True with a username to reveal>")
-            if r.notes:
+            if r.notes and reveal:
                 lines.append(f"  NOTES: {r.notes}")
             lines.append("")
         return "\n".join(lines)
@@ -134,7 +135,7 @@ def register_credential_tools(mcp: Any, *, ctx: ToolContext) -> None:
         if not validate_target_or_ip(target_ip):
             return "ERROR: Invalid target (IP or domain)."
 
-        store = CredentialStore(_cred_store_dir(target_ip))
+        store = CredentialStore(_cred_store_dir(target_ip), workspace_root=workspace)
         recs = store.all_credentials()
         enc = "ENABLED" if store.encryption_enabled else "DISABLED (plaintext fallback -- install cryptography)"
         if not recs:
@@ -152,46 +153,17 @@ def register_credential_tools(mcp: Any, *, ctx: ToolContext) -> None:
         return "\n".join(lines)
 
     @mcp.tool()
-    @require_allowlist()
-    def cred_store_confirm(
-        target_ip: str, username: str, target_host: str = "", credential_type: str = "", validated: bool = False
-    ) -> str:
-        """Mark a stored credential confirmed=True. Use ONLY after validating the credential by successfully reusing it against the target (e.g. it authenticated via lateral_exec/dump_credentials). Pass validated=True to assert that reuse succeeded -- a bare confirm is refused and flips nothing, so an unvalidated credential is never promoted. The confirmed flag is then HMAC-signed at rest so it cannot be forged on disk. Harvested credentials are never auto-confirmed; this is the deliberate post-reuse signal that the credential is known-good."""
-        if not target_ip or not target_ip.strip():
-            return "BLOCKED: target_ip is required."
-        if not validate_target_or_ip(target_ip):
-            return "ERROR: Invalid target (IP or domain)."
-        if not username or not username.strip():
-            return "BLOCKED: username is required (name which credential you confirmed)."
+    @audit_tool
+    def cred_store_confirm() -> str:
+        """Compatibility shim: agent calls cannot certify successful authentication.
 
-        store = CredentialStore(_cred_store_dir(target_ip))
-        th = (target_host or target_ip).strip()
-        ctype = (credential_type or "").strip().lower() or None
-        if not validated:
-            # Refuse to confirm without an explicit assertion of validation. The
-            # caller must have actually reused the credential (authenticated with
-            # it); a bare confirm is a no-op so the harvester cannot promote an
-            # unvalidated credential. The validated=True assertion is itself
-            # recorded in the audit log by the require_allowlist decorator.
-            return (
-                f"CRED_STORE_CONFIRM: BLOCKED -- validation required. Pass "
-                f"validated=True to assert you have successfully reused this "
-                f"credential against {th} (e.g. authenticated via "
-                f"lateral_exec/dump_credentials). Unvalidated credentials are "
-                f"never auto-confirmed."
-            )
-        try:
-            ok = store.confirm_credential(
-                username=username.strip(), target_host=th, credential_type=ctype, validated=True
-            )
-        except RuntimeError as exc:
-            return f"CRED_STORE_CONFIRM: REFUSED -- {exc}"
-        suffix = f" type={ctype}" if ctype else ""
-        if ok:
-            return f"CRED_STORE_CONFIRM: confirmed=True for username={username.strip()} target_host={th}{suffix}"
+        Confirmation is available only to an authenticated operator through the
+        run credentials UI/API after reviewing the evidence. A caller-supplied
+        ``validated`` flag is not evidence and is intentionally absent here.
+        """
         return (
-            f"CRED_STORE_CONFIRM: no unconfirmed matching credential found for "
-            f"username={username.strip()} target_host={th}{suffix}"
+            "CRED_STORE_CONFIRM: BLOCKED -- agent-initiated confirmation is disabled. "
+            "An authenticated operator must review successful reuse evidence."
         )
 
     @mcp.tool()
@@ -238,11 +210,10 @@ def register_credential_tools(mcp: Any, *, ctx: ToolContext) -> None:
         argv.append(f"{username}@{target_ip}")
         if command:
             argv.append(command)
-        cmd = " ".join(argv)  # reported for operator visibility
-
         attempt_dir, attempt_id = _attempt_dir(workspace)
-        log_path = attempt_dir / f"{m}.log"
-        status, returncode, output, elapsed = run_argv_captured(argv, 120)
+        status, returncode, output, elapsed = run_tool_argv_in_sandbox(
+            ctx, argv, target_ip=target_ip, timeout=120, tool_name="lateral_exec", max_chars=4000
+        )
         return (
             f"LATERAL_EXEC_RESULT: {status}\n"
             f"ATTEMPT_ID: {attempt_id}\n"
@@ -279,6 +250,12 @@ def register_credential_tools(mcp: Any, *, ctx: ToolContext) -> None:
         if m not in allowed_methods:
             return f"BLOCKED: unsupported method '{m}'. Allowed: {', '.join(allowed_methods)}"
 
+        if m in {"sam_local", "mimikatz", "lsass"}:
+            return (
+                f"BLOCKED: {m} reads credentials from the local operating system, not target {target_ip}. "
+                "Host-local credential extraction is disabled."
+            )
+
         attempt_dir, attempt_id = _attempt_dir(workspace)
         start = time.monotonic()
 
@@ -303,8 +280,9 @@ def register_credential_tools(mcp: Any, *, ctx: ToolContext) -> None:
                 h = ntlm_hash.strip()
                 argv.extend(["-hashes", f":{h.split(':')[-1]}"])
 
-            log_path = attempt_dir / "secretsdump.log"
-            status, returncode, output, _elapsed = run_argv_captured(argv, 300)
+            status, returncode, output, _elapsed = run_tool_argv_in_sandbox(
+                ctx, argv, target_ip=target_ip, timeout=300, tool_name="dump_credentials"
+            )
 
         elif m == "dcsync":
             # DCSync via impacket-secretsdump over DRSUAPI against a domain
@@ -338,34 +316,9 @@ def register_credential_tools(mcp: Any, *, ctx: ToolContext) -> None:
                 argv.extend(["-just-dc-user", tu])
             argv.extend(["-outputfile", str(attempt_dir / "ntds_hashes")])
 
-            status, returncode, output, _elapsed = run_argv_captured(argv, 300)
-
-        elif m == "sam_local":
-            # Save registry hives then dump locally. ``&&`` chaining requires a
-            # shell, so keep bash -c but use _run_with_pgrp_timeout so the whole
-            # process group is reaped on timeout (M2).
-            cmds = (
-                f"reg save HKLM\\SAM {attempt_dir / 'SAM'} && "
-                f"reg save HKLM\\SYSTEM {attempt_dir / 'SYSTEM'} && "
-                f"impacket-secretsdump -sam {attempt_dir / 'SAM'} -system {attempt_dir / 'SYSTEM'} LOCAL"
+            status, returncode, output, _elapsed = run_tool_argv_in_sandbox(
+                ctx, argv, target_ip=target_ip, timeout=300, tool_name="dump_credentials"
             )
-            status, returncode, output, _elapsed = run_argv_captured(["bash", "-c", cmds], 120)
-
-        elif m == "mimikatz":
-            mimikatz_bin = shutil.which("mimikatz") or shutil.which("mimikatz.exe") or "mimikatz.exe"
-            # H1: argv list -- the mimikatz sub-commands are literal arguments.
-            argv = [mimikatz_bin, "privilege::debug", "sekurlsa::logonpasswords", "lsadump::sam", "exit"]
-            status, returncode, output, _elapsed = run_argv_captured(argv, 120)
-
-        elif m == "lsass":
-            procdump = shutil.which("procdump") or shutil.which("procdump.exe") or "procdump.exe"
-            mimikatz_bin = shutil.which("mimikatz") or shutil.which("mimikatz.exe") or "mimikatz.exe"
-            dump_path = attempt_dir / "lsass.dmp"
-            cmds = (
-                f"{procdump} -accepteula -ma lsass.exe {dump_path} && "
-                f"{mimikatz_bin} 'sekurlsa::minidump {dump_path}' 'sekurlsa::logonpasswords' exit"
-            )
-            status, returncode, output, _elapsed = run_argv_captured(["bash", "-c", cmds], 120)
 
         elapsed = time.monotonic() - start
         return (
@@ -425,7 +378,14 @@ def register_credential_tools(mcp: Any, *, ctx: ToolContext) -> None:
             argv.extend(["-hashes", f":{h.split(':')[-1]}"])
         argv.extend(["-outputfile", str(tickets_file)])
 
-        status, returncode, output, elapsed = run_argv_captured(argv, 300)
+        status, returncode, output, elapsed = run_tool_argv_in_sandbox(
+            ctx,
+            argv,
+            target_ip=target_ip,
+            targets=[target_ip, dc],
+            timeout=300,
+            tool_name="kerberoast",
+        )
 
         file_size = tickets_file.stat().st_size if tickets_file.exists() else 0
 

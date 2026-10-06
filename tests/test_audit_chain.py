@@ -11,6 +11,7 @@ flagged as tampered), and by ``_load_last_hash`` when seeding the chain tail.
 
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 
@@ -58,6 +59,78 @@ async def test_chain_verifies_across_records(tmp_path: Path):
     ok, why = verify_audit_chain(tmp_path / "exploit_audit.jsonl")
     assert ok, why
     assert "4 chained" in why
+
+
+@pytest.mark.asyncio
+async def test_action_outcome_evidence_persists_in_hashed_record(tmp_path: Path):
+    policy = ExploitPolicy(_settings(tmp_path), tmp_path)
+    record = await policy.record(
+        action="run_exploit_terminal",
+        command="id",
+        status="completed",
+        attempt_id="attempt-verified",
+        exploit_outcome="compromise",
+        outcome_evidence=["shell:uid=0\\("],
+        shell_type="sh",
+        privilege_level="root",
+    )
+
+    serialized = json.loads((tmp_path / "exploit_audit.jsonl").read_text(encoding="utf-8").splitlines()[0])
+    assert serialized["exploit_outcome"] == "compromise"
+    assert serialized["outcome_evidence"] == ["shell:uid=0\\("]
+    assert serialized["shell_type"] == "sh"
+    assert serialized["privilege_level"] == "root"
+    assert record.hash == serialized["hash"]
+
+    loaded = policy.read_audit_records()[0]
+    assert loaded.exploit_outcome == "compromise"
+    assert loaded.outcome_evidence == ["shell:uid=0\\("]
+    assert loaded.privilege_level == "root"
+    ok, why = verify_audit_chain(tmp_path / "exploit_audit.jsonl")
+    assert ok, why
+
+
+@pytest.mark.asyncio
+async def test_new_action_evidence_schema_preserves_legacy_audit_chain(tmp_path: Path):
+    """Adding optional attribution fields must not invalidate existing logs."""
+    legacy_record = {
+        "timestamp": "2025-01-01T00:00:00+00:00",
+        "target_ip": "10.0.0.50",
+        "action": "run_exploit_terminal",
+        "approved": True,
+        "status": "completed",
+        "exit_code": 0,
+        "command": "id",
+        "detail": "",
+        "attempt_id": "legacy",
+        "code_sha256": "",
+        "duration_seconds": 0.0,
+        "approved_by": None,
+        "source_ip": None,
+        "session_id": None,
+        "full_args": None,
+        "scope_check_result": None,
+        "prev_hash": "",
+    }
+    canonical = json.dumps(legacy_record, sort_keys=True, default=str, ensure_ascii=True)
+    legacy_hash = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+    legacy_record["hash"] = legacy_hash
+    audit = tmp_path / "exploit_audit.jsonl"
+    audit.write_text(json.dumps(legacy_record) + "\n", encoding="utf-8")
+
+    policy = ExploitPolicy(_settings(tmp_path), tmp_path)
+    assert policy._last_hash == legacy_hash
+    current = await policy.record(
+        action="run_exploit_terminal",
+        command="id",
+        status="completed",
+        exploit_outcome="compromise",
+        outcome_evidence=["shell:uid=0\\("],
+    )
+    assert current.prev_hash == legacy_hash
+    ok, why = verify_audit_chain(audit)
+    assert ok, why
+    assert "2 chained" in why
 
 
 @pytest.mark.asyncio

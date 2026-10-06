@@ -22,6 +22,7 @@ export const STATUS_META: Record<string, { label: string; className: string }> =
   CANCELLED: { label: "Cancelled", className: "bg-muted text-muted-foreground" },
   INTERRUPTED: { label: "Interrupted", className: "bg-orange-500/15 text-orange-700 dark:text-orange-300" },
   SKIPPED: { label: "Skipped", className: "bg-muted text-muted-foreground" },
+  UNMEASURED: { label: "Unmeasured", className: "bg-muted text-muted-foreground" },
 };
 
 export function StatusBadge({ status }: { status: string }) {

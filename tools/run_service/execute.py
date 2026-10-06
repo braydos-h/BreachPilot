@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import copy
+import functools
 import json
 import time
 import traceback
@@ -64,6 +65,20 @@ if TYPE_CHECKING:
     from tools.exploit_agent import ExploitSettings
 
 ui = get_ui()
+
+
+def _run_log_scope(fn: Callable[..., Any]) -> Callable[..., Any]:
+    """Own run-log attachment across setup, execution, and report failures."""
+
+    @functools.wraps(fn)
+    async def wrapped(self: Any, request: RunRequest, preview: RunPreview, *args: Any, **kwargs: Any) -> Any:
+        RunLog.attach(preview.reports_dir)
+        try:
+            return await fn(self, request, preview, *args, **kwargs)
+        finally:
+            RunLog.detach()
+
+    return wrapped
 
 
 class ExecuteMixin:
@@ -151,6 +166,7 @@ class ExecuteMixin:
             goal: AttackGoal,
             exploit_settings: ExploitSettings,
             config_path: Path,
+            config: dict[str, Any],
             reports_dir: Path,
             assessment: ReconAssessment | None,
             approval_prompt: Any,
@@ -164,20 +180,32 @@ class ExecuteMixin:
             event_sink: EventSink,
             cancellation: CancellationToken,
             checkpoint_hook: Any = None,
+            swarm_session_complete: Any = None,
         ) -> dict[str, Any]: ...
         async def _wait_swarm(
             self,
             *,
+            swarm_loop: Any,
             swarm_task: asyncio.Task[Any],
             swarm_bridge: SwarmMcpBridge,
             swarm_workspace: Path,
+            mode: str,
             config: dict[str, Any],
             request: RunRequest,
             result: dict[str, Any],
             event_sink: EventSink,
             reports_dir: Path | None = None,
         ) -> dict[str, Any]: ...
+        async def _stop_swarm_task(
+            self,
+            *,
+            swarm_loop: Any,
+            swarm_task: asyncio.Task[Any],
+            swarm_bridge: SwarmMcpBridge,
+            mode: str,
+        ) -> None: ...
 
+    @_run_log_scope
     async def execute(
         self,
         request: RunRequest,
@@ -216,11 +244,6 @@ class ExecuteMixin:
         resolved_ip = preview.resolved_ip
         resolved_domain = preview.resolved_domain
         mode = preview.mode
-
-        # Per-run run.log: tees all console output (ui.*, print) and every
-        # logging record in this process into reports/<run_id>/run.log so
-        # failures can be traced after the fact. See tools/run_log.py.
-        RunLog.attach(reports_dir)
 
         await event_sink.emit(EVENT_STATE, {"state": RunState.RUNNING.value})
 
@@ -425,6 +448,7 @@ class ExecuteMixin:
         swarm_loop: Any = None
         swarm_task: asyncio.Task[Any] | None = None
         swarm_workspace: Path | None = None
+        swarm_wait_owns_teardown = False
         if request.swarm:
             swarm_loop, swarm_task, swarm_workspace = await self._setup_swarm(
                 request=request,
@@ -635,6 +659,40 @@ class ExecuteMixin:
                         ctx["mcp_session"] = session
                         ctx["exploit_tools_schemas"] = schemas
                         ctx["main_loop"] = main_loop
+                        audit_path = getattr(policy, "_audit_path", None)
+                        if audit_path is not None:
+                            ctx["audit_directory"] = str(Path(audit_path).parent)
+
+            async def _swarm_session_complete(primary_result: dict[str, Any] | None) -> dict[str, Any] | None:
+                """Join or stop the sibling before run_exploit_session closes MCP."""
+                nonlocal swarm_wait_owns_teardown
+                if swarm_task is None or swarm_workspace is None:
+                    return primary_result
+                try:
+                    if primary_result is None:
+                        await self._stop_swarm_task(
+                            swarm_loop=swarm_loop,
+                            swarm_task=swarm_task,
+                            swarm_bridge=swarm_bridge,
+                            mode=mode,
+                        )
+                        return None
+                    return await self._wait_swarm(
+                        swarm_loop=swarm_loop,
+                        swarm_task=swarm_task,
+                        swarm_bridge=swarm_bridge,
+                        swarm_workspace=swarm_workspace,
+                        mode=mode,
+                        config=config,
+                        request=request,
+                        result=primary_result,
+                        event_sink=event_sink,
+                        reports_dir=reports_dir,
+                    )
+                finally:
+                    # Both _wait_swarm and _stop_swarm_task own stop/join on
+                    # entry. The outer finally must not race a second teardown.
+                    swarm_wait_owns_teardown = True
 
             # Run the exploit session.
             try:
@@ -646,6 +704,7 @@ class ExecuteMixin:
                     goal=goal,
                     exploit_settings=exploit_settings,
                     config_path=config_path,
+                    config=config,
                     reports_dir=reports_dir,
                     assessment=assessment,
                     approval_prompt=None,
@@ -659,24 +718,14 @@ class ExecuteMixin:
                     event_sink=event_sink,
                     cancellation=cancellation,
                     checkpoint_hook=_checkpoint_hook,
+                    swarm_session_complete=(
+                        _swarm_session_complete if (request.swarm and swarm_task is not None) else None
+                    ),
                 )
             finally:
                 if session_attach is not None:
                     session_attach(None, [], None)
 
-            # Keep the progress ticker alive while the parallel swarm finishes;
-            # cancelling it before this wait left the API with frozen status.
-            if swarm_task is not None and swarm_workspace is not None:
-                result = await self._wait_swarm(
-                    swarm_task=swarm_task,
-                    swarm_bridge=swarm_bridge,
-                    swarm_workspace=swarm_workspace,
-                    config=config,
-                    request=request,
-                    result=result,
-                    event_sink=event_sink,
-                    reports_dir=reports_dir,
-                )
         except _EXC_GROUP_CATCH as exc:
             log_path = reports_dir / "session_error.log"
             try:
@@ -724,6 +773,17 @@ class ExecuteMixin:
                 reports_dir=str(reports_dir),
             )
         finally:
+            # The swarm is a sibling task and may still be running when the
+            # primary session is cancelled or fails before _wait_swarm starts.
+            # Join it here as well so teardown never leaves background work
+            # attached to the run.
+            if swarm_task is not None and not swarm_wait_owns_teardown:
+                await self._stop_swarm_task(
+                    swarm_loop=swarm_loop,
+                    swarm_task=swarm_task,
+                    swarm_bridge=swarm_bridge,
+                    mode=mode,
+                )
             # Witness teardown. Runs on BOTH the success and error paths (the
             # except clause above returns through this finally). Order
             # matters: before cancelling the poll task, register the exploit
@@ -756,7 +816,6 @@ class ExecuteMixin:
                 await asyncio.wait_for(ticker_task, timeout=0.1)
             except (asyncio.TimeoutError, asyncio.CancelledError):
                 pass
-            RunLog.detach()
             # Deep Run Logs: flush the activity buffer so the run's final
             # <10 audit rows survive (success AND error paths share this
             # finally). Best-effort — a logging failure must not break teardown.
@@ -846,10 +905,11 @@ class ExecuteMixin:
         # Flow A enhanced report (Phase B1). Flow A's run_exploit_agent does
         # not run an AutonomousOrchestrator campaign, so EnhancedReportGenerator
         # was Flow B-only. Build a minimal campaign_result["states"] from the
-        # audit records: each completed exit_code==0 record is a successful
-        # action; failed/blocked records populate failed_attempts. This feeds
-        # ExploitationChain + TechnicalFinding so the WebUI can render the
-        # attack graph. Best-effort — never fatal to the run.
+        # audit records: a successful exploit needs its own normalized,
+        # evidence-backed outcome; a run-wide compromise count is not enough
+        # to attribute success or a re-verification probe to an action. This
+        # feeds ExploitationChain + TechnicalFinding so the WebUI can render
+        # the attack graph. Best-effort — never fatal to the run.
         try:
             campaign_result = _build_campaign_result_from_records(result, target_ip)
             if campaign_result is not None:
@@ -938,7 +998,6 @@ class ExecuteMixin:
             finalize_manifest(reports_dir, run_id)
         except Exception:  # noqa: BLE001 -- teardown only, never gates
             pass
-        RunLog.detach()
         return _final_run_result
 
     # ------------------------------------------------------------------

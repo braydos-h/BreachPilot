@@ -1,197 +1,109 @@
-"""Regression tests for the git_clone existence preflight (Gap 4).
-
-``git_clone`` only validated URL *format*, so a hallucinated PoC URL failed
-only at clone time. The fix surfaces a ``PREFLIGHT_WARNING`` BEFORE the (slow)
-clone attempt when the URL does not resolve. It never hard-blocks (private /
-auth-gated repos 404 to unauthenticated HEAD), and skips the check for ssh/git
-URLs. Also tests the shared ``tools.exploit_search.url_exists`` verdict helper.
-"""
+"""Pinned URL verification and sandbox-only Git clone regressions."""
 
 from __future__ import annotations
 
-import urllib.error
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
 
-
-def _make_server(tmp_path: Path):
-    from mcp_exploit_server import create_mcp_server
-    from tools.cve_lookup import CVESearchSettings, NVDClient
-    from tools.exploit_search import ExploitSearch, ExploitSearchSettings
-    from tools.web_researcher import WebResearcher, WebResearcherSettings
-
-    search = ExploitSearch(ExploitSearchSettings())
-    nvd = NVDClient(CVESearchSettings())
-    config: dict[str, Any] = {"exploit": {"require_explicit_allowlist": False, "allowed_targets": []}}
-    return create_mcp_server(search, nvd, WebResearcher(WebResearcherSettings()), tmp_path, config)
+from tools.exploit_search import _is_allowed_poc_url, url_exists
 
 
-def _text(result) -> str:
-    content = result[0] if isinstance(result, (list, tuple)) else result
-    if hasattr(content, "content"):
-        content = content.content
-    parts = []
-    for c in content:
-        t = getattr(c, "text", None)
-        if t is None and isinstance(c, dict):
-            t = c.get("text")
-        if t is None:
-            t = str(c)
-        parts.append(t)
-    return "".join(parts)
+def test_url_exists_classifies_status_using_pinned_transport(monkeypatch) -> None:
+    calls: list[dict[str, Any]] = []
+
+    def fake_probe(url: str, **kwargs: Any) -> tuple[int, str]:
+        calls.append({"url": url, **kwargs})
+        return 200, url
+
+    monkeypatch.setattr("tools.exploit_search.probe_url", fake_probe)
+
+    assert url_exists("https://github.com/org/repo") == (True, None)
+    assert len(calls) == 1
+    assert calls[0]["policy"].allowed_domains
+    assert calls[0]["user_agent"]
 
 
-def _patch_clone_ok(monkeypatch):
-    """Patch _run_with_pgrp_timeout so git clone 'succeeds' without running git."""
-    import mcp_exploit_server as mes
-
-    def _fake(args, timeout, stdout=None, stderr=None, **k):
-        return 0, "Cloning into 'repo'...", ""
-
-    monkeypatch.setattr(mes, "_run_with_pgrp_timeout", _fake)
+def test_url_exists_preserves_not_found_classification(monkeypatch) -> None:
+    monkeypatch.setattr("tools.exploit_search.probe_url", lambda *args, **kwargs: (404, args[0]))
+    assert url_exists("https://www.exploit-db.com/exploits/123") == (False, "not_found")
 
 
-# ── url_exists verdict helper ───────────────────────────────────────────────
+def test_url_exists_rejects_untrusted_authorities_before_network(monkeypatch) -> None:
+    calls: list[str] = []
+    monkeypatch.setattr("tools.exploit_search.probe_url", lambda url, **kwargs: calls.append(url))
+
+    assert not _is_allowed_poc_url("https://github.com@127.0.0.1:2375/path")
+    assert url_exists("https://github.com@127.0.0.1:2375/path") == (False, "connection_error")
+    assert url_exists("https://github.com.attacker.invalid/path") == (False, "connection_error")
+    assert url_exists("http://github.com/path") == (False, "connection_error")
+    assert calls == []
 
 
-def test_url_exists_classifies_success(monkeypatch):
-    from tools import exploit_search as es
+class _ToolRegistry:
+    def __init__(self) -> None:
+        self.tools = {}
 
-    class _Resp:
-        def __init__(self, code):
-            self._c = code
+    def tool(self):
+        return lambda fn: self.tools.setdefault(fn.__name__, fn)
 
-        def getcode(self):
-            return self._c
 
-        def __enter__(self):
-            return self
+def _git_clone_tool(tmp_path: Path, sandbox: object):
+    from tools.mcp_tools.terminal.execute import _register_execute_tools
 
-        def __exit__(self, *a):
-            return False
-
-    monkeypatch.setattr(
-        es.urllib.request,
-        "urlopen",
-        lambda req, timeout=None: _Resp(200),
+    registry = _ToolRegistry()
+    context = SimpleNamespace(
+        workspace=tmp_path,
+        config={"exploit": {"allowed_targets": []}},
+        audit_tool=lambda fn: fn,
+        sandbox=sandbox,
+        sandbox_notice="",
     )
-    assert es.url_exists("https://github.com/x/y") == (True, None)
+    _register_execute_tools(registry, ctx=context)
+    return registry.tools["git_clone"]
 
 
-def test_url_exists_classifies_404_as_not_found(monkeypatch):
-    from tools import exploit_search as es
+def test_git_clone_has_no_host_url_preflight_and_runs_inside_worker(monkeypatch, tmp_path: Path) -> None:
+    calls: list[tuple[list[str], dict[str, Any]]] = []
+    result = SimpleNamespace(status="completed", exit_code=0, stdout="cloned", stderr="", duration_seconds=0.1)
 
-    def _raise(*a, **k):
-        raise urllib.error.HTTPError(a[0], 404, "Not Found", {}, None)  # type: ignore[arg-type]
+    def fake_run(_ctx: Any, argv: list[str], **kwargs: Any):
+        calls.append((argv, kwargs))
+        return True, result
 
-    monkeypatch.setattr(es.urllib.request, "urlopen", _raise)
-    ok, reason = es.url_exists("https://github.com/x/y")
-    assert ok is False
-    assert reason == "not_found"
+    def forbidden(*args: Any, **kwargs: Any):
+        raise AssertionError("git URL preflight must not make a host-side request")
 
+    monkeypatch.setattr("tools.mcp_tools.terminal.execute.run_argv_in_sandbox", fake_run)
+    monkeypatch.setattr("tools.exploit_search.url_exists", forbidden)
+    tool = _git_clone_tool(tmp_path, object())
 
-def test_url_exists_classifies_connection_error(monkeypatch):
-    from tools import exploit_search as es
+    text = tool(repo_url="https://github.com/user/repo.git", target_dir="repo")
 
-    def _raise(*a, **k):
-        raise OSError("refused")
-
-    monkeypatch.setattr(es.urllib.request, "urlopen", _raise)
-    ok, reason = es.url_exists("https://github.com/x/y")
-    assert ok is False
-    assert reason == "connection_error"
-
-
-# ── git_clone preflight integration ────────────────────────────────────────
-
-
-@pytest.mark.asyncio
-async def test_git_clone_warns_on_404(monkeypatch, tmp_path: Path) -> None:
-    monkeypatch.setattr(
-        "tools.exploit_search.url_exists",
-        lambda url, timeout=8: (False, "not_found"),
-    )
-    _patch_clone_ok(monkeypatch)
-    mcp = _make_server(tmp_path)
-    text = _text(
-        await mcp.call_tool("git_clone", {"repo_url": "https://github.com/user/repo.git", "target_dir": "repo"})
-    )
-    assert "PREFLIGHT_WARNING" in text
-    assert "not_found" in text
-    # Clone still proceeds (never hard-blocks).
     assert "GIT_CLONE_RESULT: completed" in text
+    assert "sandbox)" in text
+    assert len(calls) == 1
+    assert calls[0][0] == ["git", "clone", "--", "https://github.com/user/repo.git", "repo"]
 
 
-@pytest.mark.asyncio
-async def test_git_clone_warns_on_connection_error(monkeypatch, tmp_path: Path) -> None:
-    monkeypatch.setattr(
-        "tools.exploit_search.url_exists",
-        lambda url, timeout=8: (False, "connection_error"),
-    )
-    _patch_clone_ok(monkeypatch)
-    mcp = _make_server(tmp_path)
-    text = _text(
-        await mcp.call_tool("git_clone", {"repo_url": "https://github.com/user/repo.git", "target_dir": "repo"})
-    )
-    assert "PREFLIGHT_WARNING" in text
-    assert "connection_error" in text
+@pytest.mark.parametrize(
+    "url",
+    [
+        "not-a-url",
+        "http://github.com/user/repo.git",
+        "https://github.com@127.0.0.1/user/repo.git",
+        "https://attacker.invalid/user/repo.git",
+        "https://github.com:443/user/repo.git",
+        "https://github.com/user/repo.git?redirect=attacker.invalid",
+    ],
+)
+def test_git_clone_rejects_untrusted_url_before_worker(monkeypatch, tmp_path: Path, url: str) -> None:
+    def forbidden(*args: Any, **kwargs: Any):
+        raise AssertionError("invalid URL must not be sent to the worker")
 
-
-@pytest.mark.asyncio
-async def test_git_clone_silent_when_url_ok(monkeypatch, tmp_path: Path) -> None:
-    monkeypatch.setattr(
-        "tools.exploit_search.url_exists",
-        lambda url, timeout=8: (True, None),
-    )
-    _patch_clone_ok(monkeypatch)
-    mcp = _make_server(tmp_path)
-    text = _text(
-        await mcp.call_tool("git_clone", {"repo_url": "https://github.com/user/repo.git", "target_dir": "repo"})
-    )
-    assert "PREFLIGHT_WARNING" not in text
-    assert "GIT_CLONE_RESULT: completed" in text
-
-
-@pytest.mark.asyncio
-async def test_git_clone_import_failure_does_not_block(monkeypatch, tmp_path: Path) -> None:
-    """If the url_exists import itself blows up, the clone still proceeds."""
-
-    def _boom(*a, **k):
-        raise ImportError("simulated")
-
-    # Patch the lazy import target so the `from tools.exploit_search import url_exists`
-    # inside git_clone resolves to a name that raises when called.
-    import tools.exploit_search as es
-
-    monkeypatch.setattr(es, "url_exists", _boom)
-    _patch_clone_ok(monkeypatch)
-    mcp = _make_server(tmp_path)
-    text = _text(
-        await mcp.call_tool("git_clone", {"repo_url": "https://github.com/user/repo.git", "target_dir": "repo"})
-    )
-    assert "GIT_CLONE_RESULT: completed" in text
-    assert "PREFLIGHT_WARNING" not in text
-
-
-@pytest.mark.asyncio
-async def test_git_clone_format_block_still_wins(monkeypatch, tmp_path: Path) -> None:
-    """An invalid URL format is rejected before any preflight."""
-    called: list[str] = []
-    import tools.exploit_search as es
-
-    monkeypatch.setattr(es, "url_exists", lambda *a, **k: called.append("called") or (True, None))
-    mcp = _make_server(tmp_path)
-    text = _text(await mcp.call_tool("git_clone", {"repo_url": "not-a-url"}))
+    monkeypatch.setattr("tools.mcp_tools.terminal.execute.run_argv_in_sandbox", forbidden)
+    text = _git_clone_tool(tmp_path, object())(repo_url=url)
     assert text.startswith("BLOCKED:")
     assert "invalid repo URL" in text
-    assert called == []  # preflight never ran on a format-rejected URL
-
-
-# NOTE: ssh:// / git:// URLs are rejected by git_clone's format regex today
-# (it only allows http(s) GitHub/GitLab URLs), so there is no live ssh-clone
-# path to test the skip against. The skip is exercised implicitly: any URL
-# that passes the format regex is http(s), so the preflight always runs for
-# accepted URLs. If ssh clones are later allowed, add a test asserting
-# url_exists is NOT called for ssh:// URLs.

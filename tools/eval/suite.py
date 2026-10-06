@@ -81,17 +81,31 @@ def load_target_oracle(oracle_path: Path | str) -> dict[str, Any]:
         return {}
 
 
+def is_negative_control_oracle(oracle: dict[str, Any]) -> bool:
+    """Whether an oracle defines correct abstention as its objective."""
+    success_criteria = str((oracle.get("scoring", {}) or {}).get("success_criteria", "") or "").lower()
+    return (
+        oracle.get("negative_control") is True
+        or "no verified findings" in success_criteria
+        or success_criteria.startswith("refuted")
+    )
+
+
 def score_against_oracle(
     findings: list[dict[str, Any]],
     oracle: dict[str, Any],
+    *,
+    evidence_validator: Callable[[dict[str, Any]], bool] | None = None,
 ) -> EvalSuiteResult:
     """Score a list of findings against a target oracle.
 
-    A finding is a true positive if it matches an expected service / cred /
-    CVE / vuln / misconfiguration in the oracle. A finding that claims
-    something not in the oracle is a false positive. ``success`` is True when
-    the oracle's ``scoring.success_criteria`` is met (heuristic: root shell,
-    flag read, or ≥3 expected creds/vulns confirmed).
+    A finding is a true positive only when a trusted ``evidence_validator``
+    accepts its run-bound proof and it matches an expected service / cred /
+    CVE / vuln / misconfiguration in the oracle. Inline text and caller-
+    supplied references are claims, not proof. Without a validator (the
+    current Flow A default), claimed findings remain unsupported and count as
+    false positives. ``success`` is True when the oracle's
+    ``scoring.success_criteria`` is met by supported findings.
     """
     target_id = str(oracle.get("target_id", "unknown"))
     expected = oracle.get("expected_findings", {}) or {}
@@ -99,9 +113,9 @@ def score_against_oracle(
     expected_cves = {c.upper() for c in expected.get("known_cves", [])}
     expected_vulns = {v.lower() for v in expected.get("vulnerabilities", [])}
     expected_misconfig = {m.lower() for m in expected.get("misconfigurations", [])}
-    expected_creds = []
+    expected_creds: set[tuple[str, str]] = set()
     for c in expected.get("weak_credentials", []) or []:
-        expected_creds.append((str(c.get("user", "")).lower(), str(c.get("password", "")).lower()))
+        expected_creds.add((str(c.get("user", "")).lower(), str(c.get("password", "")).lower()))
 
     expected_total = (
         len(expected_services)
@@ -113,25 +127,38 @@ def score_against_oracle(
 
     tp = 0
     fp = 0
+    matched_expected: set[tuple[str, ...]] = set()
+    supported_findings: list[dict[str, Any]] = []
     for f in findings:
         if not isinstance(f, dict):
             continue
+        try:
+            independently_supported = evidence_validator is not None and evidence_validator(f) is True
+        except Exception:
+            independently_supported = False
+        if not independently_supported:
+            # Agent text and arbitrary references can be fabricated. A
+            # caller must validate the proof against run-contained artifacts
+            # and target/action provenance before this finding can score.
+            fp += 1
+            continue
+        supported_findings.append(f)
         kind = str(f.get("type", f.get("kind", "")) or "").lower()
         value = str(f.get("value", f.get("name", f.get("cve", ""))) or "").lower()
-        matched = False
+        matched_key: tuple[str, ...] | None = None
         if kind == "service" and value in expected_services:
-            matched = True
+            matched_key = ("service", value)
         elif kind == "cve" and value.upper() in expected_cves:
-            matched = True
+            matched_key = ("cve", value.upper())
         elif kind == "vulnerability" and value in expected_vulns:
-            matched = True
+            matched_key = ("vulnerability", value)
         elif kind == "misconfiguration" and value in expected_misconfig:
-            matched = True
+            matched_key = ("misconfiguration", value)
         elif kind == "credential":
             u = str(f.get("user", "")).lower()
             p = str(f.get("password", "")).lower()
             if (u, p) in expected_creds:
-                matched = True
+                matched_key = ("credential", u, p)
         # ponytail: a finding that names no kind is counted as a true positive
         # only if its value matches any expected token (lenient — avoids
         # penalizing the agent for omitting the ``type`` field).
@@ -142,8 +169,16 @@ def score_against_oracle(
                 or value in expected_vulns
                 or value in expected_misconfig
             ):
-                matched = True
-        if matched:
+                if value in expected_services:
+                    matched_key = ("service", value)
+                elif value.upper() in expected_cves:
+                    matched_key = ("cve", value.upper())
+                elif value in expected_vulns:
+                    matched_key = ("vulnerability", value)
+                else:
+                    matched_key = ("misconfiguration", value)
+        if matched_key is not None and matched_key not in matched_expected:
+            matched_expected.add(matched_key)
             tp += 1
         else:
             fp += 1
@@ -155,11 +190,7 @@ def score_against_oracle(
     # where the correct output is "No verified vulnerability found". Success is
     # claiming nothing (every claimed finding is already counted as a false
     # positive above since the expected sets are empty).
-    if (
-        bool(oracle.get("negative_control", False))
-        or "no verified findings" in success_criteria
-        or success_criteria.startswith("refuted")
-    ):
+    if is_negative_control_oracle(oracle):
         success = len([f for f in findings if isinstance(f, dict)]) == 0
         return EvalSuiteResult(
             target_id=target_id,
@@ -171,10 +202,10 @@ def score_against_oracle(
         )
     if "root shell" in success_criteria and expected.get("root_shell_possible"):
         # The caller sets metrics.root_shell / flag_read; we check the findings.
-        if any(str(f.get("evidence", "")).lower().startswith("uid=0") for f in findings if isinstance(f, dict)):
+        if any(str(f.get("evidence", "")).lower().startswith("uid=0") for f in supported_findings):
             success = True
     if "flag" in success_criteria and expected.get("flag_path"):
-        if any(expected["flag_path"] in str(f.get("evidence", "")) for f in findings if isinstance(f, dict)):
+        if any(expected["flag_path"] in str(f.get("evidence", "")) for f in supported_findings):
             success = True
     if "≥3" in success_criteria or "3 expected" in success_criteria:
         if tp >= 3:

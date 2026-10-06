@@ -5,6 +5,14 @@ Every attack command — arbitrary terminal commands, generated Python, exploit
 tools, Metasploit — runs inside a hardened, disposable Docker worker instead
 of on the operator host.
 
+The worker boundary covers command execution. The MCP `write_python_file` tool
+creates a new file under the run workspace only. It accepts a bare filename,
+uses a unique attempt directory, refuses absolute and nested paths, and does not
+overwrite an existing file. The kernel writer traverses from a pinned workspace
+directory descriptor and refuses symlink traversal. Workspace reads remain
+contained and vault keyfiles/listings are redacted. See
+[safety-model.md](safety-model.md) for the per-operation contracts.
+
 ```
 LLM/MCP tool → BreachPilot policy/scope checks → disposable sandbox → target
 ```
@@ -62,10 +70,10 @@ swept at MCP server startup (running workers of concurrent sessions are kept).
 
 Enforced in `tools/sandbox/docker_backend.py::_build_create_args` (unit-tested):
 
-- `--cap-drop ALL`; only `NET_RAW` is added back (`sandbox.multi_net_raw`,
-  default true) for raw packet scanning. **`NET_ADMIN` is never granted to the
-  worker** — the worker cannot loosen, remove, or even enumerate its own
-  netns firewall rules.
+- `--cap-drop ALL` with no capability added back. `NET_RAW` stays disabled
+  because `AF_PACKET` sockets can bypass IP firewall rules. **`NET_ADMIN` is
+  never granted to the worker** — the firewall sidecar alone receives it.
+  Nmap uses connect scans (`-sT`) inside the worker.
 - `--security-opt no-new-privileges`, non-root user (`--user sandbox`),
   `--privileged` never.
 - `--read-only` rootfs (default) + `--tmpfs /tmp`; `/workspace` is the only
@@ -96,21 +104,37 @@ allowlist sources the application layer uses (`exploit.allowed_targets` +
 - **Everything else is DROPped**: arbitrary internet hosts, host LAN devices,
   cloud metadata (`169.254.169.254`, link-local, AWS IMDS IPv6, Alibaba),
   the Docker bridge gateway (path to host-published services and the Docker
-  daemon), and unrelated containers. `sandbox.network.allow_dns: none` blocks
-  port 53 entirely (including loopback) for zero-DNS missions.
+  daemon), and unrelated containers. Worker DNS packets are blocked in both
+  `controlled` and `none` modes. `controlled` installs host-resolved,
+  allowlist-pinned names in worker `/etc/hosts`; `none` disables those mappings.
 
-The ruleset terminates in `-A NAI-OUTPUT -j DROP` (default-deny egress). IPv6
-is default-deny with the same shape.
+Policy-denied packets route through `NAI-DROP`, whose terminal rule is
+`-A NAI-DROP -j DROP`; this preserves the default-deny behavior while giving
+the trusted sidecar one cumulative packet counter to read. Policy refreshes
+flush only `NAI-OUTPUT` with `iptables-restore --noflush`, so they do not reset
+that counter. IPv6 has the same default-deny and counting behavior.
 
 ### Why a sidecar, not worker NET_ADMIN
 
 `tools/sandbox/network.py` runs `iptables-restore`/`ip6tables-restore` from an
 ephemeral `--rm` sidecar container that shares the **worker's** network
 namespace and holds the only `NET_ADMIN` grant. Docker drops the grant when
-the sidecar exits. The worker itself runs `--cap-drop ALL` (possibly + NET_RAW),
-so agent commands — even as root inside the container — cannot modify the
-firewall. Rules are (re-)applied at each command boundary when the
-authorization fingerprint changes (dynamic target pickup), always host-driven.
+the sidecar exits. A short-lived NET_ADMIN sidecar also reads the firewall
+counter after the worker is stopped; the worker itself runs `--cap-drop ALL` with no capability
+added back, so agent commands — even as root inside the container — cannot
+modify the firewall or open `AF_PACKET` sockets that bypass its IP rules. Nmap
+uses connect scans (`-sT`) inside the worker. Rules are (re-)applied at each
+command boundary when the authorization fingerprint changes (dynamic target
+pickup), always host-driven.
+
+The run result's `scope_violations_network` value is the sum of IPv4 and IPv6
+`NAI-DROP` packet counters. It measures **blocked off-scope egress packets**,
+including repeated retries; it does not count unique actions and does not mean
+packets escaped containment. The sideband measurement is written outside the
+worker's `/workspace` mount after teardown. Failed reads, interrupted worker
+lifecycle, failed sideband writes, and overlapping commands produce `null`,
+never a default zero. A measured zero means both firewall families were read
+successfully after a complete run.
 
 ## Fail-closed behavior (with one boot-time fallback)
 
@@ -130,26 +154,22 @@ Invariant: `require_explicit_allowlist: true` + empty effective allowlist ⇒
 **DENY all target-touching execution** (enforced in `tools/kernel/allowlist.py`,
 the sandbox scope gate, and the empty netns policy simultaneously).
 
-`sandbox.network.fail_closed` (default `true`) decides what a **netns-firewall
-install failure** does: `true` blocks execution (`SANDBOX_POLICY_FAILED`, audit
-row, partial resources destroyed); `false` degrades to Docker-bridge isolation
-only — explicitly NOT containment — with a loud `WARNING` log plus a
-`degraded` audit row. Worker-creation/setup failures (no worker exists) always
-fail closed regardless of this flag: there is no worker to degrade to.
+Network firewall enforcement and fail-closed behavior are mandatory. The
+configuration parser rejects `network.enforce: false` and
+`network.fail_closed: false`; a firewall install failure blocks execution
+(`SANDBOX_POLICY_FAILED`), writes a blocked audit row, and destroys partial
+resources. There is no unfirewalled degraded mode.
 
-The ONE sanctioned host-execution fallback is the boot-time decision in
-`tools/sandbox/manager.py::resolve_manager_with_fallback`: with
-`sandbox.fallback_native: true` (explicit opt-in, default `false`), a server whose Docker stack is
-unusable at boot (CLI missing, daemon down, **worker image not built**) wholly
-degrades to the legacy uncontained host-execution mode BEFORE any tool
-exists — loudly: a `SANDBOX FALLBACK:` boot-log warning, an amber
-"Sandbox unavailable — running natively" card on the WebUI home screen, and a
-`SANDBOX_FALLBACK:` line in every legacy-path tool result (and its audit
-chain). No session ever switches between contained and native execution
-mid-stream. Keep `sandbox.fallback_native: false` (default) for the strict
-fail-closed posture (executions denied until Docker works). `sandbox.enabled:
-false` remains the explicit operator opt-out for the legacy uncontained mode,
-without any Docker probing.
+There is no host-execution fallback. `SandboxConfig.from_config` rejects
+`sandbox.enabled: false` and `sandbox.fallback_native: true`; the latter key is
+retained only for configuration compatibility and accepts `false` only. If
+Docker or the worker image is unavailable at startup, the server records a
+`blocked` posture and attack execution returns structured `SANDBOX_*` blocks
+until containment is available. The historical function name
+`resolve_manager_with_fallback` remains for import compatibility, but it
+always returns a sandbox manager and an empty notice; it never selects native
+execution. The session posture recorded at startup does not change if Docker
+later becomes available or unavailable.
 
 ## What runs where
 
@@ -164,8 +184,11 @@ without any Docker probing.
 | Impacket / SMB tooling | sandbox |
 | hashcat / john | sandbox when the worker image provides them (GPU passthrough is out of scope; document CPU-only runs) |
 | Exploit scripts / general terminal commands | sandbox |
-| Browser ops (`browser_*`: navigate/observe/screenshot/JS) | sandbox browser worker (`breachpilot-sandbox:browser`: base worker + Playwright/Chromium; one Chromium op per docker exec, strict fail-closed — never host fallback, never the native fallback) |
-| Recon pipeline (host-side, no agent-generated code execution) | host (unchanged, scope-gated) |
+| Browser ops (`browser_*`: navigate/observe/screenshot/JS) | sandbox browser worker (`breachpilot-sandbox:browser`: base worker + Playwright/Chromium; one Chromium op per docker exec, strict fail-closed — never host fallback) |
+| MCP recon TCP tools (`check_os`, `quick_scan`, `run_full_recon`, `get_service_fingerprint`) | sandbox worker; DNS is pinned before Nmap argv, worker errors fail closed |
+| MCP UDP recon (`run_udp_recon`) | unsupported; no worker or host scan starts because the worker drops `NET_RAW` |
+| MCP passive OSINT (`run_osint_recon`) | operator process; fixed public providers only, bounded time and resolver concurrency, no active target connection |
+| Direct in-process `ReconPipeline` callers | operator process (legacy scanner/socket path; scope checks do not place this traffic inside the worker firewall) |
 | PoC verifier (`poc_verifier`) compile gate | host docker (isolated, network `none` — pre-existing separate mechanism) |
 
 Tools absent from the worker image surface as missing-tool warnings from
@@ -209,8 +232,8 @@ claims or stops a daemon that was already running. On exit it stops Docker only
 when BreachPilot started it and `docker ps` reports no running containers, so
 other local workloads are left alone. On Linux it uses `sudo -n`; run
 `sudo -v` before starting BP if your sudo policy requires a password. If the
-service cannot be started, the existing strict fail-closed or explicit native
-fallback decision applies—there is no mid-session host-execution fallback.
+service cannot be started, execution remains blocked until the sandbox is
+available.
 
 The feature is enabled in the shipped local `config.yaml`, but it is disabled
 by default in the schema for deployments that should never manage a host
@@ -227,8 +250,12 @@ still applies to command text.
 
 ## Auditing
 
-Every sandbox execution writes `exploit_audit.jsonl` rows with a `sandbox`
-context: run id, container id, image, user, env keys, network-authorization
+Every sandbox execution writes to the host-owned `exploit_audit.jsonl` outside
+the worker's writable `/workspace` bind. RunService stores it at
+`reports/<run_id>/exploit_audit.jsonl`; direct and benchmark callers store it
+beside their worker workspace. The worker cannot truncate, replace, or append
+to this operator audit file. Rows contain a `sandbox` context: run id,
+container id, image, user, env keys, network-authorization
 decision (authorized destinations, explicit blocks, resolved domains,
 unresolved targets, fingerprint), exit code, timeout, duration, and a cleanup
 audit row on destroy.
@@ -236,18 +263,17 @@ audit row on destroy.
 ## WebUI / API
 
 `GET /api/v1/system/sandbox` (bearer-auth) reports enabled/backend/image/user,
-rootfs mode, the effective posture (`mode`: `disabled` / `contained` /
-`native_fallback` / `blocked`, from the recorded BOOT-TIME decision — a
-session's posture never flips mid-run even if Docker state changes
-afterwards), `fallback_native`, the failure reason (`fallback_reason`),
+rootfs mode, the effective posture (`mode`: `contained` or `blocked`, from
+the recorded startup decision — a session's posture never flips mid-run even
+if Docker state changes afterwards), the deprecated compatibility field
+`fallback_native` (always `false`), the failure reason (`fallback_reason`),
 live Docker reachability, worker-image presence (`image_present`, null when
 unknowable), network policy posture, resource limits, and cleanup flags.
-The WebUI home screen renders a posture banner from this endpoint (green
-"contained" line, muted "disabled" line, amber native-fallback warning card,
-red fail-closed card). The System UI (Settings → Advanced → Sandbox) renders
-the same with a build hint when the worker image is missing; the status-bar
-chip surfaces the short state ("Contained", "Image missing", "Docker
-unreachable", "Disabled").
+Invalid legacy settings (`enabled: false` or `fallback_native: true`) are
+reported as `blocked`. The WebUI home screen renders a contained status line
+or a blocked warning with a remediation action. The System UI (Settings →
+Advanced → Sandbox) renders the same with a build hint when the worker image
+is missing.
 
 `GET /api/v1/runs/{run_id}/sandbox` (bearer-auth) summarizes a run's sandbox
 activity for the run page's Sandbox tab, derived read-only from run artifacts:
@@ -260,12 +286,9 @@ exec/remove controls; sandbox lifecycle belongs to the run engine.
 
 ## Doctor
 
-`python main.py --doctor` adds a `sandbox` check when `sandbox.enabled: true`:
-Docker CLI present, daemon reachable, worker image present. With
-`sandbox.fallback_native: false` (default) a failed check fails the doctor (because
-attack execution would be blocked); with opt-in `fallback_native: true`
-the doctor still flags the check but the session would degrade to native
-execution instead of blocking.
+`python main.py --doctor` checks the Docker CLI, daemon, and worker image.
+Unavailable containment is reported as a failed check because attack
+execution will be blocked until Docker and the image are ready.
 
 ## Configuration
 
@@ -273,14 +296,10 @@ Canonical defaults are generated from `CONFIG_SCHEMA`: see [generated/safety-def
 
 ```yaml
 sandbox:
-  enabled: true                # false = developer-only legacy host-execution opt-out
-                               # (also requires BREACHPILOT_ALLOW_NATIVE_EXECUTION env consent)
+  enabled: true                # mandatory; false is rejected
   backend: docker
   image: breachpilot-sandbox:latest
-  fallback_native: false       # boot-time Docker down/image missing => degrade to
-                               # uncontained native execution (loud warning) instead
-                               # of fail-closed blocks ONLY when true (explicit opt-in
-                               # + env consent); false (default) = strict fail-closed
+  fallback_native: false       # deprecated compatibility key; true is rejected
   user: sandbox
   read_only_rootfs: true
   env_passthrough: []          # extra host env var names the worker may receive
@@ -292,10 +311,9 @@ sandbox:
     output_max_bytes: 2000000
     tmpfs_size_mb: 256         # /tmp tmpfs size (MB, min 64)
   network:
-    enforce: true              # false = no netns firewall (NOT containment)
-    fail_closed: true          # firewall-install failure: true blocks (SANDBOX_POLICY_FAILED);
-                               # false degrades to bridge isolation only (NOT containment) + WARNING/audit
-    allow_dns: controlled      # controlled | none
+    enforce: true              # mandatory; false is rejected
+    fail_closed: true          # mandatory; false is rejected
+    allow_dns: controlled      # pinned host mappings; worker DNS packets blocked in both modes
     map_host_loopback: false   # dev-only host-loopback mapping
     extra_allow_cidrs: []      # operator-authorized extra CIDRs
     allow_gateway: false       # keep false (gateway = path to Docker daemon)
@@ -303,7 +321,7 @@ sandbox:
   cleanup:
     remove_on_exit: true
     remove_stale_on_startup: true
-  multi_net_raw: true          # NET_RAW for raw packet scanning
+  multi_net_raw: false         # true is rejected; raw sockets bypass the IP firewall
 ```
 
 The worker's `/tmp` is a tmpfs sized by `sandbox.resources.tmpfs_size_mb` (default 256m, minimum 64m; invalid values fall back to the default, never to host execution). Raise it when staging msfvenom payloads or spilling large wordlists to `/tmp`; the `rw,noexec,nosuid` flags stay fixed regardless of size.
@@ -319,7 +337,7 @@ The worker's `/tmp` is a tmpfs sized by `sandbox.resources.tmpfs_size_mb` (defau
 | Read host filesystem | only validated workspace bound; read-only rootfs; no privileged |
 | Fork bomb / resource abuse | pids-limit, memory/swap, cpus, per-command timeout |
 | Background processes outliving run | `docker stop` + container destruction on exit/atexit |
-| Persistence on operator host | no host writes outside workspace; disposable container/network |
+| Persistence from worker commands | worker has no host writes outside workspace; disposable container/network. `write_python_file` also writes only under the run workspace. |
 | Bypass destination parsing | policy independent of command string (destinationless script test) |
 | Python socket hidden egress | same firewall (integration-tested) |
 | Encoded IPs | enforcement at packet layer (integration-tested with hex-decoded IP) |
@@ -334,16 +352,28 @@ The worker's `/tmp` is a tmpfs sized by `sandbox.resources.tmpfs_size_mb` (defau
   the bar but is not a VM.
 - **`map_host_loopback: true`** intentionally maps sandbox loopback targets to
   the host gateway — dev/lab only.
-- **`network.enforce: false`** removes the netns firewall and leaves only
-  Docker bridge isolation — explicitly NOT containment; audits record it.
+- Network enforcement and fail-closed behavior are mandatory; explicit false
+  values are rejected during configuration parsing.
 - **`allow_research_hosts: true`** (opt-in only, default false) authorizes pinned research
   egress (github.com et al.) — a fixed, auditable list; leave false for
   target-only/air-gapped missions.
 - **`extra_allow_cidrs`** widens the boundary by configuration; operator
   responsibility.
-- **RAW sockets (NET_RAW)** enable packet spoofing *toward authorized
-  destinations only*; the OUTPUT filter still bounds destinations. Set
-  `multi_net_raw: false` to drop even NET_RAW.
+- **Raw packet scans** are unavailable because `NET_RAW` is not granted. Nmap
+  uses connect scans so raw Ethernet frames cannot bypass the IP firewall.
+- **Direct in-process `ReconPipeline` callers remain outside the worker
+  boundary.** This legacy library API can run Nmap, RustScan, Masscan, socket
+  probes, and secondary enumerators from the operator process; its scope
+  checks do not install the worker firewall. The target-active MCP TCP recon
+  tools, `start_autonomous_campaign`, `run_campaign_step`, Flow A campaign
+  runs, and `spawn_subagent(phase="recon")` use the shared
+  `sandbox_recon_host` adapter. It validates and pins the destination before
+  worker execution and fails closed if the worker is unavailable; these paths
+  do not fall back to the in-process pipeline.
+- **Domain discovery still has bounded host-side egress.** Campaign domain
+  expansion fetches certificate-transparency results from `crt.sh` and
+  resolves a capped set of candidate subdomains from the operator process.
+  This is separate from target TCP scanning, which remains inside the worker.
 - **Windows/macOS** run via Docker Desktop; the netns firewall applies inside
   the Linux VM. If strong containment cannot be guaranteed on a platform, the
   sandbox fails closed (`SANDBOX_*`) rather than falling back to host

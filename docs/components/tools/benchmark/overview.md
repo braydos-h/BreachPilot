@@ -15,7 +15,7 @@ provider (tools/benchmark/registry.py; XBEN via tools/benchmark/xben/)
   -> scenarios (tools/benchmark/models.py::BenchmarkScenario)
     -> provision/reset target   (tools/benchmark/targets.py::TargetManager)
     -> preflight port reachability (tools/benchmark/targets.py::target_ports_reachable)
-    -> run BreachPilot mission  (tools/benchmark/agent_runner.py::MissionRunner)
+    -> run BreachPilot mission  (tools/benchmark/agent_runner.py::MissionRunner, required sandbox)
     -> independently verify     (tools/benchmark/verifier.py::IndependentVerifier)
     -> classify + aggregate     (tools/benchmark/runner.py::BenchmarkRunner._classify, tools/benchmark/metrics.py)
     -> persist results          (tools/benchmark/storage.py::BenchmarkStorage)
@@ -132,7 +132,7 @@ class BenchmarkRunner:
 
 1. `get_provider(run_config.suite)` → `load_scenarios(scenario_ids, tags)`; empty match returns `{"error": ...}`.
 2. `mint_run_id()` (`%Y%m%d_%H%M%S` + monotonic-ns suffix), `collect_environment(...)`, `storage.init_run(...)` (status `running`), `BenchmarkEventLogger` on `run_dir/events.jsonl` + `run_start` event.
-3. Sandbox shortfall (`sandbox_required=true` but `sandbox.enabled=false`) logs `sandbox_unavailable`; every trial short-circuits to `INFRASTRUCTURE_ERROR`/`SANDBOX_FAILED` with no host fallback.
+3. Sandbox shortfall (`sandbox_required=true` but sandbox unavailable) logs `sandbox_unavailable`; every trial short-circuits to `INFRASTRUCTURE_ERROR`/`SANDBOX_FAILED` with no host fallback. Invalid `sandbox.enabled=false` configuration is rejected before a run.
 4. Per scenario × `trials`: emit `trial_start`, `_run_trial(...)`, `storage.write_trial(...)`; one fresh `TargetManager` per scenario, `destroy_all()` in `finally`; `cancel.is_set()` stops between trials.
 5. Aggregate via `compute_run_summary`, `finalize_run(status, trials, summary, ...)`, render `report.md`/`.html` FROM the stored JSON, then best-effort baseline save / regression compare (never fails the run).
 6. Returns `{run_id, suite, status, run_dir, report_markdown, report_html, summary, trials, regression}`.
@@ -239,7 +239,7 @@ One failing trial never aborts the suite; cancellation is checked between trials
 | `benchmark.output_dir` | `reports/benchmarks` | Storage root for suite run trees |
 | `benchmark.trials` | `3` | Repeated trials per scenario when `--trials` is omitted (API clamps 1–20) |
 | `benchmark.timeout_seconds` | `1800` | Per-trial mission budget default |
-| `benchmark.sandbox_required` | `true` | No host-execution fallback; required-but-disabled marks every trial `INFRASTRUCTURE_ERROR`/`SANDBOX_FAILED` |
+| `benchmark.sandbox_required` | `true` | Requires sandbox availability for trial execution; `false` does not disable agent sandboxing or allow host execution |
 | `benchmark.baseline_path` | `reports/benchmarks/baseline.json` | `--save-baseline` / `--check-regression` target |
 | `benchmark.regression.success_rate_tolerance` | `0.02` | Hard gate on verified-success-rate drop |
 | `benchmark.regression.false_positive_tolerance` | `0.01` | Hard gate on false-positive-rate rise |

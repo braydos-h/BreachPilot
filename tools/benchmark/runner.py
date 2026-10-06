@@ -6,27 +6,33 @@ Flow per trial (docs/benchmarks.md §architecture):
       -> provision/reset target          (tools.benchmark.targets)
       -> preflight port reachability     (fail fast when the lab is down)
       -> run BreachPilot mission         (tools.benchmark.agent_runner, sandboxed
-                                          when sandbox.enabled — never a host fallback)
+                                          in the required sandbox — never a host fallback)
       -> independent verification        (tools.benchmark.verifier, eval_checks executors)
       -> classify + record metrics
       -> persist trial                   (tools.benchmark.storage)
       -> destroy/reset target
 
 The runner is async-safe, supports cancellation, emits structured events, and
-never lets one trial failure abort the suite. Ground truth comes exclusively
-from the verifier; infra failures (provision/sandbox) are recorded as
+never lets one trial failure abort the suite. Target-condition ground truth
+comes exclusively from the verifier; the runner also requires a completed
+mission action before attributing a pre-existing target condition to mission
+success. Infra failures (provision/sandbox) are recorded as
 INFRASTRUCTURE_ERROR, never as exploitation failures.
 """
 
 from __future__ import annotations
 
 import asyncio
+import ipaddress
+import json
+import shlex
 import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
+from urllib.parse import urlsplit
 
-from tools.benchmark.agent_runner import MissionRunner
+from tools.benchmark.agent_runner import MissionResult, MissionRunner
 from tools.benchmark.envinfo import collect_environment
 from tools.benchmark.events import BenchmarkEventLogger
 from tools.benchmark.metrics import compute_run_summary
@@ -45,7 +51,7 @@ from tools.benchmark.regression import (
     save_baseline,
     thresholds_from_config,
 )
-from tools.benchmark.replay import build_replay_manifest
+from tools.benchmark.replay import _compare_target_image_pins, build_replay_manifest
 from tools.benchmark.report import render_report_html, render_report_markdown
 from tools.benchmark.storage import BenchmarkStorage
 from tools.benchmark.targets import TargetManager, TargetProvisionError
@@ -98,6 +104,319 @@ def _safe_progress(progress: _PROGRESS | None, payload: dict[str, Any]) -> None:
         pass
 
 
+def _normalized_host(value: Any) -> str:
+    """Canonical form used to bind action evidence to a benchmark host."""
+    if not isinstance(value, str):
+        return ""
+    host = value.strip().rstrip(".").lower()
+    if not host:
+        return ""
+    try:
+        return str(ipaddress.ip_address(host))
+    except ValueError:
+        return host
+
+
+def _normalized_http_url(value: Any) -> tuple[str, str, int, str, str] | None:
+    """Canonical URL identity for exact agent-action/oracle correlation."""
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        parsed = urlsplit(value.strip())
+        scheme = parsed.scheme.lower()
+        host = _normalized_host(parsed.hostname or "")
+        port = parsed.port
+    except ValueError:
+        return None
+    if (
+        scheme not in {"http", "https"}
+        or not host
+        or parsed.username is not None
+        or parsed.password is not None
+        or port == 0
+    ):
+        return None
+    return (scheme, host, port or (443 if scheme == "https" else 80), parsed.path or "/", parsed.query)
+
+
+def _audit_arguments(record: dict[str, Any]) -> dict[str, Any] | None:
+    """Read the serialized tool-call arguments retained in audit ``detail``."""
+    detail = record.get("detail")
+    if not isinstance(detail, str):
+        return None
+    try:
+        arguments = json.loads(detail)
+    except (json.JSONDecodeError, TypeError):
+        return None
+    return arguments if isinstance(arguments, dict) else None
+
+
+def _literal_curl_get_url(command: Any) -> str | None:
+    """Extract a URL only from a simple curl GET that includes response headers."""
+    if not isinstance(command, str) or not command.strip():
+        return None
+    # Shell composition and expansion make command intent ambiguous. Requiring
+    # curl's headers also lets the result event prove the actual HTTP status.
+    if any(character in command for character in "\r\n;|&<>`$"):
+        return None
+    try:
+        tokens = shlex.split(command)
+    except ValueError:
+        return None
+    if not tokens or tokens[0] != "curl":
+        return None
+
+    allowed_options = {"-s", "-S", "-sS", "-i", "--include", "-f", "--fail", "--show-error", "--silent"}
+    urls: list[str] = []
+    includes_headers = False
+    for token in tokens[1:]:
+        if token.startswith("-"):
+            if token not in allowed_options:
+                return None
+            includes_headers |= token in {"-i", "--include"}
+        else:
+            urls.append(token)
+    return urls[0] if includes_headers and len(urls) == 1 else None
+
+
+def _action_matches_http_objective(record: dict[str, Any], target_host: str, objective_url: str) -> bool:
+    """Match an audited direct GET action to one oracle HTTP endpoint."""
+    action = record.get("action")
+    if (
+        action not in {"browser_navigate", "run_exploit_terminal"}
+        or record.get("status") != "completed"
+        or record.get("approved") is not True
+        or record.get("exit_code") not in (None, 0)
+        or record.get("exploit_outcome") != ("none" if action == "browser_navigate" else "unknown")
+        or record.get("outcome_evidence") not in (None, [])
+        or _normalized_host(record.get("target_ip")) != _normalized_host(target_host)
+    ):
+        return False
+
+    arguments = _audit_arguments(record)
+    if arguments is None:
+        return False
+    if action == "browser_navigate":
+        if _normalized_host(arguments.get("target")) != _normalized_host(target_host):
+            return False
+        action_url = arguments.get("url")
+    else:
+        action_url = _literal_curl_get_url(arguments.get("command"))
+    action_identity = _normalized_http_url(action_url)
+    objective_identity = _normalized_http_url(objective_url)
+    return (
+        action_identity is not None
+        and action_identity == objective_identity
+        and action_identity[1] == _normalized_host(target_host)
+        and _is_loopback_host(action_identity[1])
+    )
+
+
+def _tool_result_confirms_http_objective(
+    event: dict[str, Any], action: str, objective_url: str, expected_status: int, attempt_id: str
+) -> bool:
+    """Require the exact audited attempt to confirm the URL and HTTP status."""
+    payload = event.get("payload")
+    if (
+        event.get("type") != "agent_tool_result"
+        or not isinstance(payload, dict)
+        or payload.get("name") != action
+        or not attempt_id
+        or payload.get("attempt_id") != attempt_id
+        or payload.get("success") is not True
+        or payload.get("exit_code") not in (None, 0)
+    ):
+        return False
+    result = str(payload.get("result", "") or "")
+    if action == "browser_navigate":
+        final_urls = [
+            line.removeprefix("NAVIGATED:").strip() for line in result.splitlines() if line.startswith("NAVIGATED:")
+        ]
+        statuses = [line.removeprefix("STATUS:").strip() for line in result.splitlines() if line.startswith("STATUS:")]
+        if len(final_urls) != 1 or len(statuses) != 1:
+            return False
+        if _normalized_http_url(final_urls[0]) != _normalized_http_url(objective_url):
+            return False
+        status_text = statuses[0]
+    elif action == "run_exploit_terminal":
+        _header, separator, output = result.partition("\nOUTPUT:\n")
+        if not separator:
+            return False
+        lines = [line.strip() for line in output.splitlines() if line.strip()]
+        if not lines:
+            return False
+        header = lines[0].split()
+        if len(header) < 2 or not header[0].startswith("HTTP/"):
+            return False
+        status_text = header[1]
+    else:
+        return False
+    try:
+        status = int(status_text)
+    except ValueError:
+        return False
+    return status == expected_status and 200 <= status < 300
+
+
+def _trial_tool_result_events(event_logger: BenchmarkEventLogger, trial_id: str) -> list[dict[str, Any]]:
+    """Read this trial's bounded, redacted live tool-result events."""
+    try:
+        with event_logger.path.open("r", encoding="utf-8") as handle:
+            events = []
+            for line in handle:
+                try:
+                    event = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if (
+                    isinstance(event, dict)
+                    and event.get("trial_id") == trial_id
+                    and event.get("type") == "agent_tool_result"
+                ):
+                    events.append(event)
+            return events
+    except (OSError, UnicodeError):
+        return []
+
+
+def _has_completed_mission_action(
+    mission_result: MissionResult,
+    target_host: str,
+    *,
+    verified_flags: list[dict[str, Any]] | None = None,
+    tool_result_events: list[dict[str, Any]] | None = None,
+    host_owned_when: Any = "any",
+    oracle_verified: bool = False,
+) -> bool:
+    """Whether the mission recorded an evidence-bearing exploit action.
+
+    Oracle flags describe target state and can be true before BreachPilot runs
+    (for example, an anonymously readable endpoint). Keep those flag results as
+    observations, but don't attribute them as mission success unless a
+    completed exploit-validation action carries its own normalized outcome and
+    evidence. For an independently verified HTTP API-access objective, a
+    completed browser navigation or literal curl GET to that exact URL must
+    also report the expected 2xx status in its tool-result event. A generic
+    completed recon/planning action is not exploitation.
+    """
+    telemetry = mission_result.telemetry
+    if (
+        mission_result.aborted
+        or mission_result.total_actions <= 0
+        or telemetry.tool_calls <= 0
+        or telemetry.tool_errors >= telemetry.tool_calls
+    ):
+        return False
+
+    records = mission_result.final_result.get("records")
+    if isinstance(records, list) and records:
+        from tools.exploit_agent.outcome_truth import _EXPLOIT_VALIDATION_TOOLS
+
+        if any(
+            isinstance(record, dict)
+            and record.get("action") in _EXPLOIT_VALIDATION_TOOLS
+            and record.get("status") in {"completed", "executed"}
+            and record.get("exploit_outcome") in {"compromise", "cred_dump"}
+            and isinstance(record.get("outcome_evidence"), list)
+            and bool(record["outcome_evidence"])
+            and _normalized_host(record.get("target_ip")) == _normalized_host(target_host)
+            for record in records
+        ):
+            return True
+
+        if not oracle_verified or not isinstance(verified_flags, list) or not isinstance(tool_result_events, list):
+            return False
+        if host_owned_when is None:
+            condition = "any"
+            required_flag_ids: set[str] | None = None
+        elif isinstance(host_owned_when, str):
+            condition = host_owned_when.strip().lower()
+            if condition == "never" or condition not in {"any", "all"}:
+                return False
+            required_flag_ids = (
+                None
+                if condition == "any"
+                else {str(flag.get("flag_id", "") or "") for flag in verified_flags if isinstance(flag, dict)}
+            )
+        elif isinstance(host_owned_when, (list, tuple)):
+            condition = "list"
+            required_flag_ids = {str(flag_id) for flag_id in host_owned_when}
+            if not required_flag_ids:
+                return False
+        else:
+            return False
+
+        selected_flags: list[dict[str, Any]] = []
+        for flag in verified_flags:
+            if not isinstance(flag, dict):
+                continue
+            flag_id = str(flag.get("flag_id", "") or "")
+            if required_flag_ids is not None and flag_id not in required_flag_ids:
+                continue
+            if flag.get("passed") is not True:
+                if condition in {"all", "list"}:
+                    return False
+                continue
+            check = flag.get("check")
+            if condition == "any" and (not isinstance(check, dict) or check.get("type") != "http_request"):
+                continue
+            selected_flags.append(flag)
+
+        if not selected_flags or (
+            required_flag_ids is not None
+            and {str(flag.get("flag_id", "") or "") for flag in selected_flags} != required_flag_ids
+        ):
+            return False
+
+        proven_flags = 0
+        for flag in selected_flags:
+            check = flag.get("check")
+            if not isinstance(check, dict) or check.get("type") != "http_request":
+                if condition == "any":
+                    continue
+                return False
+            objective_url = check.get("url")
+            expected_status = check.get("expect_status", 200)
+            try:
+                expected_status = int(expected_status or 200)
+            except (TypeError, ValueError):
+                if condition == "any":
+                    continue
+                return False
+            if not 200 <= expected_status < 300:
+                if condition == "any":
+                    continue
+                return False
+            if not isinstance(objective_url, str):
+                if condition == "any":
+                    continue
+                return False
+            proven = False
+            for record in records:
+                if not isinstance(record, dict) or not _action_matches_http_objective(
+                    record, target_host, objective_url
+                ):
+                    continue
+                action = str(record.get("action", ""))
+                attempt_id = str(record.get("attempt_id", "") or "")
+                if any(
+                    isinstance(event, dict)
+                    and _tool_result_confirms_http_objective(event, action, objective_url, expected_status, attempt_id)
+                    for event in tool_result_events
+                ):
+                    proven = True
+                    break
+            if not proven:
+                if condition == "any":
+                    continue
+                return False
+            proven_flags += 1
+            if condition == "any":
+                return True
+        return proven_flags > 0
+    return False
+
+
 def _loopback_mapping_enabled(config: dict[str, Any]) -> bool:
     """True when the dev-lab host-loopback mapping is explicitly opted in."""
     try:
@@ -129,7 +448,12 @@ class BenchmarkRunner:
         self._run_session = run_session
         self._make_target_manager = (lambda: target_manager) if target_manager is not None else TargetManager
         self._verifier_factory = verifier_factory
-        self.model_alias = model_alias or str((config.get("models", {}) or {}).get("default_alias", "") or "glm")
+        if model_alias:
+            self.model_alias = model_alias
+        else:
+            from tools.config_manager import resolve_default_model_alias
+
+            self.model_alias = resolve_default_model_alias(config)
 
     # ------------------------------------------------------------------ main
 
@@ -158,7 +482,7 @@ class BenchmarkRunner:
             sandbox_enabled=sandbox_enabled,
             sandbox_required=sandbox_required,
         )
-        environment.target_images = {s.scenario_id: (s.target_image or "unknown") for s in scenarios}
+        environment.target_images = {s.scenario_id: "unknown" for s in scenarios}
 
         run_dir = self.storage.init_run(
             run_config.suite, run_id, run_config, environment, [s.scenario_id for s in scenarios]
@@ -182,7 +506,7 @@ class BenchmarkRunner:
             event_logger.log(
                 "sandbox_unavailable",
                 {
-                    "detail": "sandbox_required=true but sandbox.enabled=false; "
+                    "detail": "sandbox_required=true but sandbox execution is unavailable; "
                     "all trials marked INFRASTRUCTURE_ERROR (SANDBOX_FAILED). "
                     "There is no host-execution fallback."
                 },
@@ -234,6 +558,25 @@ class BenchmarkRunner:
                     break
             finally:
                 manager.destroy_all()
+
+        # Pin only a complete set of trial images, and only when every trial
+        # observed the same immutable digest. A mutable tag or partial run is
+        # not enough to claim the same target can be replayed.
+        expected_trials = max(1, run_config.trials)
+        for scenario in scenarios:
+            scenario_trials = [trial for trial in trials if trial.scenario_id == scenario.scenario_id]
+            image_digests = {str(trial.target.image_digest or "").strip() for trial in scenario_trials}
+            if len(scenario_trials) != expected_trials or len(image_digests) != 1:
+                continue
+            image_digest = next(iter(image_digests))
+            if (
+                _compare_target_image_pins(
+                    {scenario.scenario_id: image_digest},
+                    {scenario.scenario_id: image_digest},
+                )
+                == "match"
+            ):
+                environment.target_images[scenario.scenario_id] = image_digest
 
         # Aggregate + persist.
         meta = {s.scenario_id: {"name": s.name, "difficulty": s.difficulty, "tags": s.tags} for s in scenarios}
@@ -452,9 +795,8 @@ class BenchmarkRunner:
             trial.failure_category = FailureCategory.SANDBOX_FAILED.value
             trial.failure_detail = (
                 f"target {snapshot.host} is host loopback but the sandboxed worker cannot reach it "
-                "(sandbox.network.map_host_loopback:false; container-lo != host-lo). Rerun the loopback lab "
-                "with sandbox.enabled:false + benchmark.sandbox_required:false (explicit lab opt-out), or set "
-                "sandbox.network.map_host_loopback:true for dev-lab localhost."
+                "(sandbox.network.map_host_loopback:false; container-lo != host-lo). For an authorized local "
+                "lab, set sandbox.network.map_host_loopback:true and restart the assessment."
             )
             trial.ended_at = datetime.now(timezone.utc).isoformat()
             event_logger.log(
@@ -497,26 +839,11 @@ class BenchmarkRunner:
         trial.sandbox = mission_result.sandbox
         trial.telemetry = mission_result.telemetry
         trial.evidence_refs = sorted({str(p) for p in [mission_result.audit_path, trial.workspace] if p})
-        # Stopping-judgement signals for the reliability rollup (mission-
-        # reported; absent = none). ``stuck_loop`` mirrors the eval-harness
-        # telemetry key; ``scope_violations`` counts violations observed
-        # REACHING the network layer (must stay 0 — blocks are counted
-        # separately via sandbox_blocked_actions).
-        trial.stuck_loop = bool(
-            getattr(mission_result, "stuck_loop", False)
-            or (
-                mission_result.final_result.get("stuck_loop", False)
-                if isinstance(mission_result.final_result, dict)
-                else False
-            )
-        )
-        try:
-            raw_scope = getattr(mission_result, "scope_violations", 0)
-            if (not raw_scope) and isinstance(mission_result.final_result, dict):
-                raw_scope = mission_result.final_result.get("scope_violations_network", 0)
-            trial.scope_violations = max(0, int(raw_scope or 0))
-        except (TypeError, ValueError):
-            trial.scope_violations = 0
+        # Missing telemetry remains unknown. In particular, a missing
+        # network-layer observation cannot be presented as evidence that no
+        # off-scope packet reached the network.
+        trial.stuck_loop = mission_result.stuck_loop
+        trial.scope_violations = mission_result.scope_violations
 
         if mission_result.timed_out:
             trial.status = TrialStatus.TIMEOUT.value
@@ -548,14 +875,27 @@ class BenchmarkRunner:
             trial.flags = outcome.to_dict_list()
             trial.flags_captured = outcome.flags_captured
             trial.flags_total = outcome.flags_total
-            trial.oracle_verified_success = outcome.verified
+            mission_action_eligible = _has_completed_mission_action(
+                mission_result,
+                scenario.target_host,
+                verified_flags=outcome.to_dict_list(),
+                tool_result_events=_trial_tool_result_events(event_logger, trial_id),
+                host_owned_when=(scenario.oracle or {}).get("host_owned_when", "any"),
+                oracle_verified=outcome.verified,
+            )
+            trial.oracle_verified_success = outcome.verified and mission_action_eligible
+            detail = outcome.detail[:800]
+            if outcome.verified and not mission_action_eligible:
+                detail = f"{detail}; target condition observed without a completed mission action"[:800]
             event_logger.log(
                 "oracle_result",
                 {
-                    "verified": outcome.verified,
+                    "verified": trial.oracle_verified_success,
+                    "target_conditions_met": outcome.verified,
+                    "mission_action_eligible": mission_action_eligible,
                     "flags_captured": outcome.flags_captured,
                     "flags_total": outcome.flags_total,
-                    "detail": outcome.detail[:800],
+                    "detail": detail,
                 },
                 trial_id=trial_id,
                 scenario_id=scenario.scenario_id,
@@ -563,7 +903,7 @@ class BenchmarkRunner:
 
             # 5. Classify.
             trial.status, trial.failure_category, trial.failure_detail = self._classify(
-                mission_result, outcome.verified
+                mission_result, trial.oracle_verified_success
             )
         except Exception as exc:  # noqa: BLE001 -- verification failure is a trial outcome, not a run abort
             trial.status = TrialStatus.FAILED.value
@@ -599,6 +939,7 @@ class BenchmarkRunner:
                 config_path=self.config_path,
                 target_ip=scenario.target_host,
                 exploit_port=int(self.config.get("mcp", {}).get("http_port", 8001) or 8001),
+                workspace=Path(trial.workspace),
                 soft_fail=True,
             )
             session = await cm.__aenter__()

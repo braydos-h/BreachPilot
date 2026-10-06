@@ -179,6 +179,36 @@ def test_body_group_soft_fail_exits_cleanly(monkeypatch, tmp_path):
     asyncio.run(_run())  # must not raise
 
 
+def test_soft_fail_never_swallows_grouped_cancellation(monkeypatch, tmp_path):
+    """A cancellation nested in an MCP task-group error must reach the caller."""
+
+    @contextlib.asynccontextmanager
+    async def _cancelled_stdio(_params):
+        raise BaseExceptionGroup("stdio shutdown", [ConnectionError("pipe closed"), asyncio.CancelledError()])
+        yield  # pragma: no cover - unreachable
+
+    _patch_stdio(monkeypatch, stdio_factory=_cancelled_stdio)
+
+    with pytest.raises(BaseExceptionGroup):
+        asyncio.run(_drive(tmp_path, soft_fail=True)())
+
+    _patch_stdio(monkeypatch)
+
+    async def _run_body():
+        async with ms.open_exploit_mcp_session(
+            transport="stdio",
+            config_path=Path("config.yaml"),
+            target_ip=_TARGET,
+            exploit_port=8001,
+            workspace=tmp_path,
+            soft_fail=True,
+        ):
+            raise BaseExceptionGroup("stdio shutdown", [asyncio.CancelledError()])
+
+    with pytest.raises(BaseExceptionGroup):
+        asyncio.run(_run_body())
+
+
 def test_body_group_hard_fail_wraps(monkeypatch, tmp_path):
     async def _run():
         async with ms.open_exploit_mcp_session(
@@ -194,6 +224,87 @@ def test_body_group_hard_fail_wraps(monkeypatch, tmp_path):
     _patch_stdio(monkeypatch)
     with pytest.raises(RuntimeError, match="MCP session closed due to error"):
         asyncio.run(_run())
+
+
+def test_stdio_child_receives_network_telemetry_sideband_path(monkeypatch, tmp_path):
+    import mcp
+
+    seen: dict[str, Any] = {}
+    original_parameters = mcp.StdioServerParameters
+
+    def _capture_parameters(**kwargs: Any):
+        seen.update(kwargs)
+        return original_parameters(**kwargs)
+
+    monkeypatch.setattr(mcp, "StdioServerParameters", _capture_parameters)
+    _patch_stdio(monkeypatch)
+    telemetry_path = tmp_path / "measurement.json"
+
+    asyncio.run(_drive(tmp_path, network_telemetry_path=telemetry_path)())
+
+    assert "--network-telemetry-path" in seen["args"]
+    path_index = seen["args"].index("--network-telemetry-path")
+    assert seen["args"][path_index + 1] == str(telemetry_path.resolve())
+
+
+def test_stdio_child_receives_host_owned_audit_path(monkeypatch, tmp_path):
+    import mcp
+
+    seen: dict[str, Any] = {}
+    original_parameters = mcp.StdioServerParameters
+
+    def _capture_parameters(**kwargs: Any):
+        seen.update(kwargs)
+        return original_parameters(**kwargs)
+
+    monkeypatch.setattr(mcp, "StdioServerParameters", _capture_parameters)
+    _patch_stdio(monkeypatch)
+    audit_path = tmp_path.parent / "reports" / "exploit_audit.jsonl"
+
+    asyncio.run(_drive(tmp_path, audit_path=audit_path)())
+
+    child_audit_path = Path(seen["env"]["EXPLOIT_AUDIT_PATH"])
+    assert child_audit_path == audit_path.resolve()
+    assert child_audit_path != tmp_path.resolve()
+    assert tmp_path.resolve() not in child_audit_path.parents
+
+
+def test_stdio_child_uses_private_frozen_config_snapshot(monkeypatch, tmp_path):
+    import mcp
+    import yaml
+
+    seen: dict[str, Any] = {}
+    original_parameters = mcp.StdioServerParameters
+
+    def _capture_parameters(**kwargs: Any):
+        seen.update(kwargs)
+        return original_parameters(**kwargs)
+
+    monkeypatch.setattr(mcp, "StdioServerParameters", _capture_parameters)
+    _patch_stdio(monkeypatch)
+    audit_path = tmp_path.parent / "reports" / "exploit_audit.jsonl"
+    frozen_config = {"exploit": {"allowed_targets": ["192.0.2.10"]}, "mcp": {"http_port": 8123}}
+
+    async def _run():
+        async with ms.open_exploit_mcp_session(
+            transport="stdio",
+            config_path=Path("config.yaml"),
+            target_ip="192.0.2.10",
+            exploit_port=8123,
+            workspace=tmp_path,
+            audit_path=audit_path,
+            config_override=frozen_config,
+        ):
+            snapshot_args = seen["args"]
+            path_index = snapshot_args.index("--config")
+            snapshot_path = Path(snapshot_args[path_index + 1])
+            assert snapshot_path.exists()
+            assert snapshot_path.stat().st_mode & 0o777 == 0o600
+            assert yaml.safe_load(snapshot_path.read_text(encoding="utf-8")) == frozen_config
+            return snapshot_path
+
+    snapshot_path = asyncio.run(_run())
+    assert not snapshot_path.exists()
 
 
 # ── Cancellation is never swallowed ──────────────────────────────────────────

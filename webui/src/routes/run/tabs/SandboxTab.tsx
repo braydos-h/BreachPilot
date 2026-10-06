@@ -16,8 +16,8 @@ export function SandboxTab({ loading, error, data }: SandboxTabProps) {
   if (!data || !data.found) {
     return (
       <p className="text-sm text-muted-foreground">
-        No sandbox activity recorded for this run — attack commands either never executed or ran in disabled (host)
-        mode.
+        No sandbox activity is recorded for this run. No attack command may have executed, or sandbox execution may have
+        been blocked before an audit row was written.
       </p>
     );
   }

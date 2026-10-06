@@ -5,15 +5,20 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import os
+import re
+import secrets
+import stat
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 from tools.attack_modules import ModuleContext
 from tools.autonomous_orchestrator import AggressionLevel, AutonomousOrchestrator, TaskStatus
 from tools.autonomous_orchestrator import AttackPhase as OrchAttackPhase
+from tools.exceptions import _EXC_GROUP_CATCH, _is_exception_group, _log_nested_exceptions
 from tools.mcp_shared import check_targets_allowlist
 from tools.mcp_tools.registry import ToolContext
-from tools.recon_pipeline import ReconConfig, ReconPipeline
 from tools.validation_utils import is_fqdn, resolve_target_to_ip, validate_target_or_ip
 
 # Strong references to background campaign tasks. CPython's event loop holds
@@ -23,10 +28,244 @@ from tools.validation_utils import is_fqdn, resolve_target_to_ip, validate_targe
 # once the task finishes so completed campaigns don't leak.
 _running_campaign_tasks: set = set()
 
+_CAMPAIGN_ID_RE = re.compile(r"campaign-[0-9]{8}_[0-9]{6}-[0-9a-f]{8}(?:-[0-9a-f]{12})?\Z")
+_MAX_CAMPAIGN_STATE_BYTES = 4 * 1024 * 1024
+
 # campaign_id -> live AutonomousOrchestrator, so stop_campaign can signal a
 # graceful stop. Popped when the background task finishes (see the done
 # callback in start_autonomous_campaign).
 _campaign_orchestrators: dict[str, Any] = {}
+
+
+def _valid_campaign_id(campaign_id: str) -> bool:
+    return isinstance(campaign_id, str) and bool(_CAMPAIGN_ID_RE.fullmatch(campaign_id))
+
+
+def _new_campaign_id(target: str) -> str:
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    target_hash = hashlib.sha256(target.encode()).hexdigest()[:8]
+    return f"campaign-{timestamp}-{target_hash}-{secrets.token_hex(6)}"
+
+
+def _create_campaign_dir(workspace: Path, campaign_id: str) -> Path:
+    """Create a unique campaign directory without following a planted symlink."""
+    if not _valid_campaign_id(campaign_id):
+        raise ValueError("invalid campaign_id")
+    root = workspace.resolve(strict=True)
+    campaigns_path = root / "campaigns"
+    campaign_path = campaigns_path / campaign_id
+    dir_flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_CLOEXEC", 0)
+    nofollow = getattr(os, "O_NOFOLLOW", 0)
+
+    if os.open in os.supports_dir_fd and os.mkdir in os.supports_dir_fd:
+        root_fd = os.open(root, dir_flags | nofollow)
+        campaigns_fd: int | None = None
+        campaign_fd: int | None = None
+        try:
+            try:
+                os.mkdir("campaigns", mode=0o700, dir_fd=root_fd)
+            except FileExistsError:
+                pass
+            campaigns_fd = os.open("campaigns", dir_flags | nofollow, dir_fd=root_fd)
+            if not stat.S_ISDIR(os.fstat(campaigns_fd).st_mode):
+                raise ValueError("campaigns path is not a directory")
+            os.mkdir(campaign_id, mode=0o700, dir_fd=campaigns_fd)
+            campaign_fd = os.open(campaign_id, dir_flags | nofollow, dir_fd=campaigns_fd)
+            if not stat.S_ISDIR(os.fstat(campaign_fd).st_mode):
+                raise ValueError("campaign path is not a directory")
+            return campaign_path
+        finally:
+            if campaign_fd is not None:
+                os.close(campaign_fd)
+            if campaigns_fd is not None:
+                os.close(campaigns_fd)
+            os.close(root_fd)
+
+    # Path-based fallback for platforms without descriptor-relative mkdir/open.
+    if campaigns_path.exists() or campaigns_path.is_symlink():
+        if campaigns_path.is_symlink() or not campaigns_path.is_dir():
+            raise ValueError("campaigns path contains a symlink or is not a directory")
+        if not campaigns_path.resolve(strict=True).is_relative_to(root):
+            raise ValueError("campaigns path escapes the workspace")
+    else:
+        campaigns_path.mkdir(mode=0o700)
+    campaign_path.mkdir(mode=0o700)
+    if campaign_path.is_symlink() or not campaign_path.resolve(strict=True).is_relative_to(root):
+        raise ValueError("campaign path contains a symlink or escapes the workspace")
+    return campaign_path
+
+
+def _make_sandbox_recon_provider(ctx: ToolContext, config: dict[str, Any] | None, aggression: str):
+    """Build the campaign recon callback from the active MCP sandbox context."""
+
+    async def provide(target: str) -> Any:
+        from tools.mcp_tools.recon import sandbox_recon_host
+
+        result, error = await sandbox_recon_host(ctx, target, config, aggression=aggression)
+        if error:
+            raise RuntimeError(error)
+        if result is None:
+            raise RuntimeError("sandbox recon returned no result")
+        return result
+
+    return provide
+
+
+def _open_campaign_dir(workspace: Path, campaign_id: str) -> tuple[int | None, Path]:
+    """Open a campaign directory without following worker-created symlinks.
+
+    The directory descriptor is used for state-file I/O where the platform
+    supports descriptor-relative operations. The returned path is only for
+    orchestrator configuration; it is constructed from a validated ID.
+    """
+    if not _valid_campaign_id(campaign_id):
+        raise ValueError("invalid campaign_id")
+
+    root = workspace.resolve(strict=True)
+    campaigns_path = root / "campaigns"
+    campaign_path = campaigns_path / campaign_id
+    if campaigns_path.is_symlink() or campaign_path.is_symlink():
+        raise ValueError("campaign path contains a symlink")
+    resolved_campaign = campaign_path.resolve(strict=True)
+    if not resolved_campaign.is_relative_to(root):
+        raise ValueError("campaign path escapes the workspace")
+
+    dir_flag = getattr(os, "O_DIRECTORY", 0)
+    nofollow = getattr(os, "O_NOFOLLOW", 0)
+    cloexec = getattr(os, "O_CLOEXEC", 0)
+    root_fd: int | None = None
+    campaigns_fd: int | None = None
+    campaign_fd: int | None = None
+    try:
+        root_fd = os.open(root, os.O_RDONLY | dir_flag | nofollow | cloexec)
+        if os.open in os.supports_dir_fd:
+            campaigns_fd = os.open("campaigns", os.O_RDONLY | dir_flag | nofollow | cloexec, dir_fd=root_fd)
+            campaign_fd = os.open(campaign_id, os.O_RDONLY | dir_flag | nofollow | cloexec, dir_fd=campaigns_fd)
+            if not stat.S_ISDIR(os.fstat(campaign_fd).st_mode):
+                raise ValueError("campaign path is not a directory")
+            return campaign_fd, resolved_campaign
+        # Windows does not provide dir_fd for these calls. Reject static
+        # symlinks and verify containment before using the path-based fallback.
+        if campaigns_path.resolve(strict=True) != campaigns_path:
+            raise ValueError("campaign path contains a symlink")
+        return None, resolved_campaign
+    except BaseException:
+        if campaign_fd is not None:
+            os.close(campaign_fd)
+        raise
+    finally:
+        if campaigns_fd is not None:
+            os.close(campaigns_fd)
+        if root_fd is not None:
+            os.close(root_fd)
+
+
+def _read_campaign_state(workspace: Path, campaign_id: str) -> tuple[Path, dict[str, Any]]:
+    """Read a regular campaign state file without following symlinks."""
+    campaign_fd, campaign_path = _open_campaign_dir(workspace, campaign_id)
+    state_path = campaign_path / "state.json"
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+    flags |= getattr(os, "O_CLOEXEC", 0)
+    state_fd: int | None = None
+    try:
+        if campaign_fd is not None:
+            state_fd = os.open("state.json", flags, dir_fd=campaign_fd)
+        else:
+            if state_path.is_symlink() or not state_path.resolve(strict=True).is_relative_to(campaign_path):
+                raise ValueError("campaign state path contains a symlink or escapes the campaign")
+            state_fd = os.open(state_path, flags)
+        if not stat.S_ISREG(os.fstat(state_fd).st_mode):
+            raise ValueError("campaign state is not a regular file")
+        chunks: list[bytes] = []
+        remaining = _MAX_CAMPAIGN_STATE_BYTES + 1
+        while remaining > 0:
+            chunk = os.read(state_fd, min(65536, remaining))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        raw = b"".join(chunks)
+        if len(raw) > _MAX_CAMPAIGN_STATE_BYTES:
+            raise ValueError("campaign state exceeds the size limit")
+        data = json.loads(raw.decode("utf-8"))
+        if not isinstance(data, dict):
+            raise ValueError("campaign state must be a JSON object")
+        return campaign_path, data
+    finally:
+        if state_fd is not None:
+            os.close(state_fd)
+        if campaign_fd is not None:
+            os.close(campaign_fd)
+
+
+def _write_campaign_state(workspace: Path, campaign_id: str, state_data: dict[str, Any]) -> None:
+    """Atomically replace state.json relative to a pinned campaign directory."""
+    campaign_fd, campaign_path = _open_campaign_dir(workspace, campaign_id)
+    state_path = campaign_path / "state.json"
+    payload = json.dumps(state_data, indent=2, default=str).encode("utf-8")
+    temp_name = f".state.json.{secrets.token_hex(8)}.tmp"
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+    flags |= getattr(os, "O_CLOEXEC", 0)
+    temp_fd: int | None = None
+    try:
+        if campaign_fd is not None:
+            try:
+                state_stat = os.stat("state.json", dir_fd=campaign_fd, follow_symlinks=False)
+            except FileNotFoundError:
+                pass
+            else:
+                if not stat.S_ISREG(state_stat.st_mode):
+                    raise ValueError("campaign state is not a regular file")
+            temp_fd = os.open(temp_name, flags, 0o600, dir_fd=campaign_fd)
+        else:
+            try:
+                state_info = state_path.lstat()
+            except FileNotFoundError:
+                pass
+            else:
+                if stat.S_ISLNK(state_info.st_mode) or not state_path.resolve(strict=True).is_relative_to(
+                    campaign_path
+                ):
+                    raise ValueError("campaign state path contains a symlink or escapes the campaign")
+                if not stat.S_ISREG(state_info.st_mode):
+                    raise ValueError("campaign state is not a regular file")
+            temp_fd = os.open(state_path.with_name(temp_name), flags, 0o600)
+        view = memoryview(payload)
+        while view:
+            written = os.write(temp_fd, view)
+            if written <= 0:
+                raise OSError("short write to campaign state")
+            view = view[written:]
+        os.fsync(temp_fd)
+        os.close(temp_fd)
+        temp_fd = None
+        if campaign_fd is not None:
+            os.replace(temp_name, "state.json", src_dir_fd=campaign_fd, dst_dir_fd=campaign_fd)
+            os.fsync(campaign_fd)
+        else:
+            os.replace(state_path.with_name(temp_name), state_path)
+    finally:
+        if temp_fd is not None:
+            os.close(temp_fd)
+        if campaign_fd is not None:
+            os.close(campaign_fd)
+
+
+def _compromised_hosts_for_state(state: Any) -> list[str]:
+    """Return verified target hosts, never module names or self-reported status."""
+    if not (getattr(state, "access_achieved", False) or getattr(state, "credentials_found", [])):
+        return []
+    host = str(getattr(state, "resolved_ip", "") or getattr(state, "target", "") or "").strip()
+    return [host] if host else []
+
+
+def _record_campaign_step_result(state: Any, state_data: dict[str, Any], status: str) -> None:
+    """Persist operational completion separately from verified compromise."""
+    tasks = state_data.get("tasks", {})
+    counter = "completed" if status in ("success", "exploited", "script_generated") else "failed"
+    tasks[counter] = tasks.get(counter, 0) + 1
+    state_data["tasks"] = tasks
+    state_data["compromised_hosts"] = _compromised_hosts_for_state(state)
 
 
 def register_campaign_tools(mcp: Any, *, ctx: ToolContext) -> None:
@@ -79,9 +318,8 @@ def register_campaign_tools(mcp: Any, *, ctx: ToolContext) -> None:
             }
             agg = aggression_map.get(aggression_level.lower(), AggressionLevel.NORMAL)
 
-            campaign_id = f"campaign-{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}-{hashlib.sha256(target_ip.encode()).hexdigest()[:8]}"
-            campaign_dir = workspace / "campaigns" / campaign_id
-            campaign_dir.mkdir(parents=True, exist_ok=True)
+            campaign_id = _new_campaign_id(target_ip)
+            campaign_dir = _create_campaign_dir(workspace, campaign_id)
 
             # Build mission config. The ``autonomous`` block (config.yaml) is
             # merged first so its opt-in Phase 2 flags (persistence_phase,
@@ -132,6 +370,8 @@ def register_campaign_tools(mcp: Any, *, ctx: ToolContext) -> None:
             orchestrator = AutonomousOrchestrator(
                 mission_config=mission_config,
                 workspace_root=campaign_dir,
+                sandbox_recon_provider=_make_sandbox_recon_provider(ctx, config, agg.value),
+                require_sandbox_recon=True,
             )
 
             # Domain targeting: when the operator passed a domain (not an IP)
@@ -166,7 +406,7 @@ def register_campaign_tools(mcp: Any, *, ctx: ToolContext) -> None:
                 "compromised_hosts": [],
                 "last_error": "",
             }
-            (campaign_dir / "state.json").write_text(json.dumps(initial_state, indent=2, default=str), encoding="utf-8")
+            _write_campaign_state(workspace, campaign_id, initial_state)
 
             # Launch in background asyncio task
             async def _run_campaign() -> None:
@@ -193,13 +433,23 @@ def register_campaign_tools(mcp: Any, *, ctx: ToolContext) -> None:
                             "failed": sum(1 for t in orchestrator._tasks.values() if t.status == TaskStatus.FAILED),
                             "pending": sum(1 for t in orchestrator._tasks.values() if t.status == TaskStatus.PENDING),
                         },
-                        "compromised_hosts": state.successful_exploits,
+                        "compromised_hosts": _compromised_hosts_for_state(state),
                         "last_error": "",
                     }
-                    (campaign_dir / "state.json").write_text(
-                        json.dumps(final_state, indent=2, default=str), encoding="utf-8"
-                    )
-                except Exception as exc:  # ponytail: bare except intentional
+                    _write_campaign_state(workspace, campaign_id, final_state)
+                except asyncio.CancelledError:
+                    cancelled_state = {
+                        **initial_state,
+                        "status": "cancelled",
+                        "completed_at": datetime.now(timezone.utc).isoformat(),
+                        "current_phase": state.current_phase.value if state else "unknown",
+                        "last_error": "campaign task cancelled",
+                    }
+                    _write_campaign_state(workspace, campaign_id, cancelled_state)
+                    raise
+                except _EXC_GROUP_CATCH as exc:
+                    if _is_exception_group(exc):
+                        _log_nested_exceptions(exc)
                     error_state = {
                         "campaign_id": campaign_id,
                         "target": target_ip,
@@ -213,9 +463,7 @@ def register_campaign_tools(mcp: Any, *, ctx: ToolContext) -> None:
                         "compromised_hosts": [],
                         "last_error": str(exc),
                     }
-                    (campaign_dir / "state.json").write_text(
-                        json.dumps(error_state, indent=2, default=str), encoding="utf-8"
-                    )
+                    _write_campaign_state(workspace, campaign_id, error_state)
 
             _bg_task = asyncio.create_task(_run_campaign())
             _running_campaign_tasks.add(_bg_task)
@@ -264,12 +512,13 @@ def register_campaign_tools(mcp: Any, *, ctx: ToolContext) -> None:
             return "ERROR: campaign_id is required."
 
         try:
-            state_path = workspace / "campaigns" / campaign_id / "state.json"
-            if not state_path.exists():
-                return f"ERROR: Campaign '{campaign_id}' not found. Check the campaign_id or workspace path."
+            _campaign_path, state_data = _read_campaign_state(workspace, campaign_id)
+        except FileNotFoundError:
+            return f"ERROR: Campaign '{campaign_id}' not found. Check the campaign_id or workspace path."
+        except (OSError, ValueError):
+            return "ERROR: Invalid campaign_id or unsafe campaign state path."
 
-            state_data = json.loads(state_path.read_text(encoding="utf-8"))
-
+        try:
             lines = [
                 f"CAMPAIGN_STATUS: {campaign_id}",
                 f"TARGET: {state_data.get('target', 'unknown')}",
@@ -323,12 +572,12 @@ def register_campaign_tools(mcp: Any, *, ctx: ToolContext) -> None:
             return "ERROR: campaign_id is required."
 
         try:
-            campaign_dir = workspace / "campaigns" / campaign_id
-            state_path = campaign_dir / "state.json"
-            if not state_path.exists():
+            try:
+                campaign_dir, state_data = _read_campaign_state(workspace, campaign_id)
+            except FileNotFoundError:
                 return f"ERROR: Campaign '{campaign_id}' not found."
-
-            state_data = json.loads(state_path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                return "ERROR: Invalid campaign_id or unsafe campaign state path."
             target_ip = state_data.get("target", "")
             if not target_ip:
                 return "ERROR: No target found in campaign state."
@@ -385,6 +634,10 @@ def register_campaign_tools(mcp: Any, *, ctx: ToolContext) -> None:
             orchestrator = AutonomousOrchestrator(
                 mission_config=mission_config,
                 workspace_root=campaign_dir,
+                sandbox_recon_provider=_make_sandbox_recon_provider(
+                    ctx, config, str(state_data.get("aggression", "normal"))
+                ),
+                require_sandbox_recon=True,
             )
 
             state = orchestrator.get_state(target_ip)
@@ -402,18 +655,16 @@ def register_campaign_tools(mcp: Any, *, ctx: ToolContext) -> None:
 
             # Run just the recon phase if no recon yet, otherwise try exploitation
             if state.recon_result is None:
-                recon_config = ReconConfig()
-                pipeline = ReconPipeline(recon_config)
-                recon_result = await pipeline.recon_host(target_ip)
+                recon_result = await _make_sandbox_recon_provider(
+                    ctx, config, str(state_data.get("aggression", "normal"))
+                )(target_ip)
                 state.recon_result = recon_result
                 state.current_phase = OrchAttackPhase.ENUMERATION
 
                 # Update state
                 state_data["current_phase"] = state.current_phase.value
                 state_data["status"] = "running"
-                (campaign_dir / "state.json").write_text(
-                    json.dumps(state_data, indent=2, default=str), encoding="utf-8"
-                )
+                _write_campaign_state(workspace, campaign_id, state_data)
 
                 return (
                     f"CAMPAIGN_STEP_RESULT: recon_completed\n"
@@ -424,7 +675,7 @@ def register_campaign_tools(mcp: Any, *, ctx: ToolContext) -> None:
                 )
 
             # Try to run the highest-scoring applicable module
-            ctx = ModuleContext(
+            module_ctx = ModuleContext(
                 target_ip=target_ip,
                 target_os=state.recon_result.os_family if state.recon_result else None,
                 services=[
@@ -435,13 +686,11 @@ def register_campaign_tools(mcp: Any, *, ctx: ToolContext) -> None:
 
             from tools.attack_modules import find_modules
 
-            scored = find_modules(ctx)
+            scored = find_modules(module_ctx)
             if not scored:
                 state_data["status"] = "completed"
                 state_data["current_phase"] = "done"
-                (campaign_dir / "state.json").write_text(
-                    json.dumps(state_data, indent=2, default=str), encoding="utf-8"
-                )
+                _write_campaign_state(workspace, campaign_id, state_data)
                 return (
                     f"CAMPAIGN_STEP_RESULT: no_applicable_modules\n"
                     f"TARGET: {target_ip}\n"
@@ -449,20 +698,14 @@ def register_campaign_tools(mcp: Any, *, ctx: ToolContext) -> None:
                 )
 
             best_score, best_module = scored[0]
-            result = best_module.run(ctx)
+            result = best_module.run(module_ctx)
 
-            # Update state
-            tasks = state_data.get("tasks", {})
-            if result.get("status") in ("success", "exploited", "script_generated"):
-                tasks["completed"] = tasks.get("completed", 0) + 1
-                state.successful_exploits.append(best_module.name)
-                state_data["compromised_hosts"] = state.successful_exploits
-            else:
-                tasks["failed"] = tasks.get("failed", 0) + 1
-
-            state_data["tasks"] = tasks
+            # Module output is an operational result, not target-bound proof.
+            # Do not append a module name to successful_exploits or report it
+            # as a compromised host merely because script generation worked.
+            _record_campaign_step_result(state, state_data, str(result.get("status", "")))
             state_data["current_phase"] = "exploit"
-            (campaign_dir / "state.json").write_text(json.dumps(state_data, indent=2, default=str), encoding="utf-8")
+            _write_campaign_state(workspace, campaign_id, state_data)
 
             lines = [
                 "CAMPAIGN_STEP_RESULT: executed",
@@ -502,13 +745,19 @@ def register_campaign_tools(mcp: Any, *, ctx: ToolContext) -> None:
         """
         if not campaign_id or not campaign_id.strip():
             return "ERROR: campaign_id is required."
+        if not _valid_campaign_id(campaign_id):
+            return "ERROR: Invalid campaign_id or unsafe campaign state path."
 
         orchestrator = _campaign_orchestrators.get(campaign_id)
         if orchestrator is None:
-            state_path = workspace / "campaigns" / campaign_id / "state.json"
-            if state_path.exists():
+            try:
+                _campaign_path, _state_data = _read_campaign_state(workspace, campaign_id)
+            except FileNotFoundError:
+                return f"ERROR: Campaign '{campaign_id}' not found."
+            except (OSError, ValueError):
+                return "ERROR: Invalid campaign_id or unsafe campaign state path."
+            else:
                 return f"STOPPED: Campaign '{campaign_id}' is not running (already finished)."
-            return f"ERROR: Campaign '{campaign_id}' not found."
 
         orchestrator.stop()
         return f"STOPPED: Campaign '{campaign_id}' stop signal sent."

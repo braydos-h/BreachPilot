@@ -3,12 +3,11 @@
 from __future__ import annotations
 
 import re
-import subprocess
-import time
 from typing import Any
 
 from tools.mcp_shared import _attempt_dir, check_targets_allowlist
-from tools.mcp_tools.registry import ToolContext, _run_with_pgrp_timeout
+from tools.mcp_tools.registry import ToolContext
+from tools.mcp_tools.sandbox_exec import run_tool_argv_in_sandbox
 from tools.validation_utils import validate_target_or_ip
 
 
@@ -115,28 +114,14 @@ def register_payload_tools(mcp: Any, *, ctx: ToolContext) -> None:
         msf_argv.extend(["-o", str(out_file)])
         cmd = " ".join(msf_argv)  # reported in the result for operator visibility
 
-        log_path = attempt_dir / "msfvenom.log"
-        start = time.monotonic()
-        try:
-            returncode, out, err = _run_with_pgrp_timeout(
-                msf_argv,
-                300,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-            )
-            output = (out + "\n" + err)[-3000:]
-            status = "completed" if returncode == 0 else "failed"
-        except subprocess.TimeoutExpired:
-            status = "timed_out"
-            output = "msfvenom timed out after 300s"
-            returncode = None
-        except Exception as exc:  # ponytail: bare except intentional
-            status = "error"
-            output = str(exc)
-            returncode = None
-
-        elapsed = time.monotonic() - start
+        status, returncode, output, elapsed = run_tool_argv_in_sandbox(
+            ctx,
+            msf_argv,
+            target_ip=lhost,
+            timeout=300,
+            tool_name="generate_payload",
+            max_chars=3000,
+        )
         file_size = out_file.stat().st_size if out_file.exists() else 0
 
         return (

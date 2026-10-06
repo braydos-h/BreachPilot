@@ -12,12 +12,8 @@ always see the FULL input.
 
 from __future__ import annotations
 
-import os
 import re
-import signal
-import subprocess
-import time
-from typing import Any
+from typing import Any, Never, NoReturn
 
 from tools.mcp_shared import (
     _attempt_dir,
@@ -25,10 +21,10 @@ from tools.mcp_shared import (
     _extract_msf_rhosts,
     check_targets_allowlist,
 )
-from tools.mcp_tools.registry import ToolContext, _platform_system, parse_extra_options
+from tools.mcp_tools.registry import ToolContext, parse_extra_options
 from tools.mcp_tools.sandbox_exec import sandbox_error_block
-from tools.metasploit_bridge import MSF_RECIPES, MetasploitBridge, get_metasploit_bridge, get_msf_recipe
-from tools.sandbox.exceptions import SandboxError
+from tools.metasploit_bridge import MSF_RECIPES, get_msf_recipe
+from tools.sandbox.exceptions import SandboxError, SandboxUnsupportedError
 from tools.validation_utils import validate_target_or_ip
 
 # Module/payload paths: Metasploit module path chars only, bounded length so a
@@ -301,6 +297,8 @@ def register_metasploit_tools(mcp: Any, *, ctx: ToolContext) -> None:
             Writes msf_run.rc + msf_output.log under the attempt dir; runs
             msfconsole (sandbox worker when enabled, host argv otherwise).
         """
+        if getattr(ctx, "sandbox", None) is None:
+            return f"MSF_RESULT: blocked\n{sandbox_error_block(SandboxUnsupportedError('Metasploit execution requires an active sandbox worker'), tool_name='run_msf_module')}"
         mod_err = _validate_module(module)
         if mod_err:
             return mod_err
@@ -352,7 +350,6 @@ def register_metasploit_tools(mcp: Any, *, ctx: ToolContext) -> None:
             except SandboxError as exc:
                 return f"MSF_RESULT: blocked\n{sandbox_error_block(exc, tool_name='run_msf_module')}"
             _msf_argv = ["msfconsole", "-q", "-r", _rc_container]
-            start = time.monotonic()
             try:
                 _ran, result = run_argv_in_sandbox(
                     ctx,
@@ -364,6 +361,8 @@ def register_metasploit_tools(mcp: Any, *, ctx: ToolContext) -> None:
                 )
             except SandboxError as exc:
                 return f"MSF_RESULT: blocked\n{sandbox_error_block(exc, tool_name='run_msf_module')}"
+            if not _ran or result is None:
+                return f"MSF_RESULT: blocked\n{sandbox_error_block(SandboxUnsupportedError('Metasploit execution requires an active sandbox worker'), tool_name='run_msf_module')}"
             merged = result.stdout or ""
             if result.stderr:
                 merged = f"{merged}\n{result.stderr}" if merged else result.stderr
@@ -381,119 +380,37 @@ def register_metasploit_tools(mcp: Any, *, ctx: ToolContext) -> None:
                 f"LOG_TAIL:\n{_tail(merged, _MAX_LOG_CHARS)}"
             )
 
-        # Linux/macOS: honor exploit.msfconsole_path from config when msfconsole
-        # isn't on PATH under that name (default "msfconsole"). No effect on
-        # Windows, which still uses the same argv via CREATE_NEW_CONSOLE.
-        _msf_bin = str((config or {}).get("exploit", {}).get("msfconsole_path", "msfconsole")) or "msfconsole"
-        msf_argv = [_msf_bin, "-q", "-r", str(rc_path)]
-        start = time.monotonic()
-        if _platform_system() == "Windows":
-            proc = subprocess.Popen(
-                msf_argv,
-                cwd=str(attempt_dir),
-                creationflags=getattr(subprocess, "CREATE_NEW_CONSOLE", 0),
-            )
-            timeout = _MSF_RUN_TIMEOUT
-            try:
-                exit_code = proc.wait(timeout=timeout)
-                status = "completed" if exit_code == 0 else "failed"
-            except subprocess.TimeoutExpired:
-                try:
-                    proc.kill()
-                except ProcessLookupError:
-                    pass
-                exit_code = None
-                status = "timed_out"
-        else:
-            with open(str(log_path), "w") as fh:
-                proc = subprocess.Popen(
-                    msf_argv,
-                    cwd=str(attempt_dir),
-                    stdout=fh,
-                    stderr=subprocess.STDOUT,
-                    start_new_session=True,
-                )
-                timeout = _MSF_RUN_TIMEOUT
-                try:
-                    exit_code = proc.wait(timeout=timeout)
-                    status = "completed" if exit_code == 0 else "failed"
-                except subprocess.TimeoutExpired:
-                    # M2: reap the whole process group on timeout.
-                    try:
-                        os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
-                    except (ProcessLookupError, PermissionError):
-                        try:
-                            proc.kill()
-                        except ProcessLookupError:
-                            pass
-                    exit_code = None
-                    status = "timed_out"
+        return f"MSF_RESULT: blocked\n{sandbox_error_block(SandboxUnsupportedError('Metasploit execution requires an active sandbox worker'), tool_name='run_msf_module')}"
 
-        elapsed = time.monotonic() - start
-        log_tail = ""
-        if log_path.exists():
-            text = log_path.read_text(encoding="utf-8", errors="replace")
-            log_tail = _tail(text, _MAX_LOG_CHARS)
-
-        return (
-            f"MSF_RESULT: {status} (exit_code={exit_code}, duration={elapsed:.1f}s)\n"
-            f"ATTEMPT_ID: {attempt_id}\n"
-            f"MODULE: {module}\n"
-            f"TARGET: {target_ip}\n"
-            f"OPTIONS: {opts_raw}\n"
-            f"LOG_TAIL:\n{log_tail}"
-        )
-
-    _msf_bridge: MetasploitBridge | None = None
-    mcp._msf_bridge = None
-
-    def _msf_bridge_or_blocked() -> Any:
-        """Bridge accessor that FAILS CLOSED when the sandbox is enabled.
+    def _msf_bridge_or_blocked() -> NoReturn:
+        """Reject the unsupported host-side Metasploit bridge.
 
         Args: None.
         Returns:
-            The shared host-side ``MetasploitBridge``.
+            Never returns.
         Gates:
-            Sandbox presence: when ``ctx.sandbox`` is set, raises
-            ``SandboxUnsupportedError`` (a ``SandboxError``) instead of
-            touching the host loopback bridge. Every bridge tool catches it
-            and returns a canonical SANDBOX_* block — never a traceback,
-            never a silent host fallback. Workarounds: drive msfconsole
-            inside the worker via run_exploit_terminal / run_msf_module, or
-            deliberately set ``sandbox.enabled: false`` for legacy host mode.
-        Side-effects: Lazily creates and caches the bridge on ``mcp``.
+            Host-side Metasploit RPC is unavailable to agent tools. Every
+            bridge tool returns a canonical SANDBOX_* block; use the
+            sandbox-contained ``run_msf_module`` path for execution.
+        Side-effects: None.
         """
-        if getattr(ctx, "sandbox", None) is not None:
-            from tools.sandbox.exceptions import SandboxUnsupportedError
-
-            raise SandboxUnsupportedError(
-                "Metasploit RPC bridge cannot execute inside the disposable sandbox "
-                "(host-side loopback process). Use msfconsole inside the worker via "
-                "run_exploit_terminal / run_msf_module, or set sandbox.enabled: false "
-                "to deliberately restore host-mode metasploit."
-            )
-        return _get_msf_bridge()
-
-    def _get_msf_bridge() -> MetasploitBridge:
-        if mcp._msf_bridge is None:
-            mcp._msf_bridge = get_metasploit_bridge(workspace)
-        return mcp._msf_bridge
+        raise SandboxUnsupportedError(
+            "Host-side Metasploit RPC is unavailable to agent tools. Use the sandbox-contained run_msf_module path."
+        )
 
     @mcp.tool()
     @audit_tool
     def msfconsole_start() -> str:
-        """Start an interactive msfconsole session in a tmux session. This is a persistent session that stays running in the background. Use msfconsole_command to send commands to it.
+        """Legacy host-side console entry point. It is disabled; use the sandbox-contained run_msf_module tool.
 
         Args: None.
         Returns:
-            MSFCONSOLE_STARTED block (name, message, marked initial-output
-            tail) or MSFCONSOLE_FAILED, or a SANDBOX_* block under sandbox.
-        Gates: ``@audit_tool`` only (local-only: starts the host console, no
-            target). Sandbox fails closed via ``_msf_bridge_or_blocked``.
-        Side-effects: Starts the persistent host msfconsole (host mode only).
+            A canonical SANDBOX_* block.
+        Gates: ``@audit_tool`` and fail-closed bridge rejection.
+        Side-effects: None.
         """
         try:
-            bridge = _msf_bridge_or_blocked()
+            bridge: Never = _msf_bridge_or_blocked()
         except SandboxError as exc:
             return f"MSFCONSOLE_FAILED: blocked\n{sandbox_error_block(exc, tool_name='msfconsole_start')}"
         result = bridge.start_console()
@@ -509,17 +426,16 @@ def register_metasploit_tools(mcp: Any, *, ctx: ToolContext) -> None:
     @mcp.tool()
     @audit_tool
     def msfconsole_stop() -> str:
-        """Stop the interactive msfconsole session.
+        """Legacy host-side console entry point. It is disabled; use sandbox-contained Metasploit execution.
 
         Args: None.
         Returns:
-            MSFCONSOLE_STOPPED block, or a SANDBOX_* block under sandbox.
-        Gates: ``@audit_tool`` only (local-only). Sandbox fails closed via
-            ``_msf_bridge_or_blocked``.
-        Side-effects: Stops the persistent host msfconsole (host mode only).
+            A canonical SANDBOX_* block.
+        Gates: ``@audit_tool`` and fail-closed bridge rejection.
+        Side-effects: None.
         """
         try:
-            bridge = _msf_bridge_or_blocked()
+            bridge: Never = _msf_bridge_or_blocked()
         except SandboxError as exc:
             return f"MSFCONSOLE_STOPPED: blocked\n{sandbox_error_block(exc, tool_name='msfconsole_stop')}"
         result = bridge.stop_console()
@@ -556,7 +472,7 @@ def register_metasploit_tools(mcp: Any, *, ctx: ToolContext) -> None:
             return wait_err or "BLOCKED: wait_seconds must be a number."
         lines, _ = _clamp_read_lines(read_lines, 100)
         try:
-            bridge = _msf_bridge_or_blocked()
+            bridge: Never = _msf_bridge_or_blocked()
         except SandboxError as exc:
             return f"MSFCONSOLE_COMMAND_FAILED: blocked\n{sandbox_error_block(exc, tool_name='msfconsole_command')}"
         result = bridge.console_command(command, wait, lines)
@@ -610,7 +526,7 @@ def register_metasploit_tools(mcp: Any, *, ctx: ToolContext) -> None:
         if wait_err or wait is None:
             return wait_err or "BLOCKED: wait_seconds must be a number."
         try:
-            bridge = _msf_bridge_or_blocked()
+            bridge: Never = _msf_bridge_or_blocked()
         except SandboxError as exc:
             return f"MSF_EXPLOIT_RESULT: blocked\n{sandbox_error_block(exc, tool_name='msf_run_exploit')}"
         result = bridge.run_exploit(module, target_ip, opts, payload.strip(), wait)
@@ -662,7 +578,7 @@ def register_metasploit_tools(mcp: Any, *, ctx: ToolContext) -> None:
         if wait_err or wait is None:
             return wait_err or "BLOCKED: wait_seconds must be a number."
         try:
-            bridge = _msf_bridge_or_blocked()
+            bridge: Never = _msf_bridge_or_blocked()
         except SandboxError as exc:
             return f"MSF_AUXILIARY_FAILED: blocked\n{sandbox_error_block(exc, tool_name='msf_run_auxiliary')}"
         result = bridge.run_auxiliary(module, target_ip, opts, wait)
@@ -684,7 +600,7 @@ def register_metasploit_tools(mcp: Any, *, ctx: ToolContext) -> None:
         Side-effects: None (read-only list).
         """
         try:
-            bridge = _msf_bridge_or_blocked()
+            bridge: Never = _msf_bridge_or_blocked()
         except SandboxError as exc:
             return f"MSF_SESSIONS: blocked\n{sandbox_error_block(exc, tool_name='msf_list_sessions')}"
         sessions = bridge.list_sessions()
@@ -734,7 +650,7 @@ def register_metasploit_tools(mcp: Any, *, ctx: ToolContext) -> None:
         if wait_err or wait is None:
             return wait_err or "BLOCKED: wait_seconds must be a number."
         try:
-            bridge = _msf_bridge_or_blocked()
+            bridge: Never = _msf_bridge_or_blocked()
         except SandboxError as exc:
             return f"MSF_SESSION_INTERACT_FAILED: blocked\n{sandbox_error_block(exc, tool_name='msf_interact_session')}"
         result = bridge.interact_session(sid, command, wait)
@@ -774,7 +690,7 @@ def register_metasploit_tools(mcp: Any, *, ctx: ToolContext) -> None:
         if opts_err:
             return opts_err
         try:
-            bridge = _msf_bridge_or_blocked()
+            bridge: Never = _msf_bridge_or_blocked()
         except SandboxError as exc:
             return f"MSF_POST_FAILED: blocked\n{sandbox_error_block(exc, tool_name='msf_run_post_module')}"
         result = bridge.run_post_module(module, sid, opts)
@@ -799,7 +715,7 @@ def register_metasploit_tools(mcp: Any, *, ctx: ToolContext) -> None:
         if sid_err or sid is None:
             return sid_err or "BLOCKED: session_id must be a positive integer."
         try:
-            bridge = _msf_bridge_or_blocked()
+            bridge: Never = _msf_bridge_or_blocked()
         except SandboxError as exc:
             return f"MSF_SESSION_KILLED: blocked\n{sandbox_error_block(exc, tool_name='msf_kill_session')}"
         result = bridge.kill_session(sid)
@@ -872,7 +788,7 @@ def register_metasploit_tools(mcp: Any, *, ctx: ToolContext) -> None:
         if extra_err:
             return extra_err
         try:
-            bridge = _msf_bridge_or_blocked()
+            bridge: Never = _msf_bridge_or_blocked()
         except SandboxError as exc:
             return f"MSF_PAYLOAD_FAILED: blocked\n{sandbox_error_block(exc, tool_name='msf_generate_payload')}"
         result = bridge.generate_payload(
@@ -924,7 +840,7 @@ def register_metasploit_tools(mcp: Any, *, ctx: ToolContext) -> None:
         if not allowed:
             return f"BLOCKED: {reason}\nTOOL: msf_run_resource_script"
         try:
-            bridge = _msf_bridge_or_blocked()
+            bridge: Never = _msf_bridge_or_blocked()
         except SandboxError as exc:
             return f"MSF_RESOURCE_FAILED: blocked\n{sandbox_error_block(exc, tool_name='msf_run_resource_script')}"
         result = bridge.run_resource_script(script_content)
@@ -986,7 +902,7 @@ def register_metasploit_tools(mcp: Any, *, ctx: ToolContext) -> None:
             if sid_err or sid is None:
                 return "BLOCKED: post recipes require a positive session_id."
         try:
-            bridge = _msf_bridge_or_blocked()
+            bridge: Never = _msf_bridge_or_blocked()
         except SandboxError as exc:
             return f"MSF_RECIPE_FAILED: blocked\n{sandbox_error_block(exc, tool_name='msf_run_recipe')}"
         result = bridge.run_recipe(name, (target_ip or "").strip(), int(session_id or 0), opts)
@@ -1041,7 +957,7 @@ def register_metasploit_tools(mcp: Any, *, ctx: ToolContext) -> None:
             if not opt_allowed:
                 return f"BLOCKED: {opt_reason}\nTOOL: msf_start_handler\nLHOST: {lhost}"
         try:
-            bridge = _msf_bridge_or_blocked()
+            bridge: Never = _msf_bridge_or_blocked()
         except SandboxError as exc:
             return f"MSF_HANDLER_FAILED: blocked\n{sandbox_error_block(exc, tool_name='msf_start_handler')}"
         result = bridge.start_handler(lhost.strip(), port, payload.strip(), opts)
@@ -1067,7 +983,7 @@ def register_metasploit_tools(mcp: Any, *, ctx: ToolContext) -> None:
         Side-effects: Kills all handler jobs (``jobs -K``).
         """
         try:
-            bridge = _msf_bridge_or_blocked()
+            bridge: Never = _msf_bridge_or_blocked()
         except SandboxError as exc:
             return f"MSF_HANDLER_STOPPED: blocked\n{sandbox_error_block(exc, tool_name='msf_stop_handler')}"
         result = bridge.stop_handler()
@@ -1094,7 +1010,7 @@ def register_metasploit_tools(mcp: Any, *, ctx: ToolContext) -> None:
         if opts_err:
             return opts_err
         try:
-            bridge = _msf_bridge_or_blocked()
+            bridge: Never = _msf_bridge_or_blocked()
         except SandboxError as exc:
             return f"MSF_POST_FAILED: blocked\n{sandbox_error_block(exc, tool_name='msf_post_' + label)}"
         result = bridge.run_post_module(module, sid, opts)

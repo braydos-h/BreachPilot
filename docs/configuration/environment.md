@@ -80,7 +80,7 @@ Allowlist check is `tools/validation_utils.is_target_in_allowlist` — supports 
 | Env var | Purpose | Default | Read at |
 |---------|---------|---------|---------|
 | `BREACHPILOT_API_TOKEN` | Bearer token override for `--demon/--daemon/--web` (`app.py` / `tools/api/auth.py`) | `api.token_file` (`.webui_secret_key`) | `app.py:71`, `tools/api/auth.py:46`, `load_or_create_token` |
-| `MCP_HTTP_TOKEN` | Optional bearer for MCP HTTP transport (`streamable_http`) | — (loopback-only, no auth) | `mcp_shared.run_mcp_http_server` — wraps ASGI with `_wrap_http_auth` |
+| `MCP_HTTP_TOKEN` | Bearer token for MCP HTTP transport (`streamable_http`) | — on loopback; required for non-loopback binds | `mcp_shared.run_mcp_http_server` — wraps ASGI with `_wrap_http_auth` |
 | `MCP_ALLOW_PUBLIC_BIND` | Second half of two-person rule for non-loopback MCP bind (`1/true/yes/on`) | — | `mcp_shared.assert_loopback_bind` — requires CLI `--allow-public-bind` AND env `1` |
 
 ### Behavior / debug
@@ -103,21 +103,21 @@ OAuth tokens are **not env vars**. They live in `~/.codex/auth.json` (or `$CODEX
 
 1. **Env wins once set** — `load_api_keys_into_env(path, allowed_names)` (`api_key_store.py:105`) iterates `load_api_key_file(path)` but skips when `os.environ.get(name)` already truthy. So shell-exported env before `python main.py` beats `secr.json`.
 2. **File-to-env bootstrap** — at startup `bootstrap_startup_api_keys(args, prompt=…)` (`config_cli.py:160`) calls `bootstrap_api_keys(config, store_path, prompt, force_prompt)` which loads `secr.json` into env, optionally prompts for missing keys, saves, and re-checks. `prompt=True` only in `--menu` mode (`main.py` sets `interactive_startup = bool(args.menu)`); `--setup-api-keys` uses `force_prompt=True`.
-3. **Config-to-env mapping** — `configured_api_key_env_names(config)` (`api_key_store.py:33`) collects `ollama.api_key_env`, `research.ollama.api_key_env`, `research.serpapi.api_key_env`, `cve_lookup.api_key_env`, `cve_lookup.github.token_env` deduped. `research_api_key_env_names` (`api_key_store.py:61`) collects only provider-relevant ones (`use_web_search/use_web_fetch` + `provider/fallback_provider`). Missing keys come from `missing_api_key_env_names`.
+3. **Config-to-env mapping** — `configured_api_key_env_names(config)` (`api_key_store.py:33`) collects `ollama.api_key_env`, `research.ollama.api_key_env`, `research.serpapi.api_key_env`, `cve_lookup.api_key_env`, `cve_lookup.github.token_env` deduped. `research_api_key_env_names` (`api_key_store.py:61`) collects keys needed by configured remote search providers; URL fetching uses a local DNS-pinned transport. Missing keys come from `missing_api_key_env_names`.
 
 Interactive prompt is via `questionary` or `getpass.getpass` (`api_key_store.py:243`); entered values saved via `save_api_keys` (atomic `NamedTemporaryFile` + `os.fsync` + `chmod 0o600` + `os.replace`).
 
 ## Provider auth specifics
 
-### Ollama Cloud (default, `config.yaml:3` `ollama.host: https://api.ollama.com`)
+### Ollama Cloud (when Ollama is selected, `ollama.host: https://api.ollama.com`)
 
-`OLLAMA_API_KEY` must be set for any cloud chat/generate call. The `ollama` Python client auto-attaches `Authorization: Bearer $OLLAMA_API_KEY` — app code attaches manually only on raw `urllib` paths (embeddings, doctor, live-models). Missing key surfaces as 401 on first chat (`doctor.py _check_ollama` reports unreachable). Embeddings default to `ollama.embed_host: http://localhost:11434` (`nomic-embed-text` self-hosted) with fallback to `ollama.host`.
+The checked-in config selects OpenCode Go for chat. If `models.provider: ollama` is selected and its host is cloud, `OLLAMA_API_KEY` must be set for chat/generate calls. The `ollama` Python client auto-attaches `Authorization: Bearer $OLLAMA_API_KEY`; the embedding adapter, doctor, and live-model checks attach it on their raw HTTP paths when configured. Missing key surfaces as 401 on first Ollama chat (`doctor.py _check_ollama` reports unreachable). When `embeddings.provider: ollama` is selected, embeddings use `ollama.embed_host: http://localhost:11434` (`nomic-embed-text`) with fallback to `ollama.host`. The checked-in `embeddings.provider: none` disables provider-aware Flow A embedding requests; frozen Flow B's legacy agent loop still uses Ollama semantic memory when enabled.
 
 Override `ollama.host` in `config.yaml` to point at a local daemon — same code path, no probe, no fallback, `OLLAMA_API_KEY` ignored locally.
 
 ### ChatGPT (opt-in, `models.provider: chatgpt`, vendored `oauth/` loopback `127.0.0.1:10531/v1`)
 
-OAuth browser flow — never env. The single seam is `tools/model_router.py::_build_model_client(raw_client=ChatGptProxyClient)`. Embeddings stay on Ollama under either provider. `--doctor` runs `_check_chatgpt` only when `provider: chatgpt` (subchecks: provider, source exists, `bun`/`node` runtime, oauth login existence, proxy `/health`, `/v1/models`).
+OAuth browser flow — never env. The single seam is `tools/model_router.py::_build_model_client(raw_client=ChatGptProxyClient)`. Embeddings have an independent `embeddings.provider` setting; the checked-in config selects `none` for provider-aware Flow A consumers, regardless of chat provider. Frozen Flow B retains its legacy direct Ollama semantic-memory path when enabled. `--doctor` runs `_check_chatgpt` only when `provider: chatgpt` (subchecks: provider, source exists, `bun`/`node` runtime, oauth login existence, proxy `/health`, `/v1/models`).
 
 ### SerpAPI / NVD / GitHub / Shodan / Caldera / Ticketing
 

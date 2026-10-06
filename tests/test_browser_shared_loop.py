@@ -1,10 +1,10 @@
 """Browser shared-loop regression test (no Chromium).
 
-Guards the host-mode fix in ``tools/mcp_tools/browser.py``: Playwright
-connections bind to the loop that created them, so every browser coroutine
-must hop onto ONE private loop. The previous ``asyncio.run(...)``-per-tool
-pattern gave each call a fresh loop and every op after ``browser_start`` died
-with ``'NoneType' object has no attribute 'send'``.
+Guards the browser tool loop lifecycle: Playwright connections bind to the
+loop that created them, so every browser coroutine must hop onto ONE private
+loop. The previous ``asyncio.run(...)``-per-tool pattern gave each call a
+fresh loop and every op after ``browser_start`` died with
+``'NoneType' object has no attribute 'send'``.
 """
 
 from __future__ import annotations

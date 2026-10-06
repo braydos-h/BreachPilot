@@ -25,7 +25,7 @@ vars can override it.
 | Validate | `ConfigValidator.validate` (`tools/config/validator.py`) | Unknown top-level keys → warnings (plugin-registered sections exempt); type/range checks per section; **errors** for hard violations (e.g. `api.host` non-loopback) |
 | Merge defaults | `apply_defaults` (`tools/config/validator.py`) | Deep-merge loaded config over `CONFIG_SCHEMA` defaults |
 | Entry points | `load_validated_config` (`tools/config/loader.py`) raises on errors, logs warnings; `main.py` and `mcp_*_server.py` use the lighter `tools/config_cli.load_config` (raw YAML, no defaults merged) |
-| Live PATCH | `PATCH /config` (tools/api/routes/system.py) | Atomic deep-merge, re-validated through `ConfigValidator`; loopback-only `allowed_origins` enforced |
+| Live PATCH | `PATCH /api/v1/config` (`tools/api/routes/system/config.py`) | Atomic deep-merge, re-validated through `ConfigValidator`; loopback-only `allowed_origins` enforced by `tools/api/routes/system/_shared.py` |
 
 Required sections (warned if absent, defaults apply): `ollama`, `models`,
 `mcp`, `exploit` (`tools/config/validator.py`).
@@ -73,7 +73,7 @@ reachability, model registry, port conflicts) and `python main.py --self-test`
 | `CALDERA_API_KEY` | — | Caldera server API key (env-only, never config) | `caldera.api_key_env` | plugins/caldera/plugin.py:42 |
 | `TICKETING_TOKEN` | — | Jira/GitHub ticketing token (env-only) | `ticketing.token_env` | tools/ticketing.py:33 |
 | `PROXMOX_API_TOKEN` | — | Proxmox snapshot provider token (env-only, never logged) | — (provider `proxmox`) | tools/snapshots.py ProxmoxProvider |
-| `MCP_HTTP_TOKEN` | — | Optional bearer auth for MCP HTTP transport | — | mcp_shared.run_mcp_http_server, mcp_engine_server.py:27 |
+| `MCP_HTTP_TOKEN` | — | Bearer auth for MCP HTTP; required for non-loopback binds | — | mcp_shared.run_mcp_http_server, mcp_engine_server.py:27 |
 | `MCP_ALLOW_PUBLIC_BIND` | — | Second half of the two-person rule for non-loopback MCP binds | — | mcp_shared.run_mcp_http_server |
 | `AI_NMAP_ACTIVE_MODEL_ALIAS` | — | Active model alias threaded into the MCP server subprocess | set by mcp_session.py:270 | tools/mcp_tools/registry.py:201, peer_models.py:80 |
 | `AI_NMAP_DEBUG` | — | Debug logging switch | set by main.py:590 from `--debug` | exploit_agent |
@@ -88,18 +88,18 @@ reachability, model registry, port conflicts) and `python main.py --self-test`
 | `host` | str | `https://api.ollama.com` | Ollama endpoint for chat/generate (cloud default; point at a local daemon to go local). The ollama Python client auto-attaches `Authorization: Bearer $OLLAMA_API_KEY`. | `tools/config/loader.py` `get_ollama_host`, `tools/model_router.py`, `tools/doctor.py` |
 | `model` | str | `glm-5.2:cloud` | Default concrete model id | `tools/config/schema.py`, `tools/interactive_menu.py` (menu default write) |
 | `api_key_env` | str | `OLLAMA_API_KEY` | Env var holding the bearer token | `tools/api_key_store.py` |
-| `embed_host` | str | `http://localhost:11434` | Embedding host (falls back to `host`) — embeddings stay local by default even on the cloud chat path | `tools/exploit_agent/runner/_impl.py` (SemanticMemoryManager wiring), `tools/skill_embeddings.py` |
+| `embed_host` | str | `http://localhost:11434` | Endpoint for the Ollama embedding provider when selected; falls back to `host` if absent. The checked-in `embeddings.provider: none` disables provider-aware Flow A requests, while frozen Flow B's legacy agent loop still uses direct Ollama semantic memory when enabled. | `tools/providers/embeddings.py`, `tools/exploit_agent/runner/_impl.py`, `tools/skill_embeddings.py`, `legacy/agent_loop.py` |
 
 ### `models:` (config.yaml:15-44) — model registry
 
 | Key | Type | Default | Controls | Consumed at |
 |-----|------|---------|----------|-------------|
-| `provider` | enum | `opencode_go` (lab config.yaml) / `ollama` (schema fallback; absent = `ollama`) | Active chat/generate provider; validated against the provider **registry** (built-ins: `ollama`\|`opencode_go`\|`chatgpt`, via `tools.config_manager.resolve_known_provider_ids`) — adding provider #4 extends the whitelist automatically. | `tools/config/loader.py` `get_ai_provider`, `tools/providers/registry.py`, `tools/model_router.py` `build_router`/`build_model_client_for_provider`, run_service/service.py, doctor.py, api/routes/system.py |
+| `provider` | enum | `opencode_go` (lab config.yaml) / `ollama` (schema fallback; absent = `ollama`) | Active chat/generate provider; validated against the provider **registry** (built-ins: `ollama`\|`opencode_go`\|`chatgpt`, via `tools.config_manager.resolve_known_provider_ids`) — adding provider #4 extends the whitelist automatically. | `tools/config/loader.py` `get_ai_provider`, `tools/providers/registry.py`, `tools/model_router.py` `build_router`/`build_model_client_for_provider`, run_service/service.py, doctor.py, `tools/api/routes/system/models.py` |
 | `registry` | map[alias→model id] | kimi/deepseek/deepseek_flash/glm/minimax/glm3 | Alias → concrete model mapping (`glm3` → `glm-5.3-flash`, the fast GLM flash variant, 128K context in `models.info`) | `tools/config/schema.py`, `tools/doctor.py`, `tools/run_service/service.py`, `tools/mcp_tools/registry.py` |
 | `default_alias` | str | `glm` | Active model alias (Ollama path; ChatGPT path uses `chatgpt.default_model`) | `tools/config/schema.py`, `tools/run_service/service.py`, `tools/eval_harness.py`, `legacy/agent_loop.py` |
-| `auto_update` | bool | `true` | Auto-update `registry` against the live Ollama API (`GET /api/tags`): at daemon boot each alias is bumped to the newest same-family version (e.g. `glm-5.2:cloud` → `glm-5.3:cloud`). No pulls (cloud pull = pointer only); `models.info` stays operator-managed. On demand: `POST /api/v1/models/refresh` | `tools/ollama_models.py` (`auto_refresh_on_startup`, `refresh_model_registry`), `main.py` `_auto_update_models`, `api/routes/system.py` `refresh_models` |
+| `auto_update` | bool | `true` | Auto-update `registry` against the live Ollama API (`GET /api/tags`): at daemon boot each alias is bumped to the newest same-family version (e.g. `glm-5.2:cloud` → `glm-5.3:cloud`). No pulls (cloud pull = pointer only); `models.info` stays operator-managed. On demand: `POST /api/v1/models/refresh` | `tools/ollama_models.py` (`auto_refresh_on_startup`, `refresh_model_registry`), `main.py` `_auto_update_models`, `tools/api/routes/system/models.py::refresh_models` |
 | `info.<alias>.context_window` | int | per-model | Source of truth for the adaptive context compactor | model_router.py:202-221, exploit_agent/context.py:63-104 |
-| `info.<alias>.label/description` | str | per-model | Display metadata | model_router.py:130, api routes/system.py:193-194 |
+| `info.<alias>.label/description` | str | per-model | Display metadata | `tools/model_router.py`, `tools/api/routes/system/models.py` |
 
 ### `providers:` (config.yaml) — per-provider chat config (canonical shape)
 
@@ -161,14 +161,17 @@ independent abstraction (`tools/providers/embeddings.py`):
 
 | Key | Type | Default | Controls | Consumed at |
 |-----|------|---------|----------|-------------|
-| `provider` | enum | `ollama` | `ollama` (legacy: local Ollama embeddings) \| `none` (**zero requests — semantic memory falls back to keyword storage, skills to deterministic matching**) | `tools/providers/embeddings.py` `build_embedding_provider` |
+| `provider` | enum | `ollama` | `ollama` (legacy: local Ollama embeddings) \| `none` (provider-aware Flow A consumers make zero requests; semantic memory falls back to keyword storage, skills to deterministic matching) | `tools/providers/embeddings.py` `build_embedding_provider` |
 | `host` | str | `""` | Embedding endpoint; `""` = `ollama.embed_host` → `ollama.host` fallback | `OllamaEmbeddingProvider` |
 | `model` | str | `""` | Embedding model; `""` = `nomic-embed-text` | `OllamaEmbeddingProvider` |
 | `api_key_env` | str | `OLLAMA_API_KEY` | Env var holding the bearer token (sent unconditionally; local daemons ignore it) | `OllamaEmbeddingProvider` |
 | `timeout_seconds` | int | `30` | urlopen timeout | `OllamaEmbeddingProvider` |
 
-With `provider: none` (as checked in) the engine makes ZERO Ollama requests
-from the embeddings path — `embeddings_disabled()` short-circuits consumers.
+With `provider: none` (as checked in), provider-aware Flow A memory and skill
+consumers make zero Ollama embedding requests because
+`embeddings_disabled()` short-circuits them. Frozen Flow B's `legacy/agent_loop.py`
+still constructs its direct Ollama semantic-memory path when enabled; the
+setting does not disable that legacy path.
 
 ### `mcp:` (config.yaml:45-46) — exploit MCP transport
 
@@ -284,7 +287,7 @@ The `opsec` block is the **active** detection-evasion / pacing / UA-rotation / D
 | `min_source_quality` | str | `medium` | `low`\|`medium`\|`high` source ranking | mcp_shared.py:138, web_researcher.py:889 |
 | `require_api_key_for_mcp_tools` | bool | `true` | Gate MCP research tools on provider keys | api_key_store.py:179 |
 | `allow_local_fetch` | bool | `false` | Permit localhost/private fetches | mcp_shared.py:139 |
-| `ollama.api_key_env` / `max_results` / `use_web_search` / `use_web_fetch` | — | `OLLAMA_API_KEY` / `8` / `true` / `true` | Ollama research provider | mcp_shared.py:153-158, web_researcher.py:319-369 |
+| `ollama.api_key_env` / `max_results` / `use_web_search` / `use_web_fetch` | — | `OLLAMA_API_KEY` / `8` / `true` / `true` | Ollama search and local fetch enablement; page fetches use the scope-checked stdlib transport | mcp_shared.py, web_researcher.py |
 | `serpapi.api_key_env` / `endpoint` / `engine` / `region` | — | `SERPAPI_API_KEY` / serpapi.com / `duckduckgo` / `us-en` | SerpAPI provider | mcp_shared.py:159-164 |
 | `assistant.*` | see research_assistant.py:97-140 | enabled, `automatic: true`, `failure_trigger: 2`, budgets | Read-only in-loop research assistant (advisory) | `tools/exploit_agent/research_assistant.py`, `tools/exploit_agent/runner/_impl.py` |
 
@@ -385,7 +388,7 @@ See [docs/benchmarks.md](benchmarks.md). Defaults in `tools/config/schema.py`; v
 | `output_dir` | str | `reports/benchmarks` | Where `reports/benchmarks/<suite>/<run_id>/` trees go | tools/benchmark/runner.py, storage.py |
 | `trials` | int | `3` | Default repeated trials per scenario (1-20; CLI `--trials` overrides) | tools/benchmark_cli.py, service.py |
 | `timeout_seconds` | int | `1800` | Per-trial mission timeout | tools/benchmark/runner.py |
-| `sandbox_required` | bool | `true` | When true, runs without `sandbox.enabled` are `INFRASTRUCTURE_ERROR` (no host-execution fallback) | tools/benchmark/runner.py |
+| `sandbox_required` | bool | `true` | Requires sandbox availability for benchmark execution; `false` does not disable the attack sandbox or permit host execution | tools/benchmark/runner.py |
 | `baseline_path` | str | `reports/benchmarks/baseline.json` | Baseline file written by `--save-baseline` / read by `--check-regression` | tools/benchmark/regression.py |
 | `regression.success_rate_tolerance` | float | `0.02` | Verified-success-rate drop beyond this is a HARD regression (CI exit 1) | tools/benchmark/regression.py |
 | `regression.false_positive_tolerance` | float | `0.01` | False-positive-rate rise beyond this is a HARD regression | tools/benchmark/regression.py |
@@ -698,7 +701,7 @@ reflection by `swarm.reflection_enabled`.
 | `event_buffer_size` | int | `256` | In-memory ring buffer per run for WS subscribers | app.py:81 |
 | `event_durability` | str | `balanced` | Event fsync policy: `strict` (per event), `balanced` (per batch + decisions/terminal transitions), `fast` (checkpoint/close only) | tools/api/event_broker.py |
 | `shutdown_timeout_seconds` | int | `15` | Graceful shutdown wait | tools/api/run_manager.py:320 |
-| `serve_webui` | bool | `false` | Mount `webui/dist/` at `/`; `--web` sets this **in memory only** | app.py:145, main.py:542 |
+| `serve_webui` | bool | `false` | Mount the SPA resolved from checkout `webui/dist/` or the wheel data prefix; `--web` sets this **in memory only** | `app.py`, `tools/paths.py::get_webui_dist_dir` |
 | `max_concurrent_runs` | int | `3` | D3: N concurrent runs (1 = legacy 409) | `tools/api/run_manager.py`, `tools/config/schema.py` |
 | `multi_operator` | bool | `true` | D4: user accounts + annotations (loopback-only) | tools/api/auth.py:60 |
 | `graph_route` | bool | `true` | Attack-path DAG API route | tools/api/routes/graph_explorer.py:30 |
@@ -725,10 +728,10 @@ never an automatic fallback. Full architecture + threat model:
 
 | Key | Type | Default | Controls | Consumed at |
 |-----|------|---------|----------|-------------|
-| `enabled` | bool | `true` | Master switch; `false` = explicit legacy host-execution opt-out (uncontained) | `tools/sandbox/manager.py:resolve_manager` |
+| `enabled` | bool | `true` | Required; explicit `false` is rejected because agent execution requires the sandbox | `tools/sandbox/models.py:SandboxConfig` |
 | `backend` | str | `docker` | Execution backend | `tools/sandbox/models.py` |
 | `image` | str | `breachpilot-sandbox:latest` | Worker image (build: `docker build -t <image> docker/sandbox`) | `tools/sandbox/docker_backend.py` |
-| `fallback_native` | bool | `false` | Boot-time degrade: unusable Docker (CLI missing, daemon down, image not built) degrades the whole session to legacy uncontained native mode with warning + WebUI banner + `SANDBOX_FALLBACK:` lines ONLY when `true` (explicit opt-in); `false` (default, fail-closed) = strict fail-closed (executions denied until Docker works) | `tools/sandbox/manager.py:resolve_manager_with_fallback`, docs/sandbox.md |
+| `fallback_native` | bool | `false` | Deprecated compatibility key; `true` is rejected. Sandbox startup/execution failures always block with `SANDBOX_*` results | `tools/sandbox/models.py:SandboxConfig` |
 | `auto_manage_docker` | bool | `false` | When true, start Docker for a sandbox session if it is stopped, then stop it on exit only when BP started it and no containers remain; Linux requires cached/non-interactive sudo authorization | `tools/sandbox/docker_lifecycle.py` |
 | `docker_start_timeout_seconds` / `docker_stop_timeout_seconds` | int | `60` / `30` | Bounds automatic daemon startup/shutdown polling and service calls | `tools/sandbox/docker_lifecycle.py` |
 | `user` | str | `sandbox` | Container user (non-root default) | `tools/sandbox/docker_backend.py:_build_create_args` |
@@ -739,29 +742,30 @@ never an automatic fallback. Full architecture + threat model:
 | `resources.pids` | int | `512` | Process-count cap (min 32) | `_build_create_args` |
 | `resources.timeout_seconds` | int | `300` | Per-command default timeout | `tools/sandbox/manager.py:execute` |
 | `resources.output_max_bytes` | int | `2000000` | Per-stream output clamp (min 1024) | `tools/sandbox/manager.py:_clamp_output` |
-| `network.enforce` | bool | `true` | Install the netns firewall; `false` = Docker bridge isolation only (NOT containment) | `tools/sandbox/manager.py:_apply_policy` |
-| `network.fail_closed` | bool | `true` | Netns-firewall install failure blocks execution (`SANDBOX_POLICY_FAILED` + audit row) when `true`; `false` degrades to Docker-bridge isolation only (NOT containment) with WARNING + `degraded` audit row. Worker setup failures always fail closed. | `tools/sandbox/manager.py:_apply_policy` |
-| `network.allow_dns` | str | `controlled` | `controlled` (host-side validated resolution) or `none` (port 53 blocked everywhere) | `tools/sandbox/policy.py`, `network.py` |
+| `network.enforce` | bool | `true` | Mandatory destination firewall; explicit `false` is rejected | `tools/sandbox/models.py`, `manager.py` |
+| `network.fail_closed` | bool | `true` | Mandatory; firewall-install failure blocks and is audited, with no degraded-allow mode | `tools/sandbox/models.py`, `manager.py` |
+| `network.allow_dns` | str | `controlled` | `controlled` installs host-resolved allowlisted names in worker `/etc/hosts`; both modes block worker DNS packets | `tools/sandbox/policy.py`, `network.py` |
 | `network.map_host_loopback` | bool | `false` | Dev-only mapping of sandbox loopback targets to the host gateway; never enable for production runs | `tools/sandbox/policy.py` |
 | `network.extra_allow_cidrs` | list[str] | `[]` | Operator-authorized extra CIDRs | `tools/sandbox/policy.py` |
 | `network.allow_gateway` | bool | `false` | Authorize the Docker bridge gateway (path to host services + Docker daemon) — keep false | `tools/sandbox/network.py` |
 | `network.allow_research_hosts` | bool | `false` | Pinned exploit-research egress (github.com et al., host-resolved + audited), opt-in only | `tools/sandbox/policy.py` |
 | `cleanup.remove_on_exit` | bool | `true` | Destroy worker + network after the run | `tools/sandbox/manager.py:destroy` |
 | `cleanup.remove_stale_on_startup` | bool | `true` | Sweep exited labeled containers / empty networks at startup (running concurrent-session workers kept) | `tools/sandbox/manager.py:cleanup_stale` |
-| `multi_net_raw` | bool | `true` | Grant NET_RAW for raw-packet scanning (nmap -sS); NET_ADMIN is never granted to the worker | `tools/sandbox/manager.py:resolve_manager` |
+| `multi_net_raw` | bool | `false` | `true` is rejected because AF_PACKET sockets can bypass the IP firewall | `tools/sandbox/models.py`, `docker_backend.py` |
 
 ### `browser:` (top-level) — browser-native web agent (Playwright, default OFF)
 
 Sandboxed Chromium agent behind the prepared seam. `tools/browser/` holds the
 `BrowserBackend` ABC, the Playwright adapter (`playwright_backend.py`), the
 sandbox launcher (one Chromium op per docker exec, no host fallback), and the
-fail-closed `BrowserManager`. Capabilities report available only when enabled +
-registered + runnable (host SDK or sandbox worker). Full design:
+fail-closed `BrowserManager`. Capabilities report available only when enabled,
+registered, and runnable in the configured sandbox worker. Host SDK or Chromium
+installation does not enable execution. Full design:
 [docs/browser-agent-design.md](browser-agent-design.md).
 
 | Key | Type | Default | Controls |
 |-----|------|---------|----------|
-| `enabled` | bool | `false` | Master switch; stock installs never enable |
+| `enabled` | bool | `false` | Master switch; stock installs never enable; execution also requires the configured browser worker |
 | `backend` | str | `none` | `none` or `playwright` (requires a `BACKEND_REGISTRY` entry — declared ≠ available) |
 | `headless` | bool | `true` | Sessions run headless (headed refused in the sandbox worker) |
 | `max_sessions` | int | `2` | Concurrent session cap (manager-enforced) |
@@ -778,7 +782,7 @@ registered + runnable (host SDK or sandbox worker). Full design:
 | `dom_summary_max_chars` | int | `8000` | DOM text summary cap (huge pages truncate) |
 | `artifact_dir` | str | `""` | Screenshot dir override (`""` = `<workspace>/browser/<session>/`) |
 | `executable_path` | str | `""` | Explicit Chromium binary (`""` = Playwright default) |
-| `worker_image` | str | `""` | Browser worker image override (`""` = `breachpilot-sandbox:browser`) |
+| `worker_image` | str | `""` | Browser worker image override (`""` = `breachpilot-sandbox:browser`); must match `sandbox.image` because the MCP session shares one worker image |
 
 
 ## Other consumed keys
@@ -821,5 +825,5 @@ Explicit CLI flags win over config values; config wins over schema defaults:
 | `skills.*` | `--skills on\|off\|hints\|lookup`, `--skills-include`, `--skills-exclude`, `--no-skills-reselect` (tools/skills_cli.py) |
 | `api.host` / `api.port` | `--api-host` / `--api-port` |
 | `mcp.default_transport` | `--mcp-transport` (ignored on the run path — always `http`) |
-| `api.serve_webui` | `--web` (in-memory only, never persisted) |
+| `api.serve_webui` | `--web` (in-memory only, never persisted; packaged and checkout SPAs are resolved by `tools.paths.get_webui_dist_dir`) |
 | `reasoning.ultrathink` | `--ultrathink` |

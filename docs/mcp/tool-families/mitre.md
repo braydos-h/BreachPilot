@@ -13,7 +13,7 @@ subsystem: mcp
 # Tool Family: mitre
 
 - **Registration source:** `tools/mcp_tools/mitre.py:17 register_mitre_tools(mcp, *, ctx)` — auto-discovered, always registered.
-- **Gate:** `@audit_tool` — local-only (reads `exploit_workspace/exploit_audit.jsonl` filtered by `target_ip`, writes a JSON layer file); no target touch, no network.
+- **Gate:** `@audit_tool` — local-only (reads this run's host-owned audit file, filtered by `target_ip`, writes a JSON layer file); no target touch, no network.
 - **Purpose:** Map an authorized-testing run's audit trail to MITRE ATT&CK techniques and write a Navigator layer JSON for blue-team handoff.
 
 ## Tools Exported (1)

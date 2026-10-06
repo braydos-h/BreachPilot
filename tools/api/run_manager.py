@@ -40,7 +40,7 @@ import json
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Callable
 
 from tools.api.decision_broker import DecisionBroker
 from tools.api.errors import APIError
@@ -96,6 +96,7 @@ class RunHandle:
         self.cancellation = CancellationToken()
         self.decision_broker: DecisionBroker | None = None
         self.event_broker: RunEventBroker | None = None
+        self.event_release: Callable[[], None] | None = None
         self.mcp_session: Any = None
         self.exploit_policy: Any = None
         self.tool_schemas: list[dict[str, Any]] = []
@@ -136,8 +137,14 @@ class RunHandle:
     def close_broker(self) -> None:
         """Close the event broker if attached (idempotent, never raises)."""
         broker = self.event_broker
-        if broker is not None:
-            broker.close()
+        try:
+            if broker is not None:
+                broker.close()
+        finally:
+            release = self.event_release
+            self.event_release = None
+            if release is not None:
+                release()
 
 
 def _snapshot_allowlist(
@@ -288,7 +295,7 @@ class RunManager:
 
             request.config_path = self._config_path
             request.reports_dir = self._persistence.reports_dir
-            run_id = self._allocate_run_id()
+            run_id = await self._allocate_run_id()
 
             # Persist the run row up-front so the id exists (and events/WS
             # routes can find it) before preparation finishes.
@@ -301,7 +308,7 @@ class RunManager:
             )
 
             # Create event broker for this run.
-            event_broker = self._events.get_or_create(run_id)
+            event_broker = self._events.acquire(run_id)
             handle = RunHandle(run_id)
             handle.request = request
             # Freeze the config for this run now so execution sees the same
@@ -309,23 +316,46 @@ class RunManager:
             handle.config_snapshot = copy.deepcopy(self._config)
             # Per-run allowlist snapshot is filled in when prepare() returns.
             handle.event_broker = event_broker
+            handle.event_release = lambda: self._events.release(run_id)
             handle.decision_broker = DecisionBroker(run_id, self._persistence, actor=self._db)
             self._active[run_id] = handle
 
-            await event_broker.emit("state", {"state": RunState.PREPARING.value})
-            await event_broker.emit(
-                "preparing",
-                {"stage": "accepted", "message": "Run accepted — preparing"},
-            )
-            handle.prep_task = asyncio.create_task(self._prepare_run(handle, request))
+            try:
+                await event_broker.emit("state", {"state": RunState.PREPARING.value})
+                await event_broker.emit(
+                    "preparing",
+                    {"stage": "accepted", "message": "Run accepted — preparing"},
+                )
+                handle.prep_task = asyncio.create_task(self._prepare_run(handle, request))
+            except BaseException as exc:
+                # The row, owner pin, and active slot are created before the
+                # first durable event. Roll all three back together if setup
+                # fails, including cancellation and ExceptionGroup paths.
+                self._active.pop(run_id, None)
+                if handle.decision_broker is not None:
+                    handle.decision_broker.cancel_all()
+                handle.close_broker()
+                try:
+                    await self._db.arun(
+                        self._persistence.update_run_state,
+                        run_id,
+                        RunState.FAILED.value,
+                        error="Run setup failed before preparation started.",
+                    )
+                except BaseException as state_error:
+                    if _is_exception_group(state_error):
+                        _log_nested_exceptions(state_error)
+                if _is_exception_group(exc):
+                    _log_nested_exceptions(exc)
+                raise
             return run_id, None, None
 
-    def _allocate_run_id(self) -> str:
+    async def _allocate_run_id(self) -> str:
         """Timestamp-based run id, uniquified against active + persisted ids."""
         base = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S_%f")
         run_id = base
         counter = 0
-        while run_id in self._active or self._persistence.get_run(run_id) is not None:
+        while run_id in self._active or await self._db.arun(self._persistence.get_run, run_id) is not None:
             counter += 1
             run_id = f"{base}_{counter}"
         return run_id
@@ -377,27 +407,30 @@ class RunManager:
             # removed while preparing.
             if self._active.get(handle.run_id) is not handle:
                 return
-            current = await self._db.arun(self._persistence.get_run, handle.run_id) or {}
-            if current.get("state") == RunState.CANCELLED.value:
-                self._active.pop(handle.run_id, None)
-                return
-
-            handle.preview = preview
-            # Preparation already resolved the target with a bounded DNS
-            # timeout. Reuse that identity: resolving again here would block
-            # the event loop under the lifecycle lock and could change the IP
-            # the operator is about to confirm.
-            handle.resolved_ip = preview.resolved_ip or preview.target_ip
-            # Per-run allowlist snapshot — Run A's target never appears in
-            # Run B's allowlist even when N runs are live concurrently.
-            handle.allowlist = _snapshot_allowlist(
-                handle.config_snapshot,
-                preview.original_target or preview.target_ip,
-                resolved_ip=handle.resolved_ip,
-            )
-            # Persist the prepared preview (target/mode/goal/model/...).
-            await self._db.arun(self._persistence.update_run_preview, handle.run_id, _preview_to_dict(preview))
             try:
+                current = await self._db.arun(self._persistence.get_run, handle.run_id) or {}
+                if current.get("state") == RunState.CANCELLED.value:
+                    self._active.pop(handle.run_id, None)
+                    handle.close_broker()
+                    return
+
+                handle.preview = preview
+                # Preparation already resolved the target with a bounded DNS
+                # timeout. Reuse that identity: resolving again here would block
+                # the event loop under the lifecycle lock and could change the IP
+                # the operator is about to confirm.
+                handle.resolved_ip = preview.resolved_ip or preview.target_ip
+                # Per-run allowlist snapshot — Run A's target never appears in
+                # Run B's allowlist even when N runs are live concurrently.
+                handle.allowlist = _snapshot_allowlist(
+                    handle.config_snapshot,
+                    preview.original_target or preview.target_ip,
+                    resolved_ip=handle.resolved_ip,
+                )
+                # Persist the prepared preview (target/mode/goal/model/...).
+                # Keep this inside the finalization guard: a DB failure here
+                # must release the active slot and mark the run failed.
+                await self._db.arun(self._persistence.update_run_preview, handle.run_id, _preview_to_dict(preview))
                 await handle.emit(
                     "preparing",
                     {"stage": "done", "message": "Run prepared", "timings": dict(preview.timings or {})},
@@ -431,18 +464,27 @@ class RunManager:
                     await self._db.arun(self._persistence.update_run_state, handle.run_id, RunState.QUEUED.value)
                     await handle.emit("state", {"state": RunState.QUEUED.value})
                     handle.task = asyncio.create_task(self._execute_run(handle))
-            except BaseException:
+            except BaseException as exc:
                 if handle.decision_broker is not None:
                     handle.decision_broker.cancel_all()
-                handle.close_broker()
                 self._active.pop(handle.run_id, None)
+                error_text = _preparation_error_text(exc)
+                if _is_exception_group(exc):
+                    _log_nested_exceptions(exc)
+                else:
+                    log.exception("run %s preparation finalization failed", handle.run_id)
+                try:
+                    await handle.emit("error", {"message": error_text})
+                    await handle.emit("state", {"state": RunState.FAILED.value, "error": error_text})
+                except Exception:  # noqa: BLE001 -- preserve cleanup if event storage failed
+                    pass
+                handle.close_broker()
                 await self._db.arun(
                     self._persistence.update_run_state,
                     handle.run_id,
                     RunState.FAILED.value,
-                    error="Run setup failed.",
+                    error=error_text,
                 )
-                raise
 
     async def _fail_preparation(self, handle: RunHandle, exc: BaseException) -> None:
         """Mark a failed preparation: failed state + actionable error + cleanup."""
@@ -475,8 +517,12 @@ class RunManager:
                 # Either finished+removed (completed/failed) or never existed.
                 raise APIError("not_found", "No active run with that id.", status_code=404)
             if handle.prep_task is None or handle.prep_task.done():
-                if handle.prep_task is not None and handle.prep_task.cancelled():
-                    raise asyncio.CancelledError
+                if handle.prep_task is not None:
+                    if handle.prep_task.cancelled():
+                        raise asyncio.CancelledError
+                    error = handle.prep_task.exception()
+                    if error is not None:
+                        raise error
                 return handle
             if asyncio.get_running_loop().time() >= deadline:
                 raise TimeoutError(f"run {run_id} still preparing after {timeout}s")
@@ -572,7 +618,16 @@ class RunManager:
             await self._maybe_title_run(handle, result_dict)
         except asyncio.CancelledError:
             await self._db.arun(self._persistence.update_run_state, handle.run_id, RunState.CANCELLED.value)
-            await handle.emit("state", {"state": RunState.CANCELLED.value})
+            try:
+                await handle.emit("state", {"state": RunState.CANCELLED.value})
+            except RuntimeError as exc:
+                if str(exc) != "Event broker is closed.":
+                    raise
+                # Shutdown may close the broker while this task is unwinding
+                # after cancellation. The persisted state is authoritative;
+                # a missing final event must not turn cancellation into an
+                # unhandled task failure.
+                log.debug("run %s broker closed before cancellation event", handle.run_id)
             raise
         except _EXC_GROUP_CATCH as exc:
             # Catch BaseExceptionGroup too (MCP subprocess death raises it,
@@ -764,6 +819,27 @@ class RunManager:
         if await self._db.arun(self._persistence.get_run, run_id) is None:
             raise APIError("not_found", "Run not found.", status_code=404)
         return await self._db.arun(self._persistence.list_decisions, run_id)
+
+    async def get_decision(self, run_id: str, decision_id: str) -> dict[str, Any] | None:
+        """Return a decision only when it belongs to ``run_id``."""
+        decision = await self._db.arun(self._persistence.get_decision, decision_id)
+        if decision is None or decision.get("run_id") != run_id:
+            return None
+        return decision
+
+    async def emit_run_event(self, run_id: str, event_type: str, payload: dict[str, Any]) -> None:
+        """Publish a run event, reopening its broker for post-run annotations.
+
+        Human review can happen after execution has closed the active broker.
+        Reopening the registry-owned broker lets clients observe that update
+        while keeping event-broker ownership behind the manager boundary.
+        """
+        broker = self._events.get_or_create(run_id)
+        try:
+            await broker.emit(event_type, payload)
+        except RuntimeError:
+            broker.reopen()
+            await broker.emit(event_type, payload)
 
     async def call_tool(self, run_id: str, tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         """Policy-gated REST bridge for manual WebUI tool calls."""

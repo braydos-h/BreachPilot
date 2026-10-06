@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Check, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
 /** Live startup state for run creation. `phase: "sending"` = POST in flight;
@@ -45,7 +46,17 @@ function stepState(index: number, activeIndex: number | null, done: boolean): "d
  *  prepared. Real backend stage events drive the steps when available; the
  *  elapsed-time hint degrades gracefully (2s/10s) instead of leaving one
  *  unchanged spinner. No fake percentages. */
-export function RunStartupProgress({ startup }: { startup: RunStartupState }) {
+export function RunStartupProgress({
+  startup,
+  statusError = false,
+  statusRetrying = false,
+  onRetryStatus,
+}: {
+  startup: RunStartupState;
+  statusError?: boolean;
+  statusRetrying?: boolean;
+  onRetryStatus?: () => void;
+}) {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 500);
@@ -146,6 +157,16 @@ export function RunStartupProgress({ startup }: { startup: RunStartupState }) {
           ))}
         </ol>
         <p className="text-xs text-muted-foreground">{slowHint}</p>
+        {statusError && (
+          <div role="alert" className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm">
+            <span>Run status could not be refreshed. The progress above may be stale; the run may still be preparing.</span>
+            {onRetryStatus && (
+              <Button type="button" size="sm" variant="outline" onClick={onRetryStatus} disabled={statusRetrying}>
+                {statusRetrying ? "Checking…" : "Retry status check"}
+              </Button>
+            )}
+          </div>
+        )}
       </CardContent>
     </Card>
   );

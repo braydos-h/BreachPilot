@@ -24,7 +24,7 @@ def register_mitre_tools(mcp: Any, *, ctx: ToolContext) -> None:
         """Map this run's audit trail to MITRE ATT&CK techniques and write a
         Navigator layer JSON. Returns the layer path + technique summary.
 
-        Reads exploit_workspace/exploit_audit.jsonl (filtered by target_ip),
+        Reads this run's operator-owned exploit audit JSONL (filtered by target_ip),
         maps each tool_name to an ATT&CK technique ID, and writes a Navigator
         4.5 layer JSON the blue team opens in ATT&CK Navigator. Local-only: no
         target touch, no network. Optional output_path is coerced under
@@ -38,6 +38,7 @@ def register_mitre_tools(mcp: Any, *, ctx: ToolContext) -> None:
             technique_map_path=mitre_cfg.get("technique_map", "tools/mitre_technique_map.json"),
             navigator_output_dir=mitre_cfg.get("navigator_output_dir", "reports/mitre"),
             include_skills=bool(mitre_cfg.get("include_skill_tags", True)),
+            audit_path=ctx.audit_path or "",
         )
         if "error" in result:
             return f"BLOCKED: {result['error']}"

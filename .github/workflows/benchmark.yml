@@ -5,6 +5,8 @@
 name: benchmark
 
 on:
+  schedule:
+    - cron: "17 3 * * *"
   push:
     branches: [main]
     paths:
@@ -43,12 +45,18 @@ jobs:
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: |
+            pyproject.toml
+            requirements.txt
+            constraints-dev.txt
       - name: Install dependencies
-        run: python -m pip install -r requirements.txt
+        run: python -m pip install -c constraints-dev.txt -r requirements.txt
       - name: Run benchmark + sandbox hardening tests (mocked)
         run: |
           python -m pytest tests/test_benchmark_metrics.py tests/test_benchmark_storage.py \
-            tests/test_benchmark_runner.py tests/test_benchmark_xben.py tests/test_benchmark_cli.py \
+            tests/test_benchmark_runner.py tests/test_benchmark_replay.py \
+            tests/test_benchmark_workflow_contract.py tests/test_benchmark_xben.py tests/test_benchmark_cli.py \
             tests/test_benchmark_api.py tests/test_sandbox_hardening.py tests/test_sandbox_family_audit.py -v
 
   benchmark-smoke:
@@ -60,8 +68,13 @@ jobs:
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            pyproject.toml
+            requirements.txt
+            constraints-dev.txt
       - name: Install dependencies
-        run: python -m pip install -r requirements.txt
+        run: python -m pip install -c constraints-dev.txt -r requirements.txt
       - name: CLI smoke — seed the deterministic fake suite and run it
         run: |
           python - <<'PY'
@@ -90,8 +103,8 @@ jobs:
 
           tmp = Path(tempfile.mkdtemp())
           config = {
-              "benchmark": {"output_dir": str(tmp / "bench"), "sandbox_required": False},
-              "sandbox": {"enabled": False},
+              "benchmark": {"output_dir": str(tmp / "bench"), "sandbox_required": True},
+              "sandbox": {"enabled": True, "network": {"map_host_loopback": True}},
               "models": {"default_alias": "smoke-model"},
               "mcp": {"http_port": 8001},
           }
@@ -104,6 +117,17 @@ jobs:
                       total_actions=2,
                       duration_seconds=1.0,
                       telemetry=TrialTelemetry(model_calls=3, tool_calls=2, total_tokens=100),
+                      final_result={
+                          "records": [
+                              {
+                                  "action": "run_exploit_terminal",
+                                  "target_ip": "127.0.0.1",
+                                  "status": "completed",
+                                  "exploit_outcome": "compromise",
+                                  "outcome_evidence": ["shell:uid-zero"],
+                              }
+                          ]
+                      },
                   )
 
           def fake_verifier(scenario):
@@ -120,7 +144,7 @@ jobs:
           runner_mod.MissionRunner = lambda *a, **kw: FakeMissionRunner()
 
           payload = asyncio.run(
-              runner.run(RunConfig(suite="fake", scenario_ids=["smoke-001"], trials=2, sandbox_required=False))
+              runner.run(RunConfig(suite="fake", scenario_ids=["smoke-001"], trials=2, sandbox_required=True))
           )
           assert payload["status"] == "completed", payload
           assert payload["summary"]["solved"] == 2, payload["summary"]
@@ -129,30 +153,66 @@ jobs:
           run_dir = Path(payload["run_dir"])
           for name in ("run.json", "summary.json", "events.jsonl", "report.md", "report.html"):
               assert (run_dir / name).exists(), name
-          assert "--benchmark fake" in payload["trials"][0].get("run_id", "") or True
           print("benchmark smoke OK:", payload["run_id"])
           PY
 
   nightly-live-benchmark:
     name: Nightly live benchmark (manual/scheduled, needs secrets)
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
     timeout-minutes: 120
+    env:
+      EXPLOIT_ALLOWED_TARGETS: 127.0.0.1
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            pyproject.toml
+            requirements.txt
+            constraints-dev.txt
       - name: Install dependencies
-        run: python -m pip install -r requirements.txt
+        run: python -m pip install -c constraints-dev.txt -r requirements.txt
+      - name: Check OpenCode Go provider key
+        id: provider-key
+        env:
+          OPENCODE_GO_API_KEY: ${{ secrets.OPENCODE_GO_API_KEY }}
+        run: |
+          if [[ -z "${OPENCODE_GO_API_KEY:-}" ]]; then
+            echo "available=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Write SKIPPED report when provider key is missing
+        if: steps.provider-key.outputs.available == 'false'
+        env:
+          OPENCODE_GO_API_KEY: ${{ secrets.OPENCODE_GO_API_KEY }}
+        run: |
+          run_dir="$(python -m tools.benchmark.skip \
+            --config config.yaml --suite xben --trials 5 \
+            --reason 'OPENCODE_GO_API_KEY is not configured; live benchmark was not run.')"
+          {
+            echo "## Nightly XBEN benchmark — SKIPPED"
+            echo ""
+            echo "Reason: required provider credential OPENCODE_GO_API_KEY is not configured."
+            echo "No model requests or benchmark trials ran, and no Docker target containers were started."
+            echo "Run artifact: `$run_dir`"
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Prepare contained local-lab config
+        if: steps.provider-key.outputs.available == 'true'
+        run: python scripts/prepare_ci_lab_config.py --output reports/ci-local-lab.yaml
       - name: Start eval target suite (loopback only)
+        if: steps.provider-key.outputs.available == 'true'
         run: docker compose -f eval_targets/docker-compose.yml up -d
       - name: Run benchmark suite
+        if: steps.provider-key.outputs.available == 'true'
         env:
-          OLLAMA_API_KEY: ${{ secrets.OLLAMA_API_KEY }}
-        run: python main.py --benchmark xben --save-baseline
+          OPENCODE_GO_API_KEY: ${{ secrets.OPENCODE_GO_API_KEY }}
+        run: python main.py --config reports/ci-local-lab.yaml --benchmark xben --trials 5 --save-baseline
       - name: Stop target suite
-        if: always()
+        if: always() && steps.provider-key.outputs.available == 'true'
         run: docker compose -f eval_targets/docker-compose.yml down
       - name: Upload benchmark reports
         if: always()
@@ -160,3 +220,5 @@ jobs:
         with:
           name: benchmark-reports
           path: reports/benchmarks/
+          if-no-files-found: warn
+          retention-days: 14

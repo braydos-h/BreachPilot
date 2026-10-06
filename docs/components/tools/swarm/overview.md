@@ -118,7 +118,7 @@ Phase map `_DEFAULT_AGENT_MAP` (`orchestrator.py:28`): `recon→ReconAgent, anal
 | `tests/test_swarm_mcp_bridge.py` | yes | `SwarmMcpBridge` dispatch/attach |
 | `tests/test_swarm_observability.py` | yes | Events + `swarm_state.json` + provider |
 | `tests/test_swarm_history_bound.py` | yes | `_trim_history` 500 cap |
-| `tests/test_swarm_recon_fix.py` | yes | ReconAgent via `ReconPipeline` |
+| `tests/test_swarm_recon_fix.py` | yes | ReconAgent sandbox adapter routing and fail-closed behavior |
 | `tests/test_blackboard_concurrency.py` | yes | `extend_list` atomicity |
 | `tests/test_swarm_negotiation.py` | yes | Negotiation deadlock + scope reject |
 | `tests/test_witness_agent.py` | yes | Witness scan (not orchestrator) |

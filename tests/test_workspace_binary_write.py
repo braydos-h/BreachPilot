@@ -1,4 +1,4 @@
-"""Regression tests for write_python_file's binary=True mode (Gap 1).
+"""Regression tests for contained write_python_file behavior.
 
 The prompt (``tools/exploit_agent/prompt.py`` FILE & KEY HANDLING) tells the agent
 that ``write_python_file`` writes bytes verbatim for SSH-key materialization.
@@ -12,10 +12,66 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import json
 from pathlib import Path
 from typing import Any
 
 import pytest
+
+
+def test_workspace_writer_creates_missing_root(tmp_path: Path) -> None:
+    from tools.kernel.workspace import write_workspace_file
+
+    root = tmp_path / "new-workspace"
+
+    written = write_workspace_file(root, "payload.bin", b"safe")
+
+    assert written.read_bytes() == b"safe"
+    assert written.parent == root
+
+
+def test_workspace_writer_refuses_symlink_root(tmp_path: Path) -> None:
+    from tools.kernel.workspace import write_workspace_file
+
+    workspace = tmp_path / "workspace"
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    workspace.symlink_to(outside, target_is_directory=True)
+
+    with pytest.raises(OSError):
+        write_workspace_file(workspace, "payload.bin", b"must not escape")
+    assert not (outside / "payload.bin").exists()
+
+
+def test_workspace_writer_refuses_symlink_parent(tmp_path: Path) -> None:
+    """A worker-created directory symlink cannot redirect a later host write."""
+    from tools.kernel.workspace import write_workspace_file
+
+    root = tmp_path / "workspace"
+    outside = tmp_path / "outside"
+    root.mkdir()
+    outside.mkdir()
+    (root / "attempt").symlink_to(outside, target_is_directory=True)
+    with pytest.raises(OSError):
+        write_workspace_file(root, "attempt/payload.bin", b"not written")
+    assert not (outside / "payload.bin").exists()
+
+
+def test_workspace_writer_refuses_symlink_leaf(tmp_path: Path) -> None:
+    """An existing worker-controlled leaf cannot redirect host-side writes."""
+    from tools.kernel.workspace import write_workspace_file
+
+    root = tmp_path / "workspace"
+    attempt = root / "attempt"
+    outside = tmp_path / "operator-data.txt"
+    attempt.mkdir(parents=True)
+    outside.write_text("keep", encoding="utf-8")
+    (attempt / "terminal.log").symlink_to(outside)
+
+    with pytest.raises(OSError):
+        write_workspace_file(root, "attempt/terminal.log", b"overwrite")
+    assert outside.read_text(encoding="utf-8") == "keep"
+
 
 # ── Harness (mirrors tests/test_mcp_injection_hardening.py) ─────────────────
 
@@ -111,8 +167,8 @@ async def test_write_python_file_binary_rejects_invalid_base64(tmp_path: Path) -
 
 
 @pytest.mark.asyncio
-async def test_write_python_file_binary_absolute_path(tmp_path: Path) -> None:
-    """binary=True honors an absolute path (LAB build: unrestricted)."""
+async def test_write_python_file_binary_absolute_path_is_refused(tmp_path: Path) -> None:
+    """Agent-provided paths cannot write outside the run workspace."""
     mcp = _make_server(tmp_path)
     target = tmp_path / "nested" / "key.pem"
     raw = b"\x00\x01\x02PEM\x80\x81"
@@ -122,5 +178,29 @@ async def test_write_python_file_binary_absolute_path(tmp_path: Path) -> None:
             {"filename": str(target), "code": base64.b64encode(raw).decode(), "binary": True},
         )
     )
-    assert "MODE: binary" in text
-    assert target.read_bytes() == raw
+    assert text.startswith("BLOCKED:")
+    assert not target.exists()
+
+
+@pytest.mark.asyncio
+async def test_write_python_file_audit_redacts_base64_key_material(tmp_path: Path) -> None:
+    """Audit captures a digest and size without persisting source or key bytes."""
+    mcp = _make_server(tmp_path)
+    raw = b"-----BEGIN OPENSSH PRIVATE KEY-----\nsecret-key-material\n-----END-----\n"
+    payload_b64 = base64.b64encode(raw).decode("ascii")
+    result = _text(
+        await mcp.call_tool(
+            "write_python_file",
+            {"filename": "id_ed25519", "code": payload_b64, "binary": True},
+        )
+    )
+    assert "PYTHON_FILE_WRITTEN" in result
+    audit = (tmp_path / "exploit_audit.jsonl").read_text(encoding="utf-8")
+    assert payload_b64 not in audit
+    assert raw.decode("ascii") not in audit
+    record = next(json.loads(line) for line in audit.splitlines() if '"tool_name": "write_python_file"' in line)
+    assert record["args"]["code"] == {
+        "redacted": True,
+        "chars": len(payload_b64),
+        "sha256": hashlib.sha256(payload_b64.encode("utf-8")).hexdigest(),
+    }

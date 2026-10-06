@@ -83,6 +83,17 @@ def _capture_run():
     return _run, captured
 
 
+@pytest.fixture(autouse=True)
+def _sandbox_tools_through_fake_worker(monkeypatch):
+    """Route tool contracts through a deterministic fake worker result."""
+    from tests.helpers.fake_sandbox import install_fake_sandbox_tool_runner
+
+    install_fake_sandbox_tool_runner(
+        monkeypatch,
+        ("tools.mcp_tools.ad",),
+    )
+
+
 # ── config-off gate ──────────────────────────────────────────────────────────
 
 
@@ -193,8 +204,8 @@ async def test_pass_the_hash_wmiexec_fallback_argv(monkeypatch, tmp_path: Path) 
 
 
 @pytest.mark.asyncio
-async def test_pass_the_hash_nxc_argv(monkeypatch, tmp_path: Path) -> None:
-    """nxc on PATH -> NetExec argv with -H <nt> -x <cmd>."""
+async def test_pass_the_hash_uses_worker_tool_independent_of_host_path(monkeypatch, tmp_path: Path) -> None:
+    """Host executable discovery cannot select a command outside the worker."""
     run, cap = _capture_run()
     monkeypatch.setattr(subprocess, "run", run)
     monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/nxc" if name == "nxc" else None)
@@ -212,10 +223,9 @@ async def test_pass_the_hash_nxc_argv(monkeypatch, tmp_path: Path) -> None:
     )
     assert "PASS_THE_HASH_RESULT: completed" in text
     argv = cap["argv"]
-    assert argv[0] == "/usr/bin/nxc"
-    assert "smb" in argv and "10.0.0.1" in argv
-    assert "-H" in argv and "31d6cfe0d16ae931b73c59d7e0c089c0" in argv
-    assert "-x" in argv and "whoami" in argv
+    assert argv[0] == "impacket-wmiexec"
+    assert "-hashes" in argv and ":31d6cfe0d16ae931b73c59d7e0c089c0" in argv
+    assert "admin@10.0.0.1" in argv and "whoami" in argv
 
 
 # ── smb_signing_check (detection-only, default ON) ──────────────────────────

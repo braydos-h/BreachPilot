@@ -16,7 +16,7 @@ tool call → require_allowlist(target_param, audit, host_param)   # audit.py:36
               → _allowed_target_list(config)                     # allowlist.py:79
                   = exploit.allowed_targets ∪ EXPLOIT_* env
               → pre-log started|blocked → run-or-BLOCKED → terminal|failed row
-              → exploit_audit.jsonl (redacted via _redact_args)
+              → run-owned audit path (MCP-server-selected; RunService stores it outside the worker bind)
 ```
 
 Both decorators wrap sync and async functions via `inspect.signature` + `functools.wraps`, preserve the original signature (`__signature__`), and tag the wrapper (`__wrapped_require_allowlist__`, `__wrapped_audit_tool__`).
@@ -24,7 +24,9 @@ Both decorators wrap sync and async functions via `inspect.signature` + `functoo
 ## `make_require_allowlist` mechanics (`audit.py:369`)
 
 ```python
-def make_require_allowlist(workspace: Path, config: dict[str, Any] | None):
+def make_require_allowlist(
+    workspace: Path, config: dict[str, Any] | None, *, audit_path: Path | None = None
+):
     def require_allowlist(target_param: str = "target_ip", *, audit: bool = True, host_param: str | None = None):
         def decorator(fn): ...
         return decorator
@@ -36,7 +38,7 @@ Lifecycle per call (async and sync wrappers are identical apart from `await`):
 1. `bound = sig.bind(*args, **kwargs); bound.apply_defaults()`.
 2. `target_ip = bound.arguments.get(target_param, "")` → `_check_allowlist(target_ip, config)` → `(allowed, reason)`.
 3. On deny with `host_param` set, `_pair_fallback` gets a second chance: the pair is accepted iff the hostname in `host_param` is itself allowlisted AND the provenance store ties the IP to that hostname (`tools.kernel.discovered.is_pair_authorized`). Success reason is `target in allowlist via <host> (<source>)`.
-4. Pre-log (when `audit=True`) to `<workspace>/exploit_audit.jsonl`: `approved=allowed`, `status="blocked"|"started"`, `args=_redact_args(...)`, `attempt_id` from the bound `attempt_id` arg, `extra=allowlist_env_audit_extra(config) or None` (names env widening on the row).
+4. Pre-log (when `audit=True`) to the selected audit file: `approved=allowed`, `status="blocked"|"started"`, `args=_redact_args(...)`, `attempt_id` from the bound `attempt_id` arg, `extra=allowlist_env_audit_extra(config) or None` (names env widening on the row). RunService passes a host-owned path outside the worker bind; compatibility callers may omit it.
 5. On deny, return without running `fn`:
    `BLOCKED: <reason>\nATTEMPT_ID: preflight\nTOOL: <fn>\nTARGET: <target_ip>`.
 6. On allow, run `fn` timed with `time.monotonic()`; exceptions (including `BaseException`, so anyio `BaseExceptionGroup`/cancellation still records) write a `failed` row via `_log_failure` and re-raise; returned results write `completed`/`blocked` via `_log_terminal` (`blocked` iff `_result_is_blocked(result)`).
@@ -44,7 +46,7 @@ Lifecycle per call (async and sync wrappers are identical apart from `await`):
 ## `make_audit_tool` mechanics (`audit.py:542`)
 
 ```python
-def make_audit_tool(workspace: Path):
+def make_audit_tool(workspace: Path, *, audit_path: Path | None = None):
     def audit_tool(fn): ...
     return audit_tool
 ```
@@ -120,7 +122,7 @@ AuditStatus = Literal["started", "completed", "blocked", "failed"]
 _BLOCKED_RESULT_MARKERS = ("BLOCKED:", "TERMINAL_RESULT: BLOCKED", "ROOT_CMD_RESULT: BLOCKED", "ERROR:")
 ```
 
-- File: `<workspace>/exploit_audit.jsonl`, one JSON object per line: `{timestamp, target_ip, tool_name, approved, status, command (masked), args (redacted), attempt_id, code_sha256, duration_seconds}` plus non-`None` `extra` keys merged in. Parent dir creation is cached in `_MKDIR_CACHE`.
+- File: selected audit path, one JSON object per line: `{timestamp, target_ip, tool_name, approved, status, command (masked), args (redacted), attempt_id, code_sha256, duration_seconds}` plus non-`None` `extra` keys merged in. Parent dir creation is cached in `_MKDIR_CACHE`.
 - `started` (pre-log, `approved=True|False`) → exactly one terminal sibling guaranteed: `completed` (`_result_is_blocked` false), `blocked` (result text starts with a blocked marker), or `failed` (escaping exception incl. `BaseExceptionGroup`/cancellation, with `extra={"error_class", "error_summary"}` sanitized and capped at 500 chars via `_failure_extra`). Failure-path writes go through best-effort `_safe_audit_log` so a full disk never masks the original exception.
 - `attempt_id` is taken from the bound `attempt_id` argument when the tool takes one (`_extract_attempt_id`), else `""`.
 
@@ -139,7 +141,7 @@ Example rows (field order as written):
 | `exploit.require_explicit_allowlist` | `true` | Empty union fail-closed when true, permissive when false |
 | `EXPLOIT_TARGET` / `EXPLOIT_TARGET_IP` / `EXPLOIT_TARGET_DOMAIN` | env (threaded by `tools/mcp_session.py`) | Single-host union entries (runtime `--target`, resolved IP, domain) |
 | `EXPLOIT_DISCOVERED_TARGETS` / `EXPLOIT_ALLOWED_TARGETS` | env (comma-separated) | Multi-host union entries; discovered hosts appended here by `add_discovered_target` |
-| `exploit.workspace_dir` | `exploit_workspace` | Root under which `exploit_audit.jsonl` is written |
+| `exploit.workspace_dir` | `exploit_workspace` | Worker/artifact workspace; the production audit file is selected separately and kept outside the writable worker bind |
 
 ## Examples
 

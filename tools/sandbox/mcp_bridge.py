@@ -23,11 +23,8 @@ _REMEDIATION = {
     SANDBOX_UNAVAILABLE: (
         "Ensure Docker Desktop (Windows/macOS) or docker.io/docker-ce (Linux) is installed "
         "and running; build the sandbox image: docker build -t breachpilot-sandbox:latest docker/sandbox. "
-        "With sandbox.fallback_native: true (explicit opt-in; default false) the server degrades to the legacy "
-        "UNCONTAINED host-execution mode at boot when the Docker probe fails -- this "
-        "in-session block means Docker died (or was unavailable) AFTER boot "
-        "(fallback happens once, at boot, never mid-session). Set sandbox.fallback_native: "
-        "false in config.yaml to keep the strict fail-closed contract instead."
+        "Restore the Docker daemon and worker image, then restart the assessment in its contained sandbox. "
+        "Keep sandbox.enabled: true; execution stays blocked until containment is available."
     ),
     SANDBOX_POLICY_FAILED: (
         "The worker network firewall could not be installed (iptables-restore failed in the "
@@ -65,10 +62,11 @@ def sandbox_block(exc: SandboxError, *, tool_name: str = "") -> str:
 
 
 def manager_from_ctx(ctx: Any) -> Any | None:
-    """Read the session SandboxManager from a tool context (None when disabled).
+    """Read the session SandboxManager from a tool context.
 
-    Duck-typed: test FakeCtx objects without a ``sandbox`` attribute resolve to
-    None (legacy host-execution mode), matching historical test expectations.
+    Duck-typed contexts without a ``sandbox`` attribute resolve to ``None``.
+    Execution funnels must treat that as a denial, never as permission to run
+    on the MCP host.
     """
     return getattr(ctx, "sandbox", None)
 

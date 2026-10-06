@@ -1,7 +1,7 @@
 ---
 title: Config Validation
 description: How config.yaml is validated, what fails hard vs warns, and how to diagnose.
-source: [tools/config_manager.py, tools/kernel/config.py, tools/doctor.py, tools/self_test.py, tools/api/routes/system.py]
+source: [tools/config_manager.py, tools/kernel/config.py, tools/doctor.py, tools/self_test.py, tools/api/routes/system/config.py, tools/api/routes/system/_shared.py]
 ---
 
 # Config Validation
@@ -19,7 +19,7 @@ Validates the checked-in operator config (`config.yaml`) against `tools/config_m
 | `load_validated_config` | `config_manager.py:1281` | `load_and_validate()`; `raise ValueError` on `errors`; `logger.warning` on `warnings/unknown_keys`; `return apply_defaults()` |
 | `tools/kernel/config.load_config` | `tools/kernel/config.py:11` | Pure: `path.exists()==False` → `{}`; non-dict → `ValueError`. Re-exported as `tools/config_cli.load_config` & `tools/mcp_shared.load_config` |
 | `validate_config_file` | `config_manager.py:1274` | Quick `load_and_validate` returning `result` only |
-| `PATCH /api/v1/system/config` | `tools/api/routes/system.py:110` | Atomic deep-merge + re-validate; rejects on `errors`; loopback `allowed_origins` enforced |
+| `PATCH /api/v1/config` | `tools/api/routes/system/config.py` and `tools/api/routes/system/_shared.py` | Atomic deep-merge + re-validate; rejects on `errors`; loopback `allowed_origins` enforced |
 | `run_doctor` | `tools/doctor.py:388` | Loads raw yaml via `yaml.safe_load`, then `ConfigValidator.load_and_validate` via `_check_config`; reports `errors/warnings/unknown_keys` |
 | `run_self_test` | `tools/self_test.py:89` | `load_validated_config`; any exception → `overall_ok=False` |
 

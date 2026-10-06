@@ -48,7 +48,7 @@ async def run_eval(args: Any) -> int:
 
     config_path = Path(getattr(args, "config", "config.yaml"))
     try:
-        config = load_validated_config(config_path)
+        config = _eval_shim("load_validated_config", load_validated_config)(config_path)
     except Exception as exc:
         print(f"[!] Could not load/validate config: {exc}")
         return 1
@@ -79,7 +79,7 @@ async def run_eval(args: Any) -> int:
     registry = config.get("models", {}).get("registry")
     provider = get_ai_provider(config)
     if provider == "chatgpt":
-        router = build_router(
+        router = _eval_shim("build_router", build_router)(
             registry,
             host=ollama_host,
             provider="chatgpt",
@@ -87,7 +87,7 @@ async def run_eval(args: Any) -> int:
             config=config,
         )
     elif provider == "opencode_go":
-        router = build_router(
+        router = _eval_shim("build_router", build_router)(
             registry,
             host=ollama_host,
             provider="opencode_go",
@@ -95,12 +95,10 @@ async def run_eval(args: Any) -> int:
             config=config,
         )
     else:
-        router = build_router(registry, host=ollama_host)
-    model_alias = config.get("models", {}).get("default_alias", "glm")
-    if provider == "opencode_go":
-        # For opencode_go the alias namespace is the model id itself (like chatgpt)
-        # Prefer the configured default_model when the ollama default_alias is stale
-        model_alias = str(get_opencode_go_config(config).get("default_model") or "muse-spark-1.2-contributor")
+        router = _eval_shim("build_router", build_router)(registry, host=ollama_host)
+    from tools.config_manager import resolve_default_model_alias
+
+    model_alias = resolve_default_model_alias(config)
     try:
         model_client = router.get_client(model_alias)
     except KeyError:
@@ -194,7 +192,7 @@ async def run_eval(args: Any) -> int:
     # session internally (the probe above only verified bootability).
     start = time.monotonic()
     try:
-        result = await run_exploit_session(
+        result = await _eval_shim("run_exploit_session", run_exploit_session)(
             client=model_client,
             model=model_alias,
             target_ip=target_ip,

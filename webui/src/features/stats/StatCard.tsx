@@ -30,7 +30,7 @@ export function StatCard({
   const classes = toneClasses[tone];
 
   return (
-    <Card className={cn("h-full", classes.border)}>
+    <Card className={cn("h-full", classes.border)} data-tone={tone}>
       <CardContent className="flex min-h-[7.5rem] flex-col justify-between gap-3 p-4">
         <div className="flex items-center justify-between gap-2">
           <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">{label}</span>

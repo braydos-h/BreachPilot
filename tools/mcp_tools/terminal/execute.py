@@ -2,59 +2,35 @@
 
 Family: interactive shell funnel + batched probes + privileged exec + repo fetch.
 
-Tool-type classification (gates):
-- ``run_exploit_terminals`` -- batch list, no ``target_ip`` param:
-  ``@audit_tool`` + per-command preflight + MANUAL ``_target_lock_block``
-  on the FULL joined sanitized text (RULE-LOCK-FIRST: an off-target host
-  past any join boundary blocks); ONE sandbox round-trip.
-- ``run_exploit_terminal`` -- command-content, no ``target_ip`` param:
-  ``@audit_tool`` + MANUAL ``_target_lock_block`` on the FULL sanitized
-  command (RULE-LOCK-FIRST: the gate sees every destination; only display
-  OUTPUT tails are truncated, with a ``[truncated]`` marker).
-- ``run_as_root`` -- command-content, no ``target_ip`` param: ``@audit_tool``
-  + preflight check + MANUAL ``_target_lock_block`` on the FULL sanitized
-  command (fires BEFORE the sudo pivot) + ``_require_sudo_or_pivot``.
-- ``git_clone`` -- local-only (no ``target_ip`` param, no target touch):
-  ``@audit_tool`` ONLY, never an allowlist. URL format gate + existence
-  preflight (advisory warning, never blocks) + workspace containment.
-
-Intentional shell paths (preserved, never extended): the host
-``run_exploit_terminal`` path runs the FULL sanitized command through a
-wrapper script (``run_exploit.sh`` / ``run_exploit.cmd``) so ``&&`` chaining,
-pipes, and redirects keep working; ``run_as_root`` runs
-``bash -c "sudo <command> 2>&1"``. No other tool in this family uses a shell
-(``git_clone`` host path is a pure argv list). Secrets are never capped
-(RULE-NO-CAP-SECRETS): the only size bound on commands is an MB-scale
-anti-fill cap; persisted logs AND live results (COMMAND_*/OUTPUT) are
-secret-masked before return/emit. Cracking workflows recover plaintext via
-the ``run_hash_crack`` tool result, not by scraping terminal output.
+All agent-provided command execution in this family requires the disposable
+sandbox worker. Target-bearing commands are preflighted and checked against
+the full allowlist before the worker enforces its pinned network policy.
+Secrets are never capped (RULE-NO-CAP-SECRETS): the only size bound on
+commands is an MB-scale anti-fill cap; persisted logs AND live results
+(COMMAND_*/OUTPUT) are secret-masked before return/emit. Git repository
+fetches run in the worker; no URL preflight is made from the MCP host.
 """
 
 from __future__ import annotations
 
 import json
-import os
 import re
-import shutil
-import signal
-import subprocess
-import time
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 from tools.kernel.audit import _mask_secret_content
+from tools.kernel.workspace import write_workspace_file
 from tools.mcp_shared import _is_inside_workspace
-from tools.mcp_tools.registry import ToolContext, _attempt_dir, _positive_int, _run_with_pgrp_timeout
+from tools.mcp_tools.registry import ToolContext, _attempt_dir, _positive_int
 from tools.mcp_tools.sandbox_exec import (
     loopback_hint,
     run_argv_in_sandbox,
     run_command_in_sandbox,
     sandbox_error_block,
-    sandbox_fallback_notice,
 )
 from tools.mcp_tools.terminal.allowlist import _extract_lock_targets, _opsec_advisory_block, _target_lock_block
-from tools.mcp_tools.terminal.privilege import _find_windows_bash, _require_sudo_or_pivot
-from tools.sandbox.exceptions import SandboxError
+from tools.sandbox.exceptions import SandboxError, SandboxUnsupportedError
 from tools.validation_utils import TargetCorrection, preflight_command_check
 
 __all__ = ["_register_execute_tools"]
@@ -96,7 +72,7 @@ def _tail(text: Any, limit: int) -> str:
 
 
 def _config_timeout(config: Any, default: int = 300) -> int:
-    """Host/sandbox run timeout from ``exploit.command_timeout_seconds``.
+    """Contained-command timeout from ``exploit.command_timeout_seconds``.
 
     Args:
         config: Full config dict (reads the ``exploit`` block).
@@ -116,6 +92,14 @@ def _config_timeout(config: Any, default: int = 300) -> int:
     except (AttributeError, TypeError):
         return default
     return _positive_int(raw, default)
+
+
+def _sandbox_required_result(ctx: ToolContext, tool_name: str) -> str | None:
+    """Return a structured denial if an execution tool has no worker."""
+    if getattr(ctx, "sandbox", None) is not None:
+        return None
+    exc = SandboxUnsupportedError(f"{tool_name} requires an active sandbox worker")
+    return sandbox_error_block(exc, tool_name=tool_name)
 
 
 def _sandbox_terminal_ok(result: Any) -> tuple[str, str, int | None, float]:
@@ -140,6 +124,35 @@ def _sandbox_terminal_ok(result: Any) -> tuple[str, str, int | None, float]:
     if result.stderr:
         merged = f"{merged}\n{result.stderr}" if merged else result.stderr
     return result.status, _tail(merged, _OUTPUT_CHARS), result.exit_code, result.duration_seconds
+
+
+def _valid_git_repo_url(value: str) -> bool:
+    """Accept credential-free HTTPS repository paths on pinned Git hosts."""
+    if not value or len(value) > 2048 or any(ord(char) <= 32 or ord(char) == 127 for char in value):
+        return False
+    try:
+        parsed = urlsplit(value)
+        host = parsed.hostname or ""
+        port = parsed.port
+    except ValueError:
+        return False
+    if (
+        parsed.scheme != "https"
+        or host not in {"github.com", "gitlab.com"}
+        or parsed.netloc.lower() != host
+        or parsed.username is not None
+        or parsed.password is not None
+        or port is not None
+        or parsed.query
+        or parsed.fragment
+    ):
+        return False
+    segments = parsed.path.split("/")[1:]
+    if len(segments) < 2 or any(segment in {"", ".", ".."} for segment in segments):
+        return False
+    if any(not re.fullmatch(r"[A-Za-z0-9_.-]+", segment) for segment in segments):
+        return False
+    return bool(segments[-1].removesuffix(".git"))
 
 
 def _sandbox_status_line(manager: Any) -> str:
@@ -167,36 +180,13 @@ def _sandbox_status_line(manager: Any) -> str:
         return "SANDBOX: active\n"
 
 
-def _platform_system() -> str:
-    """Operator OS name (Windows vs platform.system()).
-
-    Returns:
-        ``"Windows"`` on operator Windows, else ``platform.system()``
-        (``"Linux"`` fallback when the probe fails).
-
-    Gates:
-        None.
-
-    Side-effects:
-        None.
-    """
-    import platform
-
-    if os.name == "nt":
-        return "Windows"
-    try:
-        return platform.system()
-    except Exception:  # ponytail: bare except intentional -- platform probe fallback only
-        return "Linux"
-
-
 def _register_execute_tools(mcp: Any, *, ctx: ToolContext) -> None:
     """Register the terminal execution family on ``mcp``.
 
     Args:
         mcp: The MCP server to register tools on.
-        ctx: ToolContext (workspace + config + audit_tool used here; sandbox
-            selects the contained vs legacy host path per call).
+        ctx: ToolContext (workspace + config + audit_tool used here; command
+            execution requires an attached sandbox worker).
 
     Returns:
         None.
@@ -236,14 +226,13 @@ def _register_execute_tools(mcp: Any, *, ctx: ToolContext) -> None:
         Gates:
             Per-command empty/MB-cap/``preflight_command_check`` pre-gates;
             MANUAL ``_target_lock_block`` on the FULL joined sanitized text.
-            Host-PATH ``PREFLIGHT_WARNING`` is suppressed on the sandbox path
-            (host PATH is irrelevant inside the worker); every other warning
-            (corrections) is kept.
+            The host PATH is never consulted for command availability;
+            correction warnings are retained.
 
         Side-effects:
-            ONE contained execution (sandbox worker when enabled, fail closed
-            -- else the host wrapper-shell funnel, preserving ``&&``
-            chaining); writes terminal.log (secret-masked, capped). Live
+            ONE contained execution in the sandbox worker; missing or failed
+            containment blocks the command. Writes terminal.log
+            (secret-masked, capped). Live
             COMMANDS/OUTPUT in the returned block are secret-masked.
         """
         if not isinstance(commands, list) or not commands:
@@ -259,7 +248,7 @@ def _register_execute_tools(mcp: Any, *, ctx: ToolContext) -> None:
         for index, raw in enumerate(commands):
             if not isinstance(raw, str) or not raw.strip():
                 return f"BLOCKED: batch command #{index} is empty."
-            preflight = preflight_command_check(raw)
+            preflight = preflight_command_check(raw, check_tool_availability=False)
             if not preflight["valid"]:
                 return (
                     "BATCH_TERMINAL_RESULT: blocked (exit_code=None, duration=0.0s)\n"
@@ -281,166 +270,67 @@ def _register_execute_tools(mcp: Any, *, ctx: ToolContext) -> None:
                 f"COMMANDS: {json.dumps(shown_parts)}\n"
                 f"BLOCKED_REASON: {_lock_reason}"
             )
+        if blocked := _sandbox_required_result(ctx, "run_exploit_terminals"):
+            return blocked
         shown_sanitized = _mask_secret_content(joined)
         attempt_dir, attempt_id = _attempt_dir(workspace)
-        log_path = attempt_dir / "terminal.log"
-        log_path.parent.mkdir(parents=True, exist_ok=True)
         timeout = _config_timeout(config)
         preflight_note = ""
         if corrections:
             preflight_note = f"PREFLIGHT_CORRECTIONS: {json.dumps(corrections)}\n"
-        if getattr(ctx, "sandbox", None) is not None:
-            _opsec_advisory = _opsec_advisory_block(joined, config)
-            try:
-                _ran, result = run_command_in_sandbox(
-                    ctx,
-                    joined,
-                    timeout=timeout,
-                    cwd_host=attempt_dir,
-                    tool_name="run_exploit_terminals",
-                    targets=_lock_targets,
-                )
-            except SandboxError as exc:
-                return (
-                    "BATCH_TERMINAL_RESULT: blocked (exit_code=None, duration=0.0s)\n"
-                    f"ATTEMPT_ID: {attempt_id}\n"
-                    f"COMMANDS: {json.dumps(shown_parts)}\n"
-                    f"{preflight_note}"
-                    f"{sandbox_error_block(exc, tool_name='run_exploit_terminals')}"
-                )
-            _sstatus, _output_tail, _exit_code, _elapsed = _sandbox_terminal_ok(result)
-            _hint = ""
-            try:
-                # Reuses the single-parse lock targets (no re-parse).
-                _primary = _lock_targets[0] if _lock_targets else ""
-                if _primary:
-                    _hint = loopback_hint(_primary, config)
-            except Exception:  # ponytail: bare except intentional -- hint is advisory only
-                _hint = ""
-            _logged = _mask_secret_content((result.stdout or "") + ("\n" + result.stderr if result.stderr else ""))
-            log_path.write_text(
-                f"{'=' * 60}\nCOMMAND: {_mask_secret_content(joined)}\n{'=' * 60}\n"
-                + _tail(_logged, _MAX_LOG_FILE_CHARS)
-                + f"\nEXIT_CODE: {_exit_code if _exit_code is not None else 'timed_out'}\n",
-                encoding="utf-8",
-                errors="replace",
+        _opsec_advisory = _opsec_advisory_block(joined, config)
+        try:
+            _ran, result = run_command_in_sandbox(
+                ctx,
+                joined,
+                timeout=timeout,
+                cwd_host=attempt_dir,
+                tool_name="run_exploit_terminals",
+                targets=_lock_targets,
             )
+        except SandboxError as exc:
             return (
-                f"BATCH_TERMINAL_RESULT: {_sstatus} (exit_code={_exit_code}, duration={_elapsed:.1f}s)\n"
+                "BATCH_TERMINAL_RESULT: blocked (exit_code=None, duration=0.0s)\n"
                 f"ATTEMPT_ID: {attempt_id}\n"
                 f"COMMANDS: {json.dumps(shown_parts)}\n"
-                f"COMMAND_SANITIZED: {shown_sanitized}\n"
                 f"{preflight_note}"
-                f"{_sandbox_status_line(ctx.sandbox)}"
-                f"{_opsec_advisory}"
-                f"{_hint}"
-                f"WORKSPACE: {attempt_dir}\n"
-                f"OUTPUT:\n{_mask_secret_content(_output_tail)}"
+                f"{sandbox_error_block(exc, tool_name='run_exploit_terminals')}"
             )
-        # Host path (sandbox disabled): same joined funnel as run_exploit_terminal.
-        start = time.monotonic()
-        is_windows = _platform_system() == "Windows"
-        header = f"{'=' * 60}\nCOMMAND: {_mask_secret_content(joined)}\n{'=' * 60}\n"
-        log_path.write_text(header, encoding="utf-8", errors="replace")
-        _bash_on_windows = _find_windows_bash(config) if is_windows else None
-        if is_windows and _bash_on_windows is None:
-            wrapper = attempt_dir / "run_exploit.cmd"
-            wrapper.write_text(
-                "@echo off\r\n"
-                "title AI Exploit Terminal\r\n"
-                f'cd /d "{attempt_dir}"\r\n'
-                f"{joined} >> terminal.log 2>&1\r\n"
-                "echo EXIT_CODE: %ERRORLEVEL% >> terminal.log\r\n",
-                encoding="ascii",
-                errors="replace",
+        if not _ran or result is None:
+            return sandbox_error_block(
+                SandboxUnsupportedError("run_exploit_terminals requires an active sandbox worker"),
+                tool_name="run_exploit_terminals",
             )
-            proc = subprocess.Popen(
-                ["cmd.exe", "/c", str(wrapper)],
-                cwd=str(attempt_dir),
-                creationflags=getattr(subprocess, "CREATE_NEW_CONSOLE", 0)
-                | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0),
-            )
-        else:
-            _shell = str((config or {}).get("exploit", {}).get("shell", "bash")) or "bash"
-            _shell_bin = _bash_on_windows or shutil.which(_shell) or _shell
-            wrapper = attempt_dir / "run_exploit.sh"
-            wrapper.write_text(
-                f'#!{_shell_bin}\ncd "{attempt_dir}"\n{joined} 2>&1\necho EXIT_CODE: $?\n',
-                encoding="utf-8",
-            )
-            wrapper.chmod(0o755)
-            proc = subprocess.Popen(
-                [_shell_bin, str(wrapper)],
-                cwd=str(attempt_dir),
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                start_new_session=True,
-            )
-        out_bytes: bytes | str | None = None
+        _sstatus, _output_tail, _exit_code, _elapsed = _sandbox_terminal_ok(result)
+        _hint = ""
         try:
-            if is_windows and _bash_on_windows is None:
-                exit_code = proc.wait(timeout=timeout)
-                status = "completed" if exit_code == 0 else "failed"
-            else:
-                out_bytes, _ = proc.communicate(timeout=timeout)
-                exit_code = proc.returncode
-                status = "completed" if exit_code == 0 else "failed"
-        except subprocess.TimeoutExpired:
-            if is_windows:
-                try:
-                    proc.kill()
-                except ProcessLookupError:
-                    pass
-            else:
-                try:
-                    os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
-                except (ProcessLookupError, PermissionError):
-                    try:
-                        proc.kill()
-                    except ProcessLookupError:
-                        pass
-            if not (is_windows and _bash_on_windows is None):
-                try:
-                    out_bytes, _ = proc.communicate(timeout=5)
-                except Exception:  # ponytail: bare except intentional -- post-kill drain is best-effort
-                    out_bytes = out_bytes or b""
-            exit_code = None
-            status = "timed_out"
-        elapsed = time.monotonic() - start
-        output_tail = ""
-        if out_bytes is not None:
-            try:
-                text = out_bytes.decode("utf-8", errors="replace") if isinstance(out_bytes, bytes) else str(out_bytes)
-                log_path.write_text(
-                    header + _tail(_mask_secret_content(text), _MAX_LOG_FILE_CHARS),
-                    encoding="utf-8",
-                    errors="replace",
-                )
-                output_tail = _mask_secret_content(_tail(text, _OUTPUT_CHARS))
-            except Exception:  # ponytail: bare except intentional -- decode failure keeps prior (empty) tail
-                pass
-        elif log_path.exists():
-            raw_text = log_path.read_text(encoding="utf-8", errors="replace")
-            output_tail = _mask_secret_content(_tail(raw_text, _OUTPUT_CHARS))
-            try:
-                log_path.write_text(
-                    _tail(_mask_secret_content(raw_text), _MAX_LOG_FILE_CHARS),
-                    encoding="utf-8",
-                    errors="replace",
-                )
-            except OSError:
-                pass
-        _opsec_advisory = _opsec_advisory_block(joined, config)
+            # Reuses the single-parse lock targets (no re-parse).
+            _primary = _lock_targets[0] if _lock_targets else ""
+            if _primary:
+                _hint = loopback_hint(_primary, config)
+        except Exception:  # ponytail: bare except intentional -- hint is advisory only
+            _hint = ""
+        _logged = _mask_secret_content((result.stdout or "") + ("\n" + result.stderr if result.stderr else ""))
+        log_content = (
+            f"{'=' * 60}\nCOMMAND: {_mask_secret_content(joined)}\n{'=' * 60}\n"
+            + _tail(_logged, _MAX_LOG_FILE_CHARS)
+            + f"\nEXIT_CODE: {_exit_code if _exit_code is not None else 'timed_out'}\n"
+        )
+        try:
+            write_workspace_file(workspace, f"{attempt_id}/terminal.log", log_content.encode("utf-8", errors="replace"))
+        except (OSError, ValueError):
+            pass  # Worker-controlled workspace entries are never followed by host writes.
         return (
-            f"BATCH_TERMINAL_RESULT: {status} (exit_code={exit_code}, duration={elapsed:.1f}s)\n"
+            f"BATCH_TERMINAL_RESULT: {_sstatus} (exit_code={_exit_code}, duration={_elapsed:.1f}s)\n"
             f"ATTEMPT_ID: {attempt_id}\n"
             f"COMMANDS: {json.dumps(shown_parts)}\n"
             f"COMMAND_SANITIZED: {shown_sanitized}\n"
             f"{preflight_note}"
-            f"{sandbox_fallback_notice(ctx)}"
+            f"{_sandbox_status_line(ctx.sandbox)}"
             f"{_opsec_advisory}"
+            f"{_hint}"
             f"WORKSPACE: {attempt_dir}\n"
-            f"OUTPUT:\n{output_tail}"
+            f"OUTPUT:\n{_mask_secret_content(_output_tail)}"
         )
 
     @mcp.tool()
@@ -465,9 +355,8 @@ def _register_execute_tools(mcp: Any, *, ctx: ToolContext) -> None:
             ``require_explicit_allowlist`` is enforced).
 
         Side-effects:
-            Executes the sanitized command (sandbox worker when enabled, fail
-            closed -- else the host wrapper-script shell funnel, preserving
-            ``&&`` chaining/pipes/redirects); writes terminal.log
+            Executes the sanitized command only in the sandbox worker; missing
+            or failed containment blocks the command. Writes terminal.log
             (secret-masked, capped). Live COMMAND_*/OUTPUT in the returned
             block are secret-masked before return/emit.
         """
@@ -477,7 +366,7 @@ def _register_execute_tools(mcp: Any, *, ctx: ToolContext) -> None:
             return f"BLOCKED: command exceeds the {_MAX_COMMAND_CHARS}-byte anti-fill cap; split the command."
 
         original_command = command
-        preflight = preflight_command_check(command)
+        preflight = preflight_command_check(command, check_tool_availability=False)
         if not preflight["valid"]:
             return (
                 "TERMINAL_RESULT: blocked (exit_code=None, duration=0.0s)\n"
@@ -508,200 +397,86 @@ def _register_execute_tools(mcp: Any, *, ctx: ToolContext) -> None:
                 f"COMMAND_SANITIZED: {shown_sanitized}\n"
                 f"BLOCKED_REASON: {_lock_reason}"
             )
+        if blocked := _sandbox_required_result(ctx, "run_exploit_terminal"):
+            return blocked
 
-        missing_tools = preflight["missing_tools"]
         preflight_note = ""
-        if missing_tools:
-            preflight_note = f"PREFLIGHT_WARNING: Missing tools on PATH: {', '.join(missing_tools)}.\n"
         if corrections:
             preflight_note += f"PREFLIGHT_CORRECTIONS: {json.dumps(corrections)}\n"
 
         attempt_dir, attempt_id = _attempt_dir(workspace)
-        log_path = attempt_dir / "terminal.log"
-        log_path.parent.mkdir(parents=True, exist_ok=True)
         timeout = _config_timeout(config)
 
         # ---- sandbox path (fail closed): when the disposable execution
         # sandbox is enabled, the command runs inside the hardened worker
         # container -- NEVER on the host. Any sandbox failure returns a
         # SANDBOX_* block instead of falling back to host execution.
-        if getattr(ctx, "sandbox", None) is not None:
-            _opsec_advisory = _opsec_advisory_block(sanitized_command, config)
-            try:
-                _ran, result = run_command_in_sandbox(
-                    ctx,
-                    sanitized_command,
-                    timeout=timeout,
-                    cwd_host=attempt_dir,
-                    tool_name="run_exploit_terminal",
-                    targets=_lock_targets,
-                )
-            except SandboxError as exc:
-                return (
-                    "TERMINAL_RESULT: blocked (exit_code=None, duration=0.0s)\n"
-                    f"ATTEMPT_ID: {attempt_id}\n"
-                    f"COMMAND_ORIGINAL: {shown_original}\n"
-                    f"COMMAND_SANITIZED: {shown_sanitized}\n"
-                    f"{preflight_note}"
-                    f"{sandbox_error_block(exc, tool_name='run_exploit_terminal')}"
-                )
-            _sstatus, _output_tail, _exit_code, _elapsed = _sandbox_terminal_ok(result)
-            _hint = ""
-            try:
-                # ponytail: unconditional for loopback targets -- gating on output
-                # substrings ("connection refused") misses curl/python/timeout
-                # variants and exit-0-masked probes (cmd1; curl | head).
-                # Reuses the single-parse lock targets above (no re-parse).
-                _primary = _lock_targets[0] if _lock_targets else ""
-                if _primary:
-                    _hint = loopback_hint(_primary, config)
-            except Exception:  # ponytail: bare except intentional -- hint is advisory only
-                _hint = ""
-            # Persisted AND live outputs are masked: raw stdout may carry
-            # dumped hashes, tokens, or key material that must neither sit on
-            # disk nor echo verbatim in results/events in the clear.
-            _logged = _mask_secret_content((result.stdout or "") + ("\n" + result.stderr if result.stderr else ""))
-            log_path.write_text(
-                f"{'=' * 60}\nCOMMAND: {_mask_secret_content(sanitized_command)}\n{'=' * 60}\n"
-                + _tail(_logged, _MAX_LOG_FILE_CHARS)
-                + f"\nEXIT_CODE: {_exit_code if _exit_code is not None else 'timed_out'}\n",
-                encoding="utf-8",
-                errors="replace",
+        _opsec_advisory = _opsec_advisory_block(sanitized_command, config)
+        try:
+            _ran, result = run_command_in_sandbox(
+                ctx,
+                sanitized_command,
+                timeout=timeout,
+                cwd_host=attempt_dir,
+                tool_name="run_exploit_terminal",
+                targets=_lock_targets,
             )
+        except SandboxError as exc:
             return (
-                f"TERMINAL_RESULT: {_sstatus} (exit_code={_exit_code}, duration={_elapsed:.1f}s)\n"
+                "TERMINAL_RESULT: blocked (exit_code=None, duration=0.0s)\n"
                 f"ATTEMPT_ID: {attempt_id}\n"
                 f"COMMAND_ORIGINAL: {shown_original}\n"
                 f"COMMAND_SANITIZED: {shown_sanitized}\n"
                 f"{preflight_note}"
-                f"{_sandbox_status_line(ctx.sandbox)}"
-                f"{_opsec_advisory}"
-                f"{_hint}"
-                f"WORKSPACE: {attempt_dir}\n"
-                f"OUTPUT:\n{_mask_secret_content(_output_tail)}"
+                f"{sandbox_error_block(exc, tool_name='run_exploit_terminal')}"
             )
-
-        start = time.monotonic()
-        is_windows = _platform_system() == "Windows"
-        header = f"{'=' * 60}\nCOMMAND: {_mask_secret_content(sanitized_command)}\n{'=' * 60}\n"
-        log_path.write_text(header, encoding="utf-8", errors="replace")
-
-        _bash_on_windows = _find_windows_bash(config) if is_windows else None
-        if is_windows and _bash_on_windows is None:
-            wrapper = attempt_dir / "run_exploit.cmd"
-            wrapper.write_text(
-                "@echo off\r\n"
-                "title AI Exploit Terminal\r\n"
-                f'cd /d "{attempt_dir}"\r\n'
-                f"{sanitized_command} >> terminal.log 2>&1\r\n"
-                "echo EXIT_CODE: %ERRORLEVEL% >> terminal.log\r\n",
-                encoding="ascii",
-                errors="replace",
+        if not _ran or result is None:
+            return sandbox_error_block(
+                SandboxUnsupportedError("run_exploit_terminal requires an active sandbox worker"),
+                tool_name="run_exploit_terminal",
             )
-            proc = subprocess.Popen(
-                ["cmd.exe", "/c", str(wrapper)],
-                cwd=str(attempt_dir),
-                creationflags=getattr(subprocess, "CREATE_NEW_CONSOLE", 0)
-                | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0),
-            )
-        else:
-            if _bash_on_windows:
-                _shell_bin = _bash_on_windows
-            else:
-                _shell = str((config or {}).get("exploit", {}).get("shell", "bash")) or "bash"
-                _shell_bin = shutil.which(_shell) or _shell
-            wrapper = attempt_dir / "run_exploit.sh"
-            wrapper.write_text(
-                f'#!{_shell_bin}\ncd "{attempt_dir}"\n{sanitized_command} 2>&1\necho EXIT_CODE: $?\n',
-                encoding="utf-8",
-            )
-            wrapper.chmod(0o755)
-            proc = subprocess.Popen(
-                [_shell_bin, str(wrapper)],
-                cwd=str(attempt_dir),
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                start_new_session=True,
-            )
-
-        out_bytes: bytes | str | None = None
+        _sstatus, _output_tail, _exit_code, _elapsed = _sandbox_terminal_ok(result)
+        _hint = ""
         try:
-            if is_windows and _bash_on_windows is None:
-                exit_code = proc.wait(timeout=timeout)
-                status = "completed" if exit_code == 0 else "failed"
-            else:
-                out_bytes, _ = proc.communicate(timeout=timeout)
-                exit_code = proc.returncode
-                status = "completed" if exit_code == 0 else "failed"
-        except subprocess.TimeoutExpired:
-            if is_windows:
-                try:
-                    proc.kill()
-                except ProcessLookupError:
-                    pass
-            else:
-                try:
-                    os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
-                except (ProcessLookupError, PermissionError):
-                    try:
-                        proc.kill()
-                    except ProcessLookupError:
-                        pass
-            if not (is_windows and _bash_on_windows is None):
-                try:
-                    out_bytes, _ = proc.communicate(timeout=5)
-                except Exception:  # ponytail: bare except intentional -- post-kill drain is best-effort
-                    out_bytes = out_bytes or b""
-            exit_code = None
-            status = "timed_out"
-
-        elapsed = time.monotonic() - start
-        output_tail = ""
-        if out_bytes is not None:
-            try:
-                text = out_bytes.decode("utf-8", errors="replace") if isinstance(out_bytes, bytes) else str(out_bytes)
-                log_path.write_text(
-                    header + _tail(_mask_secret_content(text), _MAX_LOG_FILE_CHARS),
-                    encoding="utf-8",
-                    errors="replace",
-                )
-                # Live OUTPUT is masked before return (same as the persisted
-                # log above) -- secrets must not echo verbatim in results.
-                output_tail = _mask_secret_content(_tail(text, _OUTPUT_CHARS))
-            except Exception:  # ponytail: bare except intentional -- decode failure keeps prior (empty) tail
-                pass
-        elif log_path.exists():
-            # cmd.exe path appends raw output to terminal.log via shell
-            # redirect: mask before return, then mask the persisted copy.
-            raw_text = log_path.read_text(encoding="utf-8", errors="replace")
-            output_tail = _mask_secret_content(_tail(raw_text, _OUTPUT_CHARS))
-            try:
-                log_path.write_text(
-                    _tail(_mask_secret_content(raw_text), _MAX_LOG_FILE_CHARS),
-                    encoding="utf-8",
-                    errors="replace",
-                )
-            except OSError:
-                pass
-
-        _opsec_advisory = _opsec_advisory_block(sanitized_command, config)
-
+            # ponytail: unconditional for loopback targets -- gating on output
+            # substrings ("connection refused") misses curl/python/timeout
+            # variants and exit-0-masked probes (cmd1; curl | head).
+            # Reuses the single-parse lock targets above (no re-parse).
+            _primary = _lock_targets[0] if _lock_targets else ""
+            if _primary:
+                _hint = loopback_hint(_primary, config)
+        except Exception:  # ponytail: bare except intentional -- hint is advisory only
+            _hint = ""
+        # Persisted AND live outputs are masked: raw stdout may carry
+        # dumped hashes, tokens, or key material that must neither sit on
+        # disk nor echo verbatim in results/events in the clear.
+        _logged = _mask_secret_content((result.stdout or "") + ("\n" + result.stderr if result.stderr else ""))
+        log_content = (
+            f"{'=' * 60}\nCOMMAND: {_mask_secret_content(sanitized_command)}\n{'=' * 60}\n"
+            + _tail(_logged, _MAX_LOG_FILE_CHARS)
+            + f"\nEXIT_CODE: {_exit_code if _exit_code is not None else 'timed_out'}\n"
+        )
+        try:
+            write_workspace_file(workspace, f"{attempt_id}/terminal.log", log_content.encode("utf-8", errors="replace"))
+        except (OSError, ValueError):
+            pass  # Worker-controlled workspace entries are never followed by host writes.
         return (
-            f"TERMINAL_RESULT: {status} (exit_code={exit_code}, duration={elapsed:.1f}s)\n"
+            f"TERMINAL_RESULT: {_sstatus} (exit_code={_exit_code}, duration={_elapsed:.1f}s)\n"
             f"ATTEMPT_ID: {attempt_id}\n"
             f"COMMAND_ORIGINAL: {shown_original}\n"
             f"COMMAND_SANITIZED: {shown_sanitized}\n"
             f"{preflight_note}"
-            f"{sandbox_fallback_notice(ctx)}"
+            f"{_sandbox_status_line(ctx.sandbox)}"
             f"{_opsec_advisory}"
+            f"{_hint}"
             f"WORKSPACE: {attempt_dir}\n"
-            f"OUTPUT:\n{output_tail}"
+            f"OUTPUT:\n{_mask_secret_content(_output_tail)}"
         )
 
     @mcp.tool()
     @audit_tool
     def run_as_root(command: str) -> str:
-        """Run ANY command with sudo (root privileges). Use for commands that require root: tcpdump, iptables, systemctl, writing to /etc, raw socket operations, etc. The command runs synchronously and output is captured.
+        """Run a command as root inside the sandbox worker and capture its output.
 
         Args:
             command: Full shell command text (never truncated before the gate;
@@ -709,19 +484,16 @@ def _register_execute_tools(mcp: Any, *, ctx: ToolContext) -> None:
 
         Returns:
             ROOT_CMD_RESULT block (status, exit code, command, OUTPUT tail),
-            or a preflight / target-lock / sudo-pivot block.
+            or a preflight / target-lock / sandbox-denial block.
 
         Gates:
             Empty/MB-cap pre-gates; ``preflight_command_check`` (sanitizes IP
             typos); MANUAL ``_target_lock_block`` on the FULL sanitized
-            command -- fires BEFORE the sudo pivot (RULE-LOCK-FIRST); then
-            ``_require_sudo_or_pivot`` short-circuits when passwordless sudo
-            is unavailable.
+            command (RULE-LOCK-FIRST); active sandbox worker required.
 
         Side-effects:
-            Executes ``sudo <sanitized-command>`` (container root when
-            sandboxed, fail closed -- else host ``bash -c``, preserving
-            ``&&`` chaining). Live COMMAND/OUTPUT in the returned block are
+            Executes the sanitized command as container root. No host command
+            runs if the worker is unavailable. Live COMMAND/OUTPUT are
             secret-masked before return/emit.
         """
         if not command or not command.strip():
@@ -729,7 +501,7 @@ def _register_execute_tools(mcp: Any, *, ctx: ToolContext) -> None:
         if len(command) > _MAX_COMMAND_CHARS:
             return f"BLOCKED: command exceeds the {_MAX_COMMAND_CHARS}-byte anti-fill cap; split the command."
         original_command = command
-        preflight = preflight_command_check(command)
+        preflight = preflight_command_check(command, check_tool_availability=False)
         if not preflight["valid"]:
             return (
                 f"ROOT_CMD_RESULT: blocked (preflight: {preflight['blocked_reason']})\n"
@@ -745,52 +517,33 @@ def _register_execute_tools(mcp: Any, *, ctx: ToolContext) -> None:
         _lock_reason = _target_lock_block(sanitized_command, config, targets=_lock_targets)
         if _lock_reason:
             return f"ROOT_CMD_RESULT: blocked (target lock: {_lock_reason})"
-        _pivot = _require_sudo_or_pivot("run_as_root", sanitized_command)
-        if _pivot:
-            return _pivot
+        if blocked := _sandbox_required_result(ctx, "run_as_root"):
+            return blocked
         timeout = _config_timeout(config)
         # ---- sandbox path: root INSIDE the disposable worker (confined by
         # --cap-drop ALL / no devices / netns firewall / workspace-only bind);
         # host root is never involved.
-        if getattr(ctx, "sandbox", None) is not None:
-            try:
-                _ran, result = run_command_in_sandbox(
-                    ctx,
-                    sanitized_command,
-                    timeout=timeout,
-                    tool_name="run_as_root",
-                    user="root",
-                    targets=_lock_targets,
-                )
-            except SandboxError as exc:
-                return f"ROOT_CMD_RESULT: blocked\n{sandbox_error_block(exc, tool_name='run_as_root')}"
-            merged = result.stdout or ""
-            if result.stderr:
-                merged = f"{merged}\n{result.stderr}" if merged else result.stderr
-            return (
-                f"ROOT_CMD_RESULT: {result.status} (exit_code={result.exit_code}, sandbox)\n"
-                f"COMMAND: {shown_command}\nSUDO: not required (executed as container root)\n"
-                f"OUTPUT:\n{_mask_secret_content(_tail(merged, _OUTPUT_CHARS))}"
-            )
-        cmd = f"sudo {sanitized_command} 2>&1"
         try:
-            returncode, out, err = _run_with_pgrp_timeout(
-                ["bash", "-c", cmd],
-                timeout,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
+            _ran, result = run_command_in_sandbox(
+                ctx,
+                sanitized_command,
+                timeout=timeout,
+                tool_name="run_as_root",
+                user="root",
+                targets=_lock_targets,
             )
-            output = _mask_secret_content(_tail(((out or "") + "\n" + (err or "")), _OUTPUT_CHARS))
-            status = "completed" if returncode == 0 else "failed"
-            return (
-                f"{sandbox_fallback_notice(ctx)}"
-                f"ROOT_CMD_RESULT: {status} (exit_code={returncode})\nCOMMAND: {shown_command}\nOUTPUT:\n{output}"
-            )
-        except subprocess.TimeoutExpired:
-            return f"{sandbox_fallback_notice(ctx)}ROOT_CMD_RESULT: timed_out\nCOMMAND: {shown_command}"
-        except Exception as exc:  # ponytail: bare except intentional -- run failure is data, not a crash
-            return f"{sandbox_fallback_notice(ctx)}ROOT_CMD_RESULT: error - {exc}"
+        except SandboxError as exc:
+            return f"ROOT_CMD_RESULT: blocked\n{sandbox_error_block(exc, tool_name='run_as_root')}"
+        if not _ran or result is None:
+            return f"ROOT_CMD_RESULT: blocked\n{sandbox_error_block(SandboxUnsupportedError('run_as_root requires an active sandbox worker'), tool_name='run_as_root')}"
+        merged = result.stdout or ""
+        if result.stderr:
+            merged = f"{merged}\n{result.stderr}" if merged else result.stderr
+        return (
+            f"ROOT_CMD_RESULT: {result.status} (exit_code={result.exit_code}, sandbox)\n"
+            f"COMMAND: {shown_command}\nSUDO: not required (executed as container root)\n"
+            f"OUTPUT:\n{_mask_secret_content(_tail(merged, _OUTPUT_CHARS))}"
+        )
 
     @mcp.tool()
     @audit_tool
@@ -803,8 +556,7 @@ def _register_execute_tools(mcp: Any, *, ctx: ToolContext) -> None:
 
         Returns:
             GIT_CLONE_RESULT block (status, exit code, repo, path, OUTPUT
-            tail), BLOCKED on gate failure, or a PREFLIGHT_WARNING prefix when
-            the URL existence check fails (advisory -- the clone still runs).
+            tail), or BLOCKED on validation or sandbox failure.
 
         Gates:
             Local-only ``@audit_tool`` (never an allowlist -- no target
@@ -812,80 +564,49 @@ def _register_execute_tools(mcp: Any, *, ctx: ToolContext) -> None:
             workspace containment (fail closed on escape).
 
         Side-effects:
-            Clones via argv-list ``git clone`` (sandbox worker when enabled,
-            else host ``_run_with_pgrp_timeout`` with the configured timeout);
-            no shell anywhere on this path.
+            Clones via argv-list ``git clone`` inside the sandbox worker;
+            missing or failed containment blocks the request.
         """
         if not repo_url or not repo_url.strip():
             return "BLOCKED: repo_url is required."
         url = repo_url.strip()
-        if not re.fullmatch(r"https?://[a-zA-Z0-9._/\-:@]+\.git", url) and not re.fullmatch(
-            r"https?://github\.com/[a-zA-Z0-9._\-/]+", url
-        ):
+        if not _valid_git_repo_url(url):
             return "BLOCKED: invalid repo URL. Must be a GitHub/GitLab HTTPS URL."
-        dir_name = target_dir.strip() if target_dir.strip() else url.rstrip("/").split("/")[-1].replace(".git", "")
+        repo_name = urlsplit(url).path.rsplit("/", 1)[-1].removesuffix(".git")
+        dir_name = target_dir.strip() if target_dir.strip() else repo_name
         if not re.fullmatch(r"[A-Za-z0-9._-]{1,80}", dir_name):
             return f"BLOCKED: target_dir must match [A-Za-z0-9._-]{{1,80}} (got {dir_name!r})."
         clone_dir = workspace / dir_name
         if not _is_inside_workspace(workspace, clone_dir.resolve()):
             return f"BLOCKED: clone target {clone_dir} escapes the exploit workspace."
         timeout = _config_timeout(config, 120)
+        if blocked := _sandbox_required_result(ctx, "git_clone"):
+            return blocked
 
+        # Do not preflight this URL from the MCP host. The actual clone runs
+        # inside the worker, where the pinned egress policy governs DNS and
+        # redirects without opening an SSRF path from the operator machine.
         preflight_note = ""
-        if url.lower().startswith(("http://", "https://")):
-            try:
-                from tools.exploit_search import url_exists as _url_exists_check
-
-                _ok, _reason = _url_exists_check(url, timeout=8)
-            except Exception:  # ponytail: bare except intentional -- existence check never blocks the clone
-                _ok, _reason = True, None
-            if not _ok:
-                preflight_note = (
-                    f"PREFLIGHT_WARNING: URL existence check failed ({_reason}); "
-                    "if this is a private/auth-gated repo the clone may still "
-                    "succeed. If the clone fails, use cve_to_poc instead of "
-                    "guessing URLs.\n"
-                )
 
         # ---- sandbox path: clone inside the worker (egress is governed by
         # the pinned RESEARCH_HOSTS set + the netns firewall, not by the host).
-        if getattr(ctx, "sandbox", None) is not None:
-            import shlex as _shlex
-
-            _clone_cmd = f"git clone -- {_shlex.quote(url)} {_shlex.quote(dir_name)}"
-            try:
-                _ran, result = run_command_in_sandbox(
-                    ctx, _clone_cmd, timeout=timeout, cwd_host=workspace, tool_name="git_clone"
-                )
-            except SandboxError as exc:
-                return f"{preflight_note}GIT_CLONE_RESULT: blocked\n{sandbox_error_block(exc, tool_name='git_clone')}"
-            merged = result.stdout or ""
-            if result.stderr:
-                merged = f"{merged}\n{result.stderr}" if merged else result.stderr
-            return (
-                f"{preflight_note}GIT_CLONE_RESULT: {result.status} (exit_code={result.exit_code}, sandbox)\n"
-                f"REPO: {_mask_secret_content(url)}\nPATH: {clone_dir} (container: /workspace/{dir_name})\n"
-                f"OUTPUT:\n{_mask_secret_content(_tail(merged, _GIT_OUTPUT_CHARS))}"
-            )
-
         try:
-            returncode, out, err = _run_with_pgrp_timeout(
-                ["git", "clone", "--", url, str(clone_dir)],
-                timeout,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
+            _ran, result = run_argv_in_sandbox(
+                ctx,
+                ["git", "clone", "--", url, dir_name],
+                timeout=timeout,
+                cwd_host=workspace,
+                tool_name="git_clone",
             )
-            output = _mask_secret_content(_tail(((out or "") + "\n" + (err or "")), _GIT_OUTPUT_CHARS))
-            status = "completed" if returncode == 0 else "failed"
-            return (
-                f"{preflight_note}{sandbox_fallback_notice(ctx)}GIT_CLONE_RESULT: {status} (exit_code={returncode})\n"
-                f"REPO: {_mask_secret_content(url)}\nPATH: {clone_dir}\nOUTPUT:\n{output}"
-            )
-        except subprocess.TimeoutExpired:
-            return (
-                f"{preflight_note}{sandbox_fallback_notice(ctx)}GIT_CLONE_RESULT: timed_out\n"
-                f"REPO: {_mask_secret_content(url)}"
-            )
-        except Exception as exc:  # ponytail: bare except intentional -- run failure is data, not a crash
-            return f"{preflight_note}{sandbox_fallback_notice(ctx)}GIT_CLONE_RESULT: error - {exc}"
+        except SandboxError as exc:
+            return f"{preflight_note}GIT_CLONE_RESULT: blocked\n{sandbox_error_block(exc, tool_name='git_clone')}"
+        if not _ran or result is None:
+            return f"GIT_CLONE_RESULT: blocked\n{sandbox_error_block(SandboxUnsupportedError('git_clone requires an active sandbox worker'), tool_name='git_clone')}"
+        merged = result.stdout or ""
+        if result.stderr:
+            merged = f"{merged}\n{result.stderr}" if merged else result.stderr
+        return (
+            f"{preflight_note}GIT_CLONE_RESULT: {result.status} (exit_code={result.exit_code}, sandbox)\n"
+            f"REPO: {_mask_secret_content(url)}\nPATH: {clone_dir} (container: /workspace/{dir_name})\n"
+            f"OUTPUT:\n{_mask_secret_content(_tail(merged, _GIT_OUTPUT_CHARS))}"
+        )

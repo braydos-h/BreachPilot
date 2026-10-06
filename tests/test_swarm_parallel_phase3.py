@@ -18,12 +18,15 @@ Verifies the two headline behaviors of the re-enabled ``route_parallel``:
 
 from __future__ import annotations
 
+import asyncio
+import logging
 import threading
 import time
 from typing import Any
 
 import pytest
 
+from tools.run_log import RunLog
 from tools.swarm.base import Agent, AgentResult, AgentStatus
 from tools.swarm.orchestrator import SwarmOrchestrator
 
@@ -96,12 +99,15 @@ async def test_depends_on_waits_for_milestone():
     the dependency's end time."""
     # Use a recon agent that sleeps so we can observe the timing.
     dep_start_times: dict[str, float] = {}
+    dep_end_times: dict[str, float] = {}
+    heartbeat_times: list[float] = []
 
     class _TimedRecon(Agent):
         def run(self, task, context):
             t = task.get("target", "")
             dep_start_times[t] = time.monotonic()
             time.sleep(0.3)
+            dep_end_times[t] = time.monotonic()
             bb = context.get("blackboard", {})
             from tools.swarm.bb_compat import bb_set
 
@@ -137,7 +143,14 @@ async def test_depends_on_waits_for_milestone():
             "depends_on": ["10.0.0.5", "recon"],
         },
     ]
+
+    async def heartbeat():
+        await asyncio.sleep(0.05)
+        heartbeat_times.append(time.monotonic())
+
+    heartbeat_task = asyncio.create_task(heartbeat())
     results = await orch.route_parallel(tasks)
+    await heartbeat_task
     assert len(results) == 2
     # The vuln task ran AFTER recon finished (its start >= recon's start+delay).
     recon_start = dep_start_times["10.0.0.5"]
@@ -146,6 +159,42 @@ async def test_depends_on_waits_for_milestone():
     # the same task dict to the agent, so we can read it back from the result
     # via the battle log. Easier: just assert the milestone is set now.
     assert orch.is_milestone_set("10.0.0.5", "recon")
+    assert heartbeat_times[0] < dep_end_times["10.0.0.5"]
+
+
+@pytest.mark.asyncio
+async def test_dependency_timeout_does_not_start_dependent_agent(monkeypatch):
+    started: list[bool] = []
+
+    class _MustNotRun(Agent):
+        def run(self, task, context):
+            started.append(True)
+            return AgentResult(agent_type=self.agent_type, status=AgentStatus.COMPLETE)
+
+    orch = SwarmOrchestrator(
+        {"config": {}},
+        agent_registry={"analysis": _MustNotRun},
+        critic_enabled=False,
+    )
+
+    async def dependency_timeout(*args, **kwargs):
+        return False
+
+    monkeypatch.setattr(orch, "_await_milestone_async", dependency_timeout)
+    results = await orch.route_parallel(
+        [
+            {
+                "task_id": "V-timeout",
+                "phase": "analysis",
+                "target": "10.0.0.5",
+                "depends_on": ["10.0.0.5", "recon"],
+            }
+        ]
+    )
+
+    assert started == []
+    assert results[0].status == AgentStatus.FAILED
+    assert "task not started" in results[0].error
 
 
 # ── Real concurrency ─────────────────────────────────────────────────────
@@ -192,6 +241,46 @@ async def test_parallel_recon_runs_concurrently_not_sequentially():
     assert len(results) == 3
     assert all(r.status == AgentStatus.COMPLETE for r in results)
     assert max_active == 3, f"recon ran sequentially (max concurrent agents: {max_active}, expected 3)"
+
+
+@pytest.mark.asyncio
+async def test_parallel_routes_keep_concurrent_run_log_ownership(tmp_path):
+    """Executor workers must retain the originating run context under overlap."""
+    barrier = threading.Barrier(2, timeout=5)
+
+    class _LoggedRecon(Agent):
+        def run(self, task, context):
+            barrier.wait()
+            logging.getLogger("swarm-test").warning("worker-run:%s", task["run_marker"])
+            return AgentResult(
+                agent_type=self.agent_type,
+                status=AgentStatus.COMPLETE,
+                task_id=task["task_id"],
+                output={},
+            )
+
+    orch = SwarmOrchestrator(
+        {"config": {}},
+        agent_registry={"recon": _LoggedRecon},
+        critic_enabled=False,
+        max_parallel=2,
+    )
+
+    async def _run(marker: str) -> None:
+        run_dir = tmp_path / marker
+        RunLog.attach(run_dir)
+        try:
+            await orch.route_parallel([{"task_id": marker, "phase": "recon", "target": marker, "run_marker": marker}])
+        finally:
+            RunLog.detach()
+
+    await asyncio.gather(_run("first"), _run("second"))
+    first_log = (tmp_path / "first" / "run.log").read_text(encoding="utf-8")
+    second_log = (tmp_path / "second" / "run.log").read_text(encoding="utf-8")
+    assert "worker-run:first" in first_log
+    assert "worker-run:second" not in first_log
+    assert "worker-run:second" in second_log
+    assert "worker-run:first" not in second_log
 
 
 @pytest.mark.asyncio

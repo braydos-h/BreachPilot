@@ -8,14 +8,15 @@ no target touch -- so it is ``@audit_tool`` only (no allowlist gate).
 
 from __future__ import annotations
 
-import os
 import re
-import shutil
+from pathlib import Path
 from typing import Any
 
 from tools.mcp_shared import _attempt_dir
 from tools.mcp_tools.modules.hash import _identify_hash_modes
-from tools.mcp_tools.registry import ToolContext, run_argv_captured
+from tools.mcp_tools.registry import ToolContext
+from tools.mcp_tools.sandbox_exec import run_argv_in_sandbox, sandbox_error_block
+from tools.sandbox.exceptions import SandboxError, SandboxUnsupportedError, SandboxWorkspaceError
 
 
 def register_cracking_tools(mcp: Any, *, ctx: ToolContext) -> None:
@@ -54,6 +55,22 @@ def register_cracking_tools(mcp: Any, *, ctx: ToolContext) -> None:
         cfg_wl = ((config or {}).get("exploit") or {}).get("wordlist")
         return str(cfg_wl) if cfg_wl else _DEFAULT_WORDLIST
 
+    def _worker_path(raw_path: str) -> str | None:
+        """Map workspace paths into the worker; never inspect a host path."""
+        path = Path(raw_path)
+        candidate = path if path.is_absolute() else workspace / path
+        sandbox = ctx.sandbox
+        if sandbox is None:
+            return None
+        try:
+            return str(sandbox.container_path(candidate))
+        except SandboxWorkspaceError:
+            # Absolute paths outside the shared workspace refer to the worker
+            # image only; relative paths may not escape the workspace.
+            return str(path) if path.is_absolute() else None
+        except SandboxError:
+            return None
+
     def _clamp_timeout(value: Any) -> int:
         try:
             ivalue = int(value)  # type: ignore[arg-type]
@@ -77,7 +94,7 @@ def register_cracking_tools(mcp: Any, *, ctx: ToolContext) -> None:
         rules: str = "",
         timeout: int = 600,
     ) -> str:
-        """Crack a hash locally with hashcat or john.
+        """Crack a hash inside the disposable worker with hashcat or john.
 
         Args:
             hash_value: Single hash string to crack (full input is gated;
@@ -86,8 +103,9 @@ def register_cracking_tools(mcp: Any, *, ctx: ToolContext) -> None:
             hash_mode: Optional explicit hashcat ``-m`` mode (digits only).
                 Omitted means auto-identify from the hash string.
             wordlist: Optional wordlist path (explicit, config, or default).
-                Must exist on the operator box.
-            rules: Optional hashcat rule file path. Must exist when given.
+                Workspace-relative paths are mapped into the worker; absolute
+                paths outside the workspace refer to the worker image.
+            rules: Optional hashcat rule file path in the same path namespace.
             timeout: Crack-command timeout in seconds, clamped to 1..3600.
 
         Returns:
@@ -96,13 +114,19 @@ def register_cracking_tools(mcp: Any, *, ctx: ToolContext) -> None:
             ``CRACKER_NOT_INSTALLED`` fail-closed string.
 
         Gates:
-            ``@audit_tool`` only. Local-only tool: no target is touched, so no
-            allowlist gate is added (never add one here).
+            ``@audit_tool`` only. No target is touched, so no allowlist gate is
+            added. All cracker processes run inside the sandbox worker.
 
         Side-effects:
             Writes the hash to ``<workspace>/hash.txt`` for the attempt and
-            executes the local cracker via argv (no shell).
+            executes the cracker via argv inside the disposable worker.
         """
+        sandbox = ctx.sandbox
+        if sandbox is None:
+            return sandbox_error_block(
+                SandboxUnsupportedError("hash cracking requires an active sandbox worker"),
+                tool_name="run_hash_crack",
+            )
         # RULE-LOCK-FIRST: gate sees the FULL input; truncation applies only to
         # display OUTPUT tails below (with [truncated] markers).
         if not hash_value or not hash_value.strip():
@@ -158,46 +182,84 @@ def register_cracking_tools(mcp: Any, *, ctx: ToolContext) -> None:
                     "proceeding with john auto-detect."
                 )
 
-        if not shutil.which(t):
-            return (
-                f"CRACKER_NOT_INSTALLED: {t} is not on PATH. "
-                f"Install it (e.g. apt install {t}) on the operator box and retry."
-            )
-
         wl = _resolve_wordlist(wordlist)
-        if not os.path.exists(wl):
-            return f"WORDLIST_NOT_FOUND: wordlist '{wl}' does not exist on the operator box."
+        worker_wl = _worker_path(wl)
+        if worker_wl is None:
+            return "BLOCKED: relative wordlist must remain inside the shared run workspace."
         rules_path = (rules or "").strip()
-        if rules_path and not os.path.exists(rules_path):
-            return f"RULES_NOT_FOUND: rule file '{rules_path}' does not exist on the operator box."
+        worker_rules = _worker_path(rules_path) if rules_path else ""
+        if rules_path and worker_rules is None:
+            return "BLOCKED: relative rule file must remain inside the shared run workspace."
 
         attempt_dir, attempt_id = _attempt_dir(workspace)
         hashfile = attempt_dir / "hash.txt"
         hashfile.write_text(h + "\n", encoding="utf-8")
+        try:
+            worker_hashfile = str(sandbox.container_path(hashfile))
+        except SandboxError as exc:
+            return sandbox_error_block(exc, tool_name="run_hash_crack")
 
         cracked: list[tuple[str, str]] = []
         crack_argv: list[str]
         show_argv: list[str]
         if t == "hashcat":
-            crack_argv = ["hashcat", "-m", mode, "-a", "0", str(hashfile), wl]
-            if rules_path:
-                crack_argv.extend(["-r", rules_path])
-            show_argv = ["hashcat", "-m", mode, str(hashfile), "--show"]
+            crack_argv = ["hashcat", "-m", mode, "-a", "0", worker_hashfile, worker_wl]
+            if worker_rules:
+                crack_argv.extend(["-r", worker_rules])
+            show_argv = ["hashcat", "-m", mode, worker_hashfile, "--show"]
         else:  # john
-            crack_argv = ["john", f"--wordlist={wl}", str(hashfile)]
+            crack_argv = ["john", f"--wordlist={worker_wl}", worker_hashfile]
             if john_format:
                 crack_argv.extend([f"--format={john_format}"])
-            show_argv = ["john", "--show", str(hashfile)]
+            show_argv = ["john", "--show", worker_hashfile]
             if john_format:
                 show_argv.extend([f"--format={john_format}"])
 
         cmd = " ".join(crack_argv)
-        crack_status, returncode, crack_out, elapsed = run_argv_captured(crack_argv, clamped_timeout, max_chars=3000)
+        try:
+            ran, crack_result = run_argv_in_sandbox(
+                ctx,
+                crack_argv,
+                timeout=clamped_timeout,
+                cwd_host=attempt_dir,
+                tool_name="run_hash_crack",
+            )
+            if not ran or crack_result is None:
+                return sandbox_error_block(
+                    SandboxUnsupportedError("hash cracking requires an active sandbox worker"),
+                    tool_name="run_hash_crack",
+                )
+        except SandboxError as exc:
+            return sandbox_error_block(exc, tool_name="run_hash_crack")
+        crack_status = crack_result.status
+        returncode = crack_result.exit_code
+        crack_out = _tail(
+            (crack_result.stdout or "") + ("\n" + crack_result.stderr if crack_result.stderr else ""), 3000
+        )
+        elapsed = crack_result.duration_seconds
+        if returncode == 127:
+            return (
+                f"CRACKER_NOT_INSTALLED: {t} is not installed in the sandbox worker image. "
+                "Use a derived worker image that includes the cracker; host installation is not used."
+            )
 
         # Retrieve recovered plaintext via the cracker's --show view.
         show_out = ""
-        if crack_status != "error" and shutil.which(t):
-            _, _, show_out, _ = run_argv_captured(show_argv, 60, max_chars=2000)
+        if crack_status not in {"error", "blocked", "timed_out"}:
+            try:
+                ran, show_result = run_argv_in_sandbox(
+                    ctx,
+                    show_argv,
+                    timeout=60,
+                    cwd_host=attempt_dir,
+                    tool_name="run_hash_crack",
+                )
+                if ran and show_result is not None:
+                    show_out = _tail(
+                        (show_result.stdout or "") + ("\n" + show_result.stderr if show_result.stderr else ""), 2000
+                    )
+            except SandboxError as exc:
+                return sandbox_error_block(exc, tool_name="run_hash_crack")
 
         # Parse --show output. hashcat: "hash:plain" (or "hash:salt:plain");
         # john: "username:password" lines plus a "Ng 0:00:..." summary line.

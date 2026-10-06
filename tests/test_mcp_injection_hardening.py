@@ -9,7 +9,7 @@ These cover the fixes in ``mcp_exploit_server.py`` for the confirmed bugs:
 - H4  ``run_exploit_terminal``: allowlist covers IPv6/hostname/bracketed.
 - H5/M5  ``run_as_root``: target-IP allowlist lock (destructive gate removed in lab build).
 - H6  ``download_and_install``: target_name validation + argv install.
-- M4  ``run_python_file``: validate_ipv4 gate + ps_quote WindowTitle.
+- M4  ``run_python_file``: target validation + sandbox-only execution.
 - M8  ``cve_to_exploit_synth``: validate_ipv4 + service_name/version reject.
 
 Each test mocks subprocess / network (no live tools) and asserts a malicious
@@ -19,9 +19,10 @@ argv element (no shell string, no injected token executed).
 
 from __future__ import annotations
 
-import subprocess
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
+from unittest.mock import patch
 
 import pytest
 
@@ -33,11 +34,55 @@ def _make_server(
     *,
     require_allowlist: bool = False,
     allowed_targets: list[str] | None = None,
+    with_sandbox: bool = True,
 ):
     from mcp_exploit_server import create_mcp_server
     from tools.cve_lookup import CVESearchSettings, NVDClient
     from tools.exploit_search import ExploitSearch, ExploitSearchSettings
+    from tools.sandbox.models import SandboxResult
     from tools.web_researcher import WebResearcher, WebResearcherSettings
+
+    class FakeSandbox:
+        """In-process worker double: records requests and never runs commands."""
+
+        def __init__(self) -> None:
+            self.workspace = tmp_path.resolve()
+            self.cfg = SimpleNamespace(remove_stale_on_startup=False)
+            self.calls: list[dict[str, Any]] = []
+
+        def container_path(self, path: str | Path) -> str:
+            resolved = Path(path).resolve()
+            if resolved != self.workspace and self.workspace not in resolved.parents:
+                raise ValueError("path outside fake worker workspace")
+            relative = resolved.relative_to(self.workspace).as_posix()
+            return "/workspace" if relative == "." else f"/workspace/{relative}"
+
+        def _enforce_scope(self, target: str) -> None:
+            self.calls.append({"kind": "scope", "target": target})
+
+        def execute_argv(self, argv: list[str], **kwargs: Any) -> SandboxResult:
+            self.calls.append({"kind": "argv", "argv": list(argv), **kwargs})
+            return SandboxResult(
+                exit_code=0,
+                stdout="ok\n",
+                stderr="",
+                timed_out=False,
+                duration_seconds=0.1,
+                sandbox_id="test-worker",
+                status="completed",
+            )
+
+        def execute(self, command: str, **kwargs: Any) -> SandboxResult:
+            self.calls.append({"kind": "command", "command": command, **kwargs})
+            return SandboxResult(
+                exit_code=0,
+                stdout="ok\n",
+                stderr="",
+                timed_out=False,
+                duration_seconds=0.1,
+                sandbox_id="test-worker",
+                status="completed",
+            )
 
     search = ExploitSearch(ExploitSearchSettings())
     nvd = NVDClient(CVESearchSettings())
@@ -47,7 +92,12 @@ def _make_server(
             "allowed_targets": allowed_targets or [],
         }
     }
-    return create_mcp_server(search, nvd, WebResearcher(WebResearcherSettings()), tmp_path, config)
+    sandbox = FakeSandbox()
+    selected_sandbox = sandbox if with_sandbox else None
+    with patch("tools.sandbox.resolve_manager_with_fallback", return_value=(selected_sandbox, "")):
+        server = create_mcp_server(search, nvd, WebResearcher(WebResearcherSettings()), tmp_path, config)
+    server._test_sandbox = selected_sandbox
+    return server
 
 
 def _text(result) -> str:
@@ -64,60 +114,6 @@ def _text(result) -> str:
             t = str(c)
         parts.append(t)
     return "".join(parts)
-
-
-class _ProcStub:
-    """Minimal Popen-like stub for run_msf_module / run_python_file capture.
-
-    Subclasses ``subprocess.Popen`` so the MCP SDK's ``subprocess.Popen[bytes]``
-    type annotation (used in ``mcp.os.win32.utilities.FallbackProcess``) keeps
-    working when this stub replaces ``subprocess.Popen`` -- a plain class would
-    make the SDK's subscripted annotation raise ``TypeError: not subscriptable``
-    during its lazy import inside ``call_tool``.
-    """
-
-    def __init__(self, argv, returncode=0, stdout_bytes=b"ok\n", **kwargs):
-        self.argv = argv
-        self.returncode = returncode
-        self._stdout = stdout_bytes
-        self.stdout = None  # Linux PIPE path not used in these tests
-        self.stderr = None
-        self.pid = 12345
-
-    def wait(self, timeout=None):
-        return self.returncode
-
-    def kill(self):
-        self.returncode = -9
-
-    def communicate(self, input=None, timeout=None):
-        return self._stdout, b""
-
-
-class _Popen(_ProcStub, subprocess.Popen):
-    """Subscriptable Popen stub (inherits ``__class_getitem__`` from Popen)."""
-
-    def __init__(self, argv, **kwargs):
-        _ProcStub.__init__(self, argv)
-
-
-def _patch_pgrp(monkeypatch, returncode=0, out=b"ok\n", err=b""):
-    """Patch ``_run_with_pgrp_timeout`` to record argv and return a tuple.
-
-    Returns a list that the test can inspect to assert on the captured argv.
-    """
-    import mcp_exploit_server as mes
-
-    captured: list[Any] = []
-
-    def _fake(args, timeout, stdout=None, stderr=None, cwd=None, env=None, input_text=None, **popen_kwargs):
-        captured.append(list(args))
-        out_s = out.decode() if isinstance(out, bytes) else out
-        err_s = err.decode() if isinstance(err, bytes) else err
-        return returncode, out_s, err_s
-
-    monkeypatch.setattr(mes, "_run_with_pgrp_timeout", _fake)
-    return captured
 
 
 # ── C1: run_msf_module ──────────────────────────────────────────────────────
@@ -172,20 +168,12 @@ async def test_run_msf_module_rejects_metachar_option_value(tmp_path: Path) -> N
         )
     )
     assert text.startswith("BLOCKED:")
-    assert "forbidden characters" in text
+    assert "forbidden shell metacharacters" in text
 
 
 @pytest.mark.asyncio
 async def test_run_msf_module_uses_argv_list_no_shell(monkeypatch, tmp_path: Path) -> None:
     """Valid call invokes msfconsole as an argv list (no bash -c)."""
-    captured: list[Any] = []
-
-    class _CapturingPopen(_Popen):
-        def __init__(self, argv, **kwargs):
-            super().__init__(argv)
-            captured.append(list(argv))
-
-    monkeypatch.setattr(subprocess, "Popen", _CapturingPopen)
     mcp = _make_server(tmp_path)
     text = _text(
         await mcp.call_tool(
@@ -198,10 +186,10 @@ async def test_run_msf_module_uses_argv_list_no_shell(monkeypatch, tmp_path: Pat
         )
     )
     assert "MSF_RESULT:" in text
-    # The Popen argv must be a list with msfconsole and a resource file, never
-    # a shell string.
-    assert captured, "subprocess.Popen was not invoked"
-    argv = captured[0]
+    # The worker receives argv and never an MCP-host process request.
+    calls = [call for call in mcp._test_sandbox.calls if call["kind"] == "argv"]
+    assert calls
+    argv = calls[0]["argv"]
     assert isinstance(argv, list)
     assert argv[0] == "msfconsole"
     assert "-r" in argv
@@ -210,12 +198,40 @@ async def test_run_msf_module_uses_argv_list_no_shell(monkeypatch, tmp_path: Pat
     assert not any(";" in str(a) for a in argv if a not in ("exit -y",))
 
 
+@pytest.mark.asyncio
+async def test_establish_persistence_refuses_symlinked_attempt_directory(monkeypatch, tmp_path: Path) -> None:
+    """A worker-created attempt symlink cannot redirect the host implant write."""
+    mcp = _make_server(tmp_path)
+    outside = tmp_path.parent / f"{tmp_path.name}-outside"
+    outside.mkdir()
+    attempt_id = "worker-controlled-attempt"
+    (tmp_path / attempt_id).symlink_to(outside, target_is_directory=True)
+    monkeypatch.setattr(
+        "tools.mcp_tools.operator_connection._attempt_dir",
+        lambda workspace: (workspace / attempt_id, attempt_id),
+    )
+
+    text = _text(
+        await mcp.call_tool(
+            "establish_persistence",
+            {
+                "target_ip": "10.0.0.1",
+                "method": "linux_cron",
+                "callback_host": "10.0.0.2",
+                "auto_start_listener": False,
+            },
+        )
+    )
+
+    assert text.startswith("BLOCKED: implant script could not be written safely")
+    assert not list(outside.glob("implant_*.py"))
+
+
 # ── H1: lateral_exec / dump_credentials / kerberoast ───────────────────────
 
 
 @pytest.mark.asyncio
 async def test_lateral_exec_uses_argv_list_password_literal(monkeypatch, tmp_path: Path) -> None:
-    captured = _patch_pgrp(monkeypatch)
     mcp = _make_server(tmp_path)
     text = _text(
         await mcp.call_tool(
@@ -230,7 +246,7 @@ async def test_lateral_exec_uses_argv_list_password_literal(monkeypatch, tmp_pat
         )
     )
     assert "LATERAL_EXEC_RESULT:" in text
-    argv = captured[0]
+    argv = next(call["argv"] for call in mcp._test_sandbox.calls if call["kind"] == "argv")
     assert isinstance(argv, list)
     assert argv[0] == "impacket-psexec"
     # The malicious password must be a single literal argv element, not split
@@ -253,7 +269,6 @@ async def test_lateral_exec_rejects_invalid_target_ip(tmp_path: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_dump_credentials_secretsdump_argv_list(monkeypatch, tmp_path: Path) -> None:
-    captured = _patch_pgrp(monkeypatch)
     mcp = _make_server(tmp_path)
     text = _text(
         await mcp.call_tool(
@@ -262,7 +277,7 @@ async def test_dump_credentials_secretsdump_argv_list(monkeypatch, tmp_path: Pat
         )
     )
     assert "CRED_DUMP_RESULT:" in text
-    argv = captured[0]
+    argv = next(call["argv"] for call in mcp._test_sandbox.calls if call["kind"] == "argv")
     assert argv[0] == "impacket-secretsdump"
     # The whole 'domain/user:password@ip' target is one literal argv element.
     assert any("secret'$(id)" in a for a in argv)
@@ -271,7 +286,6 @@ async def test_dump_credentials_secretsdump_argv_list(monkeypatch, tmp_path: Pat
 
 @pytest.mark.asyncio
 async def test_kerberoast_argv_list(monkeypatch, tmp_path: Path) -> None:
-    captured = _patch_pgrp(monkeypatch)
     mcp = _make_server(tmp_path)
     text = _text(
         await mcp.call_tool(
@@ -280,7 +294,7 @@ async def test_kerberoast_argv_list(monkeypatch, tmp_path: Path) -> None:
         )
     )
     assert "KERBEROAST_RESULT:" in text
-    argv = captured[0]
+    argv = next(call["argv"] for call in mcp._test_sandbox.calls if call["kind"] == "argv")
     assert argv[0] == "impacket-GetUserSPNs.py"
     assert any("p`whoami`" in a for a in argv)
     assert not any(a == "-c" for a in argv)
@@ -312,7 +326,6 @@ async def test_generate_payload_rejects_metachar_options(tmp_path: Path) -> None
 
 @pytest.mark.asyncio
 async def test_generate_payload_uses_argv_list(monkeypatch, tmp_path: Path) -> None:
-    captured = _patch_pgrp(monkeypatch)
     mcp = _make_server(tmp_path)
     text = _text(
         await mcp.call_tool(
@@ -329,7 +342,7 @@ async def test_generate_payload_uses_argv_list(monkeypatch, tmp_path: Path) -> N
         )
     )
     assert "PAYLOAD_RESULT:" in text
-    argv = captured[0]
+    argv = next(call["argv"] for call in mcp._test_sandbox.calls if call["kind"] == "argv")
     assert argv[0] == "msfvenom"
     assert "-p" in argv
     # The shlex-parsed option must be a single literal argv element.
@@ -355,7 +368,6 @@ async def test_git_clone_rejects_traversal_target_dir(tmp_path: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_git_clone_uses_argv_list(monkeypatch, tmp_path: Path) -> None:
-    captured = _patch_pgrp(monkeypatch)
     mcp = _make_server(tmp_path)
     text = _text(
         await mcp.call_tool(
@@ -364,7 +376,7 @@ async def test_git_clone_uses_argv_list(monkeypatch, tmp_path: Path) -> None:
         )
     )
     assert "GIT_CLONE_RESULT:" in text
-    argv = captured[0]
+    argv = next(call["argv"] for call in mcp._test_sandbox.calls if call["kind"] == "argv")
     assert argv[:3] == ["git", "clone", "--"]
     # URL and dir are literal argv elements (no shell concatenation).
     assert "https://github.com/user/repo.git" in argv
@@ -398,6 +410,28 @@ async def test_run_exploit_terminal_allows_allowlisted_target(tmp_path: Path) ->
     # Not blocked by the allowlist (it may still fail on subprocess, but it must
     # not be a preflight allowlist block).
     assert "not in the explicit allowlist" not in text
+    assert "Missing tools on PATH" not in text  # command runs in worker, not MCP host
+
+
+@pytest.mark.asyncio
+async def test_terminal_does_not_follow_worker_log_symlink(tmp_path: Path, monkeypatch) -> None:
+    mcp = _make_server(tmp_path, require_allowlist=False)
+    outside = tmp_path / "operator-data.txt"
+    outside.write_text("keep", encoding="utf-8")
+    import tools.mcp_tools.terminal.execute as terminal_execute
+
+    run_in_sandbox = terminal_execute.run_command_in_sandbox
+
+    def create_worker_symlink(ctx: Any, command: str, **kwargs: Any):
+        attempt_dir = kwargs["cwd_host"]
+        (attempt_dir / "terminal.log").symlink_to(outside)
+        return run_in_sandbox(ctx, command, **kwargs)
+
+    monkeypatch.setattr(terminal_execute, "run_command_in_sandbox", create_worker_symlink)
+    text = _text(await mcp.call_tool("run_exploit_terminal", {"command": "echo harmless"}))
+
+    assert "TERMINAL_RESULT: completed" in text
+    assert outside.read_text(encoding="utf-8") == "keep"
 
 
 # ── H5/M5: run_as_root ──────────────────────────────────────────────────────
@@ -412,18 +446,12 @@ async def test_run_as_root_allows_destructive_in_lab(monkeypatch, tmp_path: Path
     """LAB BUILD: a destructive command is NOT refused -- it runs (mocked here)
     because the destructive gate was removed. Only the target-IP lock remains,
     and it is off here (require_explicit_allowlist=False)."""
-    captured = _patch_pgrp(monkeypatch)
-    # Gap 3: run_as_root now short-circuits to a pivot when passwordless sudo is
-    # unavailable (e.g. on the Windows test host, where _can_passwordless_sudo
-    # returns False). This test exercises the run path, so force sudo available.
-    monkeypatch.setattr("tools.env_probe._can_passwordless_sudo", lambda: True)
     mcp = _make_server(tmp_path)
     text = _text(await mcp.call_tool("run_as_root", {"command": "rm -rf /tmp"}))
     assert text.startswith("ROOT_CMD_RESULT: completed")
-    # The command ran via bash -c "sudo rm -rf /tmp 2>&1" -- no preflight block.
-    argv = captured[0]
-    payload = argv[argv.index("-c") + 1]
-    assert payload == "sudo rm -rf /tmp 2>&1"
+    call = next(call for call in mcp._test_sandbox.calls if call["kind"] == "command")
+    assert call["command"] == "rm -rf /tmp"
+    assert call["user"] == "root"
 
 
 @pytest.mark.asyncio
@@ -489,16 +517,6 @@ async def test_run_python_file_passes_target_both_positional_and_flag(monkeypatc
     / orchestrator convention) and a script using argparse --target both receive
     the IP. Regression guard for the log bug where sys.argv[1] was the literal
     string "--target" and the script connected to "--target:445"."""
-    from tools.mcp_tools import workspace as wsmod
-
-    captured: list[Any] = []
-
-    class _CapturingPopen(_Popen):
-        def __init__(self, argv, **kwargs):
-            super().__init__(argv)
-            captured.append(list(argv))
-
-    monkeypatch.setattr(subprocess, "Popen", _CapturingPopen)
     mcp = _make_server(tmp_path)
 
     written = _text(
@@ -511,27 +529,11 @@ async def test_run_python_file_passes_target_both_positional_and_flag(monkeypatc
     text = _text(await mcp.call_tool("run_python_file", {"target_ip": "10.0.0.5", "filename": "argcheck.py"}))
     assert "PYTHON_RUN_RESULT" in text
 
-    if wsmod._platform_system() == "Windows":
-        # Windows: the python argv is materialized inside the .ps1 wrapper as
-        # $args = @('10.0.0.5', '--target', '10.0.0.5') (ps_quote single-quotes
-        # each arg). Recover it from the run dir.
-        script_line = [ln for ln in text.splitlines() if ln.startswith("SCRIPT:")]
-        assert script_line, "SCRIPT: line missing from result"
-        script_path = Path(script_line[0].split(":", 1)[1].strip())
-        wrapper = script_path.parent / "run_python.ps1"
-        assert wrapper.exists(), "powershell wrapper was not written"
-        ps1 = wrapper.read_text(encoding="utf-8")
-        assert "'10.0.0.5'" in ps1
-        assert "'--target'" in ps1
-        # Bare positional must precede --target so sys.argv[1] is the IP, not the flag.
-        assert ps1.index("'10.0.0.5'") < ps1.index("'--target'")
-    else:
-        # Linux: subprocess.Popen is called with the python argv directly.
-        assert captured, "subprocess.Popen was not invoked"
-        argv = captured[0]
-        assert "10.0.0.5" in argv
-        assert "--target" in argv
-        assert argv.index("10.0.0.5") < argv.index("--target")
+    call = next(call for call in mcp._test_sandbox.calls if call["kind"] == "argv")
+    argv = call["argv"]
+    assert "10.0.0.5" in argv
+    assert "--target" in argv
+    assert argv.index("10.0.0.5") < argv.index("--target")
 
 
 @pytest.mark.asyncio
@@ -559,88 +561,40 @@ async def test_run_as_root_uses_argv_no_shell(monkeypatch, tmp_path: Path) -> No
     a raw concatenation that could be injected). The sudo command still uses
     bash -c but the input is the original command (operator-controlled), not a
     string built from untrusted args."""
-    captured = _patch_pgrp(monkeypatch)
-    # Gap 3: force passwordless sudo available so the run path (not the pivot)
-    # is exercised here; the argv-list behavior is what this test asserts.
-    monkeypatch.setattr("tools.env_probe._can_passwordless_sudo", lambda: True)
     mcp = _make_server(tmp_path)
     text = _text(await mcp.call_tool("run_as_root", {"command": "whoami"}))
     assert "ROOT_CMD_RESULT:" in text
-    argv = captured[0]
-    assert isinstance(argv, list)
-    assert argv[0] == "bash"
-    assert "-c" in argv
-    # The bash -c payload is exactly 'sudo whoami 2>&1' -- no extra injection.
-    payload = argv[argv.index("-c") + 1]
-    assert payload == "sudo whoami 2>&1"
+    call = next(call for call in mcp._test_sandbox.calls if call["kind"] == "command")
+    assert call["command"] == "whoami"
+    assert call["user"] == "root"
 
 
-# ── H6: download_and_install ────────────────────────────────────────────────
+# ── H6: host package-install tools ─────────────────────────────────────────
 
 
 @pytest.mark.asyncio
-async def test_download_and_install_neutralizes_traversal_target_name(monkeypatch, tmp_path: Path) -> None:
-    """A traversal-shaped target_name is reduced to its basename so the download
-    path stays inside the workspace (no BLOCKED needed -- the traversal is
-    neutralized, not the metachar-rejection path)."""
-    captured = _patch_pgrp(monkeypatch)
+async def test_package_install_tools_never_execute_on_mcp_host(monkeypatch, tmp_path: Path) -> None:
+    """Legacy package tool names must not inherit host privileges or secrets."""
+    import subprocess
 
-    def _ok_curl(*a, **k):
-        return subprocess.CompletedProcess(args=a, returncode=0, stdout="", stderr="")
-
-    monkeypatch.setattr(subprocess, "run", _ok_curl)
     mcp = _make_server(tmp_path)
-    text = _text(
-        await mcp.call_tool(
-            "download_and_install",
-            {"url": "https://example.com/tool.deb", "target_name": "../evil.deb"},
-        )
-    )
-    assert "INSTALL_RESULT:" in text
-    # The deb install argv must reference a path inside the workspace attempt
-    # dir (the basename 'evil.deb'), never a '..' traversal.
-    assert captured, "_run_with_pgrp_timeout was not invoked"
-    dpkg_argv = captured[0]
-    assert dpkg_argv[:3] == ["sudo", "dpkg", "-i"]
-    dpkg_path = dpkg_argv[3]
-    assert "evil.deb" in dpkg_path
-    assert ".." not in Path(dpkg_path).parts
 
+    def forbidden(*args, **kwargs):
+        raise AssertionError("agent package tools must not spawn a host command")
 
-@pytest.mark.asyncio
-async def test_download_and_install_rejects_metachar_target_name(tmp_path: Path) -> None:
-    mcp = _make_server(tmp_path)
-    text = _text(
-        await mcp.call_tool(
-            "download_and_install",
-            {"url": "https://example.com/tool.deb", "target_name": "x;id.deb"},
-        )
-    )
-    assert text.startswith("BLOCKED:")
-    assert "target_name must match" in text
-
-
-@pytest.mark.asyncio
-async def test_download_and_install_deb_uses_argv_list(monkeypatch, tmp_path: Path) -> None:
-    captured = _patch_pgrp(monkeypatch)
-
-    def _ok_curl(*a, **k):
-        return subprocess.CompletedProcess(args=a, returncode=0, stdout="", stderr="")
-
-    monkeypatch.setattr(subprocess, "run", _ok_curl)
-    mcp = _make_server(tmp_path)
-    text = _text(
-        await mcp.call_tool(
-            "download_and_install",
-            {"url": "https://example.com/tool.deb", "target_name": "tool.deb"},
-        )
-    )
-    assert "INSTALL_RESULT:" in text
-    # First captured argv should be the dpkg install (no shell).
-    assert captured, "_run_with_pgrp_timeout was not invoked"
-    first = captured[0]
-    assert first[:3] == ["sudo", "dpkg", "-i"]
-    assert not any(a == "-c" for a in first)
+    monkeypatch.setattr(subprocess, "run", forbidden)
+    monkeypatch.setattr("tools.mcp_tools.registry._run_with_pgrp_timeout", forbidden)
+    calls = [
+        ("apt_install", {"packages": "nmap"}),
+        ("pip_install", {"packages": "requests"}),
+        ("install_package", {"manager": "apt", "packages": "nmap"}),
+        ("download_and_install", {"url": "http://127.0.0.1/host-tool.deb"}),
+        ("update_system", {"upgrade": True}),
+    ]
+    for name, arguments in calls:
+        text = _text(await mcp.call_tool(name, arguments))
+        assert text.startswith("BLOCKED:")
+        assert "MCP host process" in text
 
 
 # ── M4: run_python_file ─────────────────────────────────────────────────────
@@ -660,43 +614,14 @@ async def test_run_python_file_rejects_invalid_target_ip(tmp_path: Path) -> None
 
 
 @pytest.mark.asyncio
-async def test_run_python_file_psquotes_window_title(monkeypatch, tmp_path: Path) -> None:
-    """On Windows the WindowTitle literal is ps_quote'd, not raw-interpolated."""
-    import mcp_exploit_server as mes
-
-    written: dict[str, str] = {}
-
-    class _NoopPopen(_Popen):
-        def __init__(self, argv, **kwargs):
-            super().__init__(argv)
-
-    monkeypatch.setattr(subprocess, "Popen", _NoopPopen)
-    # Force the Windows branch by monkeypatching platform.system.
-    monkeypatch.setattr(mes.platform, "system", lambda: "Windows")
-
-    # Write a harmless script into the workspace so run_python_file finds it.
-    (tmp_path / "x.py").write_text("print('hi')\n", encoding="utf-8")
-
-    # Capture the .ps1 wrapper content by intercepting Path.write_text.
-    orig_write_text = Path.write_text
-
-    def _spy_write_text(self, data, *a, **k):
-        if str(self).endswith("run_python.ps1"):
-            written["ps1"] = data
-        return orig_write_text(self, data, *a, **k)
-
-    monkeypatch.setattr(Path, "write_text", _spy_write_text)
-
-    mcp = _make_server(tmp_path)
+async def test_run_python_file_without_worker_fails_closed(tmp_path: Path) -> None:
+    """Python exploit scripts are never executed by the MCP host."""
+    mcp = _make_server(tmp_path, with_sandbox=False)
     text = _text(await mcp.call_tool("run_python_file", {"target_ip": "10.0.0.1", "filename": "x.py"}))
-    assert "PYTHON_RUN_RESULT:" in text
-    ps1 = written.get("ps1", "")
-    # The WindowTitle line must use ps_quote (single-quoted literal), so a
-    # crafted target_ip cannot break out of the PowerShell string.
-    title_line = [ln for ln in ps1.splitlines() if "WindowTitle" in ln]
-    assert title_line, "WindowTitle line not found in wrapper"
-    # The quoted title should appear as a single-quoted PowerShell string token.
-    assert "'AI Exploit Python: 10.0.0.1'" in title_line[0]
+
+    assert text.startswith("PYTHON_RUN_RESULT: blocked")
+    assert "active sandbox" in text
+    assert "host execution is disabled" in text
 
 
 # ── M8: cve_to_exploit_synth ────────────────────────────────────────────────

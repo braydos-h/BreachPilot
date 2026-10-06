@@ -222,17 +222,21 @@ normalization layer: `providers.<id>` first, legacy block fallback).
 
 ## Operator-facing checklist (per acceptance gate)
 
-When your provider ships, verify the Ollama-free operational surfaces:
+When your chat provider ships, verify the provider-isolated operational
+surfaces:
 
 - `models.provider: <id>` in `config.yaml` (the config validator whitelists
   ids from the registry via `tools.config_manager.resolve_known_provider_ids`
   — automatic).
-- Doctor (`python main.py --doctor`) probes ONLY your provider: no Ollama
-  endpoints for non-ollama selections (generic providers use your
+- Doctor (`python main.py --doctor`) probes ONLY the active chat provider: no
+  Ollama endpoints for non-ollama selections (generic providers use your
   `health()`).
 - `GET /api/v1/providers` returns your `metadata()` row (UI picker comes
   from it); `GET /api/v1/models/live` dispatches your `list_models`.
 - Telemetry attributes usage by `provider` (`model_telemetry.py`).
-- Embeddings are independent: `embeddings.provider: none` runs the engine
-  with zero Ollama traffic; skills degrade to deterministic matching and
-  semantic memory to keyword storage.
+- Embeddings are independent: `embeddings.provider: none` makes provider-aware
+  Flow A memory/skill consumers use keyword/tag fallbacks without embedding
+  requests. Frozen Flow B still has its legacy Ollama semantic-memory path when
+  enabled. Research is also independent; the checked-in config selects Ollama
+  research with SerpAPI as fallback, so non-Ollama chat alone does not mean
+  zero total Ollama traffic.

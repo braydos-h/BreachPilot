@@ -3,6 +3,8 @@ version: 0.1.0
 description: Sliver C2 bridge - implant generation, team server, session management. Mirrors tools/metasploit_bridge.py for modern C2. Target-touching tools are allowlist-locked; callback hosts must be added to exploit.allowed_targets.
 author: BreachPilot
 capabilities: [mcp_tool]
+target_touching: true
+provides_mcp_tools: [sliver_generate_implant, sliver_interact_session, sliver_list_sessions]
 enabled: false
 config_section:
   sliver_c2:

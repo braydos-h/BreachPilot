@@ -140,11 +140,14 @@ The autonomous orchestrator's no-MCP "Path B" is target-locked by its
 `scope_gate.check_scope` (kept for that reason); its `max_pivot_depth` defaults
 to 0.
 
-**Operator-box filesystem is unrestricted** (the operator box is a throwaway lab
-VM): `read_workspace_file` reads any path (including `/etc/hosts`, the vault
-keyfile), `write_python_file` accepts arbitrary paths/sizes/code, and
-`list_workspace` hides nothing. Recon / Flow B still enforce their own workspace
-containment where relevant.
+**Workspace filesystem contracts differ by operation.** `read_workspace_file`
+uses `tools/kernel/workspace.py` to reject paths resolving outside the workspace
+and refuses `.vault_key` reads. `list_workspace` redacts the `credentials/`
+subtree and vault keyfile names. `write_python_file` accepts only a bare
+filename, creates a new file in a unique run-workspace attempt directory, and
+has an anti-fill cap. Absolute paths, nested names, symlinks, and replacement
+of existing files are refused. Its writes remain host-side materialization
+inside the run workspace, separate from sandbox command execution.
 
 `config.yaml` defaults to the lab posture:
 
@@ -168,7 +171,7 @@ SAFE/GATED narrowing, and the defensive scope-gated `mcp_server.py` are unchange
 
 `mcp_server.py` is a defensive, scope-aware MCP server.
 
-`mcp_exploit_server.py` is not the main safety boundary. It exposes tools for shell execution, script writing/running, package installation, Metasploit, payloads, credential storage, recon, autonomous campaigns, sessions, listeners, and exploit modules. Its file-level docstring explicitly says policy gating is expected in `tools.exploit_agent`. When the sandbox is enabled (default), every attack-execution tool funnels through the disposable worker (`tools/mcp_tools/sandbox_exec.py`) and any sandbox failure returns a structured `SANDBOX_*` block — host execution is never an automatic fallback.
+`mcp_exploit_server.py` is not the main safety boundary. It exposes tools for shell execution, script writing/running, package installation, Metasploit, payloads, credential storage, recon, autonomous campaigns, sessions, listeners, and exploit modules. Its file-level docstring explicitly says policy gating is expected in `tools.exploit_agent`. Every attack-execution tool funnels through the required disposable worker (`tools/mcp_tools/sandbox_exec.py`); any sandbox failure returns a structured `SANDBOX_*` block, with no host-execution fallback.
 
 When `multi_model.enabled` is true, the exploit MCP server also exposes `consult_peer_models`. This is advisory only: peer models receive no MCP tool schemas, cannot execute commands, and their responses must still pass through the main agent and `ExploitPolicy` before any target-touching action occurs.
 
@@ -205,15 +208,14 @@ Evidence and auditability are part of the safety model:
 - New attack-execution paths MUST go through the sandbox funnel
   (`tools/mcp_tools/sandbox_exec.py`); never `subprocess` agent-generated
   commands directly on the host, and never add a host-execution fallback for
-  sandbox failures (fail closed with `SANDBOX_*` blocks). The ONE sanctioned
-  fallback is the boot-time decision in
-  `tools/sandbox/manager.py::resolve_manager_with_fallback`: with
-  `sandbox.fallback_native: true` (explicit opt-in; default `false`), an unusable Docker stack degrades
-  the WHOLE server process to the legacy host-execution mode before any tool
-  exists — surfacing as a boot-log warning, an amber WebUI home-screen banner,
-  and a `SANDBOX_FALLBACK:` line in every legacy-path tool result. Never
-  switch a session between contained and native execution mid-stream, and keep
-  `sandbox.fallback_native: false` (default, fail-closed) (`SANDBOX_UNAVAILABLE` blocks).
+  sandbox failures (fail closed with `SANDBOX_*` blocks). Both
+  `sandbox.enabled: false` and `sandbox.fallback_native: true` are rejected
+  during configuration parsing. The `fallback_native` key remains only as a
+  deprecated compatibility field and must be `false`. If Docker or the worker
+  image is unavailable, the entire session remains fail-closed and attack
+  tools return `SANDBOX_*` blocks; there is no host-execution fallback. The
+  historical `resolve_manager_with_fallback` name is retained for imports but
+  always returns a manager with no fallback notice.
   See [sandbox.md](sandbox.md) for the full fail-closed contract and
   [generated/safety-defaults.md](generated/safety-defaults.md) for the
   schema-generated default table.

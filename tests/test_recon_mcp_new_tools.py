@@ -1,9 +1,10 @@
-"""Phase 3 Round 2 — MCP registration + behavior of the 3 new recon tools.
+"""MCP registration + behavior of UDP, OSINT, and recon diff tools.
 
 Builds a real MCP server via ``create_mcp_server`` (mirroring
 ``test_mcp_tool_registration.py``) with ``require_explicit_allowlist: False``
-so the allowlist decorator is a pass-through. No real network: OSINT and UDP
-backends are monkeypatched.
+so the allowlist decorator is a pass-through. No real network: OSINT is
+monkeypatched and UDP is expected to fail closed under the worker capability
+policy.
 """
 
 from __future__ import annotations
@@ -114,27 +115,16 @@ async def test_run_osint_recon_rejects_invalid_ip(tmp_path: Path):
 
 
 @pytest.mark.asyncio
-async def test_run_udp_recon_returns_summary(tmp_path: Path) -> None:
+async def test_run_udp_recon_is_unsupported_without_worker_net_raw(tmp_path: Path, monkeypatch) -> None:
+    import tools.mcp_tools.recon as recon_module
+
     mcp = _make_server(tmp_path)
-
-    async def fake_recon_udp(self, target, top_ports=100):
-        from tools.recon_pipeline import HostReconResult, ServiceInfo
-
-        return HostReconResult(
-            target_ip=target,
-            scan_tool="nmap-udp",
-            udp_ports=[53, 161],
-            services=[
-                ServiceInfo(port=53, protocol="udp", service="domain"),
-                ServiceInfo(port=161, protocol="udp", service="snmp"),
-            ],
-        )
-
-    with pytest.MonkeyPatch().context() as mp:
-        mp.setattr("tools.recon_pipeline.ReconPipeline.recon_udp", fake_recon_udp)
-        result = await mcp.call_tool("run_udp_recon", {"target_ip": "10.0.0.50", "top_ports": 100})
+    worker_calls: list[str] = []
+    monkeypatch.setattr(recon_module, "run_argv_in_sandbox", lambda *_args, **_kwargs: worker_calls.append("called"))
+    result = await mcp.call_tool("run_udp_recon", {"target_ip": "10.0.0.50", "top_ports": 100})
     text = _to_text(result)
-    assert "UDP_PORTS" in text
-    assert "53" in text
-    assert "161" in text
-    assert "domain" in text
+    assert "UDP_PORTS: blocked" in text
+    assert "SANDBOX_UNSUPPORTED" in text
+    assert "NET_RAW" in text
+    assert "EXECUTED: nowhere" in text
+    assert worker_calls == []

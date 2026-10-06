@@ -129,7 +129,7 @@ def register_assessment_state_tools(mcp: Any, *, ctx: ToolContext) -> None:
         from tools.assessment_state import aggregate_state
 
         try:
-            snap = aggregate_state(target_ip, workspace, config)
+            snap = aggregate_state(target_ip, workspace, config, audit_path=ctx.audit_path)
         except _EXC_GROUP_CATCH as exc:  # noqa: BLE001 -- snapshot never raises
             _log_nested_exceptions(exc)
             return f"ERROR: aggregate_state failed: {exc}"
@@ -274,7 +274,7 @@ def register_assessment_state_tools(mcp: Any, *, ctx: ToolContext) -> None:
 
         max_items = max(1, min(_positive_int(limit, 25), 200))
         tool_filter = (tool or "").strip().lower()
-        audit = workspace / "exploit_audit.jsonl"
+        audit = ctx.audit_path or workspace / "exploit_audit.jsonl"
         lines = ["EVIDENCE:"]
         rows: list[str] = []
         if audit.exists():

@@ -78,7 +78,7 @@ export function useSkillsPage() {
     if (status !== "all") out = out.filter((s) => skillState(s.name, skillsCfg) === status);
     if (sort === "name") out = [...out].sort((a, b) => a.name.localeCompare(b.name));
     else if (sort === "state") {
-      const order: Record<string, number> = { enabled: 0, auto: 1, blocked: 2 };
+      const order: Record<ReturnType<typeof skillState>, number> = { enabled: 0, auto: 1, blocked: 2 };
       out = [...out].sort(
         (a, b) =>
           order[skillState(a.name, skillsCfg)] - order[skillState(b.name, skillsCfg)] ||
@@ -226,6 +226,7 @@ export function useSkillsPage() {
     draftMarkdown,
     setDraftMarkdown,
     draftError,
+    setDraftError,
     previewTab,
     setPreviewTab,
     skillsCfg,

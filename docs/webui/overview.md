@@ -31,10 +31,12 @@ Vite + React 18 + TypeScript SPA under `webui/src/`. Loopback-only; all authorit
 |-------|------|--------|
 | HTML entry | `webui/index.html:2` | `<html class="dark">`, theme toggle script (`breachpilot.theme`), `#root` mount |
 | React root | `webui/src/main.tsx:8` | `ReactDOM.createRoot` → `<ErrorBoundary>` → `<App />` |
-| CSS | `webui/src/index.css:1` | Tailwind base/components/utilities, HSL CSS vars (`:root`/`.dark`), custom utilities (`bg-grid`, `glow-primary`, `animate-scan`, etc.) |
+| CSS | `webui/src/index.css:1` | Tailwind 4 import with `tailwind.config.ts` loaded through `@config`, HSL CSS vars (`:root`/`.dark`), custom utilities (`bg-grid`, `glow-primary`, `animate-scan`, etc.) |
 | Version inject | `webui/vite.config.ts:13` | `define.__APP_VERSION__` from `package.json:version` (`0.68.4`) |
 
-`index.css` defines light `:root` + dark `.dark` HSL vars (`--background`, `--primary`, etc.). Default is dark via `index.html`.
+`index.css` defines the dark HSL vars (`--background`, `--primary`, etc.) in
+`:root` and `.dark`. The UI is dark-only and `index.html` sets
+`color-scheme: dark`.
 
 ## Build & Toolchain
 
@@ -46,7 +48,7 @@ Vite + React 18 + TypeScript SPA under `webui/src/`. Loopback-only; all authorit
 | Alias | `vite.config.ts:18`, `tsconfig.app.json:19` | `@/*` → `src/*` |
 | Plugins | `vite.config.ts:16` | `@vitejs/plugin-react` only |
 | TS target | `tsconfig.app.json:2` | `ES2021`, `lib:[ES2023, DOM, DOM.Iterable]`, `strict`, `noUnusedLocals/Parameters`, `noFallthroughCasesInSwitch` |
-| Tailwind | `tailwind.config.ts:5` | `darkMode:["class"]`, content `index.html + src/**/*.{ts,tsx}`, plugins `typography`+`animate`, HSL-var colors, `typography.invert` overrides |
+| Tailwind | `tailwind.config.ts:5` | Tailwind 4.3 loads the legacy config via `@config`; `darkMode:["class"]`, content `index.html + src/**/*.{ts,tsx}`, plugins `typography`+`animate`, HSL-var colors, `typography.invert` overrides |
 
 See `docs/webui/build.md` for full build write-up.
 
@@ -78,18 +80,22 @@ All routes are nested under `<Layout>` (`src/components/Layout.tsx:50`) which pr
 
 ### SPA Serving
 
-`python main.py --web` builds `webui/dist/` if missing, sets `api.serve_webui:true` in-memory, mounts `dist/` at `/` with deep-link fallback. Dev uses `npm run dev` against a separately running daemon.
+`python main.py --web` uses the built SPA (from a source checkout it runs
+`npm ci && npm run build` when missing; a wheel uses the bundled data-prefix
+copy), sets `api.serve_webui:true` in-memory, and mounts it at `/` with a
+deep-link fallback. `--rebuild` requires a source checkout and Node/npm. Dev
+uses `npm run dev` against a separately running daemon.
 
 ## Auth
 
 | Gate | File | Behaviour |
 |------|------|-----------|
-| `TokenGate` | `webui/src/components/TokenGate.tsx` | Reads `sessionStorage breachpilot.apiToken.v1` via `api/client.ts:6`. Verifies via `GET /capabilities` (`api/hooks.ts:114`). 401→ clear+error. `status 0` → daemon unreachable hint. |
+| `TokenGate` | `webui/src/components/TokenGate.tsx` | Reads the module-memory token via `api/client.ts`. Verifies via `GET /capabilities` (`api/hooks.ts:114`). 401→ clear+error. `status 0` → daemon unreachable hint. |
 | `OnboardingGate` | `webui/src/components/OnboardingGate.tsx` | After token: `GET /secrets` (`api/hooks.ts:169`). If any `missing` and `sessionStorage breachpilot.onboarding.v1 !== "1"`, shows provider+keys+ChatGPT setup. |
 | `WelcomeGate` | `webui/src/components/WelcomeScreen.tsx` | First-visit tour (event `breachpilot:open-welcome` from `HomePage`) |
 | `ErrorBoundary` | `webui/src/components/ErrorBoundary.tsx` | Wraps entire app (`main.tsx:10`) |
 
-Token storage: `sessionStorage` only (survives reload, clears on tab close). Header `Authorization: Bearer <token>` injected by `apiFetch` (`api/client.ts:75`). WS/SSE handshake also uses `sessionStorage` token (`api/ws.ts:236`, `api/sse.ts:200`).
+Token storage: module memory only (cleared on reload, sign-out, or session expiry). Header `Authorization: Bearer <token>` injected by `apiFetch` (`api/client.ts`). WS/SSE handshakes use the same in-memory token (`api/ws.ts`, `api/sse.ts`). The onboarding dismissal flag and telemetry baseline use `sessionStorage`; the bearer token does not.
 
 `Layout.tsx:63` sign-out clears token and reloads.
 
@@ -103,7 +109,7 @@ Token storage: `sessionStorage` only (survives reload, clears on tab close). Hea
 | Permission mode | `lib/permissionMode.ts` + `components/permission/PermissionControl.tsx` | `read_only`/`approve`/`full_access`, auto-answer via `autoAnswerFor` (`routes/RunPage.tsx:169`) |
 | Theme | `lib/useTheme.ts` | `localStorage breachpilot.theme`, toggled in `Layout` |
 | Wizard | `RunWizard.tsx:37` local `useState` | Lifted model/mode/target/goal/power-ups state, `buildRequest()` serialises to `RunCreateRequest` |
-| Router | `react-router-dom 6.27` | `?path=recon|attack|fast` pre-selects mode; `:runId` params |
+| Router | `react-router-dom 7.18` | `?path=recon|attack|fast` pre-selects mode; `:runId` params |
 
 ### Query Defaults
 

@@ -31,12 +31,9 @@ date with `main` before merge (no stale-green merges).
 - **Force-push blocked** (`non_fast_forward`) and **deletion blocked**
   (`deletion`). History on `main` is append-only; changes land via
   squash-merge.
-- Solo-maintainer note: GitHub does not count the author's own approval, so
-  `required_approving_review_count: 1` needs a second reviewer to merge.
-  Until one exists, either set the count to `0` at apply time (the §10
-  checklist evidence posted on the PR **is** the review — see
-  `CONTRIBUTING.md` §11b) or add a collaborator. Do not weaken the status
-  checks to compensate.
+- The checked-in spec requires one approving review. If the project cannot
+  provide a second reviewer, the ruleset remains an unresolved governance
+  prerequisite; do not silently lower the approval count or status checks.
 
 ## 3. Merge process
 

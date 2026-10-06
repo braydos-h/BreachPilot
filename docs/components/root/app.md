@@ -70,7 +70,8 @@ No other public symbols — `app.py` is import-only via `main._run_daemon` / tes
 
 - `reports/api_runtime.db` via `ApiPersistence` — runs + decisions (separate from Flow B `research.db`).
 - `EventBrokerRegistry` — per-run JSONL + ring buffer (`api.event_buffer_size`, default 256) + WebSocket pub/sub.
-- `webui/dist/` — built SPA; served read-only, never mutated.
+- Resolved SPA directory — source checkout `webui/dist/` or the wheel data-prefix
+  copy returned by `tools.paths.get_webui_dist_dir()`; served read-only.
 - Lifespan `recover_interrupted()` re-marks interrupted runs so UI shows them as failed rather than stuck.
 
 ## Configuration
@@ -129,7 +130,7 @@ flowchart TD
 | Non-loopback `api.host` | `assert_api_loopback` | `ValueError` at factory time |
 | `event_buffer_size < 1` | `app.py:86` | `ValueError` |
 | Invalid `allowed_origins` | `app.py:113` | `ValueError` (must be list of loopback origins) |
-| Missing `webui/dist/index.html` when `serve_webui` true | Guard `index_html.exists()` | SPA fallback not mounted; API still serves |
+| Missing `index.html` under the resolved SPA directory when `serve_webui` true | Guard `index_html.exists()` | SPA fallback not mounted; API still serves |
 | Path traversal in SPA fallback | `candidate.relative_to(_webui_dist_resolved)` | 404 |
 | Missing `uvicorn`/`app.py` import | `main._run_daemon` | Exit 1 with hint to `pip install -r requirements.txt` |
 
@@ -144,7 +145,7 @@ flowchart TD
 
 - Bearer token required on every `/api/v1` request; WS auth also checks token + origin.
 - CORS allowlist is loopback-only; `allow_credentials=True` only for those origins.
-- SPA serving is read-only `FileResponse` under `webui/dist/` with resolved-path traversal guard.
+- SPA serving is read-only `FileResponse` under the resolved SPA directory with a resolved-path traversal guard.
 
 ## Tests
 

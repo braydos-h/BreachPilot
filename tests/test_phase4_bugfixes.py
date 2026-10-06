@@ -245,25 +245,31 @@ async def test_orchestrator_domain_campaign_runs_subdomain_expansion(tmp_path: P
 
     orch._executor = _NoopExecutor()  # type: ignore[attr-defined]
 
-    # Mock crt.sh urlopen to return two subdomains.
+    # Mock the bounded crt.sh transport to return two subdomains.
     fake_crt = _json.dumps(
         [
             {"name_value": "www.example.com"},
             {"name_value": "api.example.com"},
         ]
     ).encode()
-    fake_resp = MagicMock()
-    fake_resp.read.return_value = fake_crt
-    fake_resp.__enter__ = lambda self: self
-    fake_resp.__exit__ = lambda self, *a: None
-    import urllib.request as _urlreq
+    from tools.research import http_fetch
 
-    monkeypatch.setattr(_urlreq, "urlopen", lambda *a, **k: fake_resp)
+    fetch_options: dict[str, Any] = {}
 
-    # Mock resolve_target_to_ip for the discovered subdomains.
+    def _fake_fetch(_url, **kwargs):
+        fetch_options.update(kwargs)
+        return 200, {}, fake_crt, _url
+
+    monkeypatch.setattr(http_fetch, "fetch_response", _fake_fetch)
+    # Mock bounded DNS for the discovered subdomains.
+    import socket
+
     monkeypatch.setattr(
-        "tools.validation_utils.resolve_target_to_ip",
-        lambda h: {"www.example.com": "1.1.1.1", "api.example.com": "2.2.2.2"}.get(h),
+        http_fetch,
+        "resolve_addresses_bounded",
+        lambda h, _port, _timeout: (
+            [(socket.AF_INET, {"www.example.com": "1.1.1.1", "api.example.com": "2.2.2.2"}[h])]
+        ),
     )
     # is_fqdn must pass for "example.com".
     monkeypatch.setattr("tools.validation_utils.is_fqdn", lambda h: h == "example.com")
@@ -287,6 +293,42 @@ async def test_orchestrator_domain_campaign_runs_subdomain_expansion(tmp_path: P
     subs = {s["subdomain"] for s in state.discovered_subdomains}
     assert "www.example.com" in subs
     assert "api.example.com" in subs
+    assert fetch_options["timeout"] == 5.0
+    assert fetch_options["max_bytes"] == 250_000
+    assert fetch_options["policy"].allowed_domains == ("crt.sh",)
+
+
+def test_campaign_domain_discovery_bounds_candidates_and_dns_timeouts(monkeypatch):
+    """CT output and DNS fan-out stay bounded without external network access."""
+    import json
+    import socket
+
+    from tools.campaign import phases
+    from tools.research import http_fetch
+
+    rows = [{"name_value": f"host{i}.example.com"} for i in range(100)]
+    monkeypatch.setattr(
+        http_fetch,
+        "fetch_response",
+        lambda *_args, **_kwargs: (200, {}, json.dumps(rows).encode(), "https://crt.sh/"),
+    )
+    resolved: list[str] = []
+
+    def _resolve(host, _port, timeout):
+        resolved.append(host)
+        assert timeout == phases._SUBDOMAIN_DNS_TIMEOUT_SECONDS
+        if host == "host0.example.com":
+            raise TimeoutError("simulated bounded timeout")
+        return [(socket.AF_INET, "93.184.216.34")]
+
+    monkeypatch.setattr(http_fetch, "resolve_addresses_bounded", _resolve)
+
+    result = phases._discover_domain_targets("example.com")
+
+    assert len(resolved) == phases._SUBDOMAIN_CANDIDATE_LIMIT
+    assert len(resolved) <= phases._SUBDOMAIN_DNS_WORKERS * phases._SUBDOMAIN_CANDIDATE_LIMIT
+    assert all(subdomain.endswith(".example.com") for subdomain, _ip in result)
+    assert len(result) == phases._SUBDOMAIN_CANDIDATE_LIMIT - 1
 
 
 def test_attack_state_to_dict_serializes_domain_fields():
@@ -560,7 +602,7 @@ def _stub_run_ok(*_a: Any, **_k: Any) -> tuple[str, int, str, float]:
 @pytest.mark.asyncio
 async def test_lateral_exec_accepts_lm_nt_hash(monkeypatch, tmp_path: Path) -> None:
     """Bug #13: a valid LM:NT (64-hex with colon) hash was rejected before."""
-    monkeypatch.setattr("tools.mcp_tools.credentials.run_argv_captured", _stub_run_ok)
+    monkeypatch.setattr("tools.mcp_tools.credentials.run_tool_argv_in_sandbox", _stub_run_ok)
     mcp = _make_server(tmp_path)
     text = _text(
         await mcp.call_tool(
@@ -580,7 +622,7 @@ async def test_lateral_exec_accepts_lm_nt_hash(monkeypatch, tmp_path: Path) -> N
 
 @pytest.mark.asyncio
 async def test_lateral_exec_accepts_nt_only_hash(monkeypatch, tmp_path: Path) -> None:
-    monkeypatch.setattr("tools.mcp_tools.credentials.run_argv_captured", _stub_run_ok)
+    monkeypatch.setattr("tools.mcp_tools.credentials.run_tool_argv_in_sandbox", _stub_run_ok)
     mcp = _make_server(tmp_path)
     text = _text(
         await mcp.call_tool(

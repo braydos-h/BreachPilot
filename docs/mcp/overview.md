@@ -35,7 +35,7 @@ Three MCP servers share one lifecycle, one transport hardening layer, and one se
 | Exploit | `mcp_exploit_server.py` | `AI Exploitation Tools` | Permissive exploitation surface for the exploit agent / recon-first paths; ~120 tools across 30 families | 30 families in `tools/mcp_tools/` (24 top-level incl. `terminal/` + 6 in `modules/`) | `8001` (`mcp_exploit_server.py:206-208`) |
 | Engine | `mcp_engine_server.py` | `breachpilot-engine` | Read-only advisory + history for foreign assistants (Claude Desktop, Cursor) | 5 tools | `8002` (`mcp_engine_server.py:200-203`) |
 
-All three call `tools.mcp_shared.run_mcp_http_server` (`tools/mcp_shared.py:384-405`) for HTTP: `mcp.streamable_http_app()` + `uvicorn.run` with loopback gate and optional `MCP_HTTP_TOKEN` bearer auth.
+All three call `tools.mcp_shared.run_mcp_http_server` (`tools/mcp_shared.py:384-405`) for HTTP: `mcp.streamable_http_app()` + `uvicorn.run` with a loopback gate. Non-loopback binds require both public-bind opt-ins and `MCP_HTTP_TOKEN` bearer authentication.
 
 ## Transports
 

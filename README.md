@@ -173,7 +173,7 @@ Execution is **autonomous within configured authorization boundaries**, while fi
 - **Authorized targets only.** The allowlist is the scope authority: anything not explicitly allowed is `BLOCKED` at the tool layer, regardless of what a command or prompt says. Static command-string inspection is best-effort (dynamically constructed, DNS-resolved, or sub-interpreter destinations may not be visible) — the sandbox egress firewall below is the containment authority.
 - **Mission scope gate.** `forbidden_actions` / `disallowed_assets` deny with an auditable `SCOPE_DENIED` row. Recon stays scope-gated even in attack mode.
 - **Disposable worker.** Attack commands run in a per-run Docker container (non-root, capability-dropped, read-only rootfs, resource limits), destroyed afterward. Build it once: `docker build -t breachpilot-sandbox:latest docker/sandbox`.
-- **Network containment, fail closed.** An ephemeral firewall in the worker's network namespace authorizes only the effective allowlist. Sandbox failures deny execution with structured `SANDBOX_*` errors — native host execution requires explicit, separate opt-in and is developer-only.
+- **Network containment, fail closed.** An ephemeral firewall in the worker's network namespace authorizes only the effective allowlist. Sandbox failures deny execution with structured `SANDBOX_*` errors. `sandbox.enabled: false` and `sandbox.fallback_native: true` are rejected; agent-generated attack commands never fall back to host execution.
 - **Tamper-evident audit.** Every action lands in a SHA-256-chained JSONL audit trail with loot, credentials, and graph evidence.
 
 Full model, threat model, and residual risks: `docs/safety-model.md`, `docs/sandbox.md`.
@@ -184,7 +184,7 @@ Mission control at `http://127.0.0.1:8765` (loopback-only, token-authenticated, 
 
 ## Configuration and AI providers
 
-Everything lives in `config.yaml` (validated against a schema), editable from the WebUI System pages. Providers are pluggable (`ollama`, `opencode_go`, `chatgpt`) — `bp --doctor` probes only the active one, and embeddings are a separate optional layer. Model routing, browser agent, sandbox, API concurrency, and benchmark suites are all config-driven. Key reference: `docs/config-reference.md`; providers: `docs/providers.md`.
+Everything lives in `config.yaml` (validated against a schema), editable from the WebUI System pages. Providers are pluggable (`ollama`, `opencode_go`, `chatgpt`) — the checked-in config selects OpenCode Go for chat and disables provider-aware Flow A embeddings; `bp --doctor` probes only the active chat provider. Model routing, browser agent, sandbox, API concurrency, and benchmark suites are all config-driven. Key reference: `docs/config-reference.md`; providers: `docs/providers.md`.
 
 API keys (`OPENCODE_GO_API_KEY`, `OLLAMA_API_KEY`, optional NVD/GitHub/SerpAPI keys) live in the environment or gitignored `secr.json`. `bp --setup-api-keys` walks through setup.
 
@@ -193,7 +193,7 @@ Data residency: loopback Ollama keeps prompts on-box (`local`); Ollama Cloud, Op
 ## Evaluation and quality
 
 - **Tests:** mocked pytest suite (no live Nmap) covering scope gates, recon, swarm, audit chains, credentials, and Metasploit. Run one file at a time per repo policy (see `AGENTS.md`).
-- **CI:** pytest matrix (Python 3.11–3.13), coverage, CodeQL, dependency review on every push/PR.
+- **CI:** pytest matrix (Python 3.11–3.13), coverage, and CodeQL run on pushes and pull requests; dependency review runs on pull requests.
 - **Lint/types:** `ruff check .` and `ruff format --check .` must be clean; `mypy` over `tools/`; WebUI via `tsc`, `vite build`, and `vitest`.
 - **Regression:** `bp --eval` (oracle-graded targets) and `bp --benchmark` (sandboxed suites) with `--save-baseline` / `--check-regression` gates, surfaced in the WebUI Benchmarks page and nightly workflows. The gates fail on score drift **and** on stopping-judgement drift: false-compromise rise, any scope violation reaching the network layer (>0), and stuck-loop rise.
 

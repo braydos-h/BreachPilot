@@ -1,21 +1,13 @@
 name: Sandbox image
 
-# Prebuilt disposable-worker images (#55). Builds on release tags (and weekly
-# to catch base-image drift), pushes versioned + major-floating tags to GHCR,
-# signs keyless with cosign (GitHub OIDC, no maintainer keys), and records
-# digests as the workflow artifact. Until the first push lands, the release
-# gate keeps `sandbox-image-published` EXTERNAL.
+# Prebuilt disposable-worker images (#55). The scheduled/manual refresh pushes
+# the `nightly` channel to GHCR and records the digests as an artifact. Release
+# tags do not trigger this workflow, so a NO-GO release cannot publish an image.
 #
 # One-time maintainer setup: GHCR publishing to an org/user namespace works
 # with the default GITHUB_TOKEN (packages: write). No secret to create.
 
 on:
-  push:
-    tags:
-      - "v*"
-    paths:
-      - "docker/sandbox/**"
-      - ".github/workflows/sandbox-image.yml"
   schedule:
     - cron: "23 4 * * 1"
   workflow_dispatch:
@@ -32,6 +24,7 @@ env:
 jobs:
   build-push-sign:
     name: Build, push, sign worker images
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -39,11 +32,7 @@ jobs:
       - name: Set image tags
         id: tags
         run: |
-          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
-            echo "version=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
-          else
-            echo "version=nightly" >> "$GITHUB_OUTPUT"
-          fi
+          echo "version=nightly" >> "$GITHUB_OUTPUT"
       - name: Log in to GHCR
         uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
@@ -67,6 +56,8 @@ jobs:
         with:
           context: docker/sandbox
           file: docker/sandbox/Dockerfile.browser
+          build-args: |
+            BASE_WORKER_IMAGE=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.base.outputs.digest }}
           push: true
           tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.tags.outputs.version }}-browser
           cache-from: type=gha
@@ -82,6 +73,8 @@ jobs:
           {
             echo "# Sandbox image digests (${{ steps.tags.outputs.version }})"
             echo ""
+            echo "- created_at: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo "- source_revision: ${GITHUB_SHA}"
             echo "- base: \`${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.base.outputs.digest }}\`"
             echo "- browser: \`${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.browser.outputs.digest }}\`"
             echo ""

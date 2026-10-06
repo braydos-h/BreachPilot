@@ -98,7 +98,7 @@ The local-target short-circuit exists because network brute force is the wrong s
 | `result` / `error` / `evidence_refs` | Outcome payload, error string, evidence references |
 | `chain_parent` / `chain_children` / `prerequisites` | Chaining links (prerequisite waiting uses `CHAINED`) |
 | `created_from` | Provenance tag; `"recovery:prerequisite"` for recovery-scheduled producers |
-| `failure_class` | Classified failure of the last attempt (`tools/failure_taxonomy.py` value, `""` = unclassified/success) |
+| `failure_class` | Classified failure of the last attempt (`tools/failure_taxonomy.py` value, including `outcome_unknown` when thread-backed module work outlives its timeout; `""` = unclassified/success) |
 
 `to_dict` / `from_dict` serialize the full task for `attack_states.json`.
 
@@ -132,14 +132,14 @@ Key methods: `record_success` (sets shell/priv/creds/loot/pivots, emits `ui.comp
 | `SQLInjection` | union, error, time-based, then stacked techniques with tamper scripts |
 | `default` | Longer timeouts with retries, then `aggressive: True` |
 
-`get_retry_parameters(module_name, attempt)` returns the strategy for that attempt, or the last one with extra aggression and a quadrupled timeout once exhausted. `should_retry` refuses when the attempt budget is spent, when `classify_failure` reports a permanent class, when the error matches the permanent-error substring list (`out of scope`, `permission denied`, `not authorized`, `blocked by scope`, `target unreachable`, `connection refused`), or when the tool is missing (`not found`, `not installed`).
+`get_retry_parameters(module_name, attempt)` returns the configured strategy for that attempt and keeps returning the final configured row after the table is exhausted; it does not increase timeout or aggression beyond that row. `should_retry` refuses when the attempt budget is spent, when `classify_failure` reports a permanent class, when the error matches the permanent-error substring list (`out of scope`, `permission denied`, `not authorized`, `blocked by scope`, `target unreachable`, `connection refused`), or when the tool is missing (`not found`, `not installed`). A thread-backed module timeout is `outcome_unknown`: the worker remains tracked until it exits, the task is blocked, and the campaign does not automatically repeat a potentially completed action. An operator should inspect its state before starting another attempt.
 
 ## Phases
 
 | Handler | Gate | What it does |
 |---|---|---|
 | `_phase_local_takeover` | `is_local_target(target)` | Best-effort local filesystem reads via `tool_executor`, then straight to privesc |
-| `_phase_reconnaissance` | Always (skipped for local targets) | `ReconPipeline.recon_host`; reuses prior recon on resume; domain targets trigger crt.sh subdomain expansion with `add_discovered_target` auto-authorization |
+| `_phase_reconnaissance` | Always (skipped for local targets) | Uses the injected sandbox recon provider in MCP/Flow A target-active paths and fails closed if it is required but missing; direct non-MCP library callers without a provider retain `ReconPipeline.recon_host`. Reuses prior recon on resume. Domain targets trigger bounded host-side crt.sh discovery and DNS resolution, then `add_discovered_target` auto-authorization. |
 | `_phase_exploitation` | Open ports exist | `find_modules(ctx, experience_store=...)` ranking, top 15 tasks plus deduped service-specific tasks, batch execute, aggression escalation + retry when no access |
 | `_phase_privilege_escalation` | Access achieved, privilege below admin/system/root | OS-appropriate privesc modules, cloud/container gate on ports or OS hint, optional advisory `LocalExploitSuggester` follow-up |
 | `_phase_lateral_movement` | `pivot_targets` non-empty | Max 5 pivots per level, visited-host skip, recursion capped at `max_pivot_depth`, skipped entirely for local targets |

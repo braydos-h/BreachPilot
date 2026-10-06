@@ -15,7 +15,7 @@ AutonomousOrchestrator (orchestrator.py)
   -> _preflight_targets (preflight.py)        # resolve / dedupe / scope-check, before any scan
   -> per target: _attack_target (phases.py)
        _phase_local_takeover  (local box: filesystem reads -> privesc)
-       _phase_reconnaissance  (ReconPipeline.recon_host; reused on resume)
+       _phase_reconnaissance  (injected sandbox provider for MCP/Flow A; library fallback otherwise; reused on resume)
        _phase_exploitation    (find_modules ranking + service tasks -> batch)
        _phase_privilege_escalation / _phase_lateral_movement
        _phase_persistence     (opt-in) -> _phase_validation
@@ -76,7 +76,7 @@ class AutonomousOrchestrator:
     def stop(self) -> None: ...
 ```
 
-Constructor wiring (`orchestrator.py:60-274`): builds `ReconPipeline`, a shared `ExperienceStore` (falls back to ranking without it), an `OpsecManager` from the `opsec` block (best-effort), and the `AttackModuleExecutor` with the swarm context passed through. Retry budget `_max_module_failures` defaults to `MAX_MODULE_FAILURES` (3, from `tools/kernel/orchestration.py`), overridable via `mission_config["agent"]["max_retries_per_task"]`; `_max_cycles` defaults to 100; `_max_aggression` defaults to `AggressionLevel("maximum")`.
+Constructor wiring (`orchestrator.py:60-274`): retains a `ReconPipeline` for direct non-MCP library callers, accepts a sandbox recon provider for MCP/Flow A paths, and can require that provider so a missing worker adapter fails closed. It also builds a shared `ExperienceStore` (falls back to ranking without it), an `OpsecManager` from the `opsec` block (best-effort), and the `AttackModuleExecutor` with the swarm context passed through. Retry budget `_max_module_failures` defaults to `MAX_MODULE_FAILURES` (3, from `tools/kernel/orchestration.py`), overridable via `mission_config["agent"]["max_retries_per_task"]`; `_max_cycles` defaults to 100; `_max_aggression` defaults to `AggressionLevel("maximum")`.
 
 `run_autonomous_campaign` lifecycle: stash `original_target`/`resolved_ip` for `get_state()` → `load_state` when `resume=True` (missing file = fresh start) → `_preflight_targets(targets)` → per-target `_attack_target` (serial by default; semaphore-bounded when `max_parallel_targets > 1`) → `{targets, results, duration, total_tasks, successful_exploits, states}`. Each target runs under a crash-bounded guard returning `{"status": "crashed", ...}` instead of aborting the campaign; `checkpoint_every: N` saves state every N completed targets (best-effort); `stop()` flips `_running` so in-flight loops exit with `{"status": "stopped", ...}`.
 
@@ -157,7 +157,7 @@ class AttackModuleExecutor:
     async def execute_plan_step(self, step: StepContext) -> dict[str, Any]: ...
 ```
 
-`execute()` order: mark `RUNNING` → fail-closed scope check (no gate wired = `BLOCKED`) → risk-budget check → `CriticAgent` pre-check (`deny` blocks, `modify` downgrades aggression in place; critic exception denies fail-closed) → resolve module through the facade → build `ModuleContext` (version/CPE/creds/task params/live attack state) → per-target OPSEC pacing → run with timeout → dispatch runnable artifact through `tool_executor` when wired (verified shell markers only set `access_achieved`) → `COMPLETED` only for `success`/`exploited`/`script_generated` (`info` stubs count as failed, never wins) → blackboard + semantic-lesson recording → advisory reflection post-check.
+`execute()` order: mark `RUNNING` → fail-closed scope check (no gate wired = `BLOCKED`) → risk-budget check → `CriticAgent` pre-check (`deny` blocks, `modify` downgrades aggression in place; critic exception denies fail-closed) → resolve module through the facade → build `ModuleContext` (version/CPE/creds/task params/live attack state) → per-target OPSEC pacing → run with timeout → dispatch runnable artifact through `tool_executor` when wired (verified shell markers only set `access_achieved`) → `COMPLETED` only for `success`/`exploited`/`script_generated` (`info` stubs count as failed, never wins) → blackboard + semantic-lesson recording → advisory reflection post-check. Module calls run in threads and cannot be forcibly stopped; a timeout records `outcome_unknown`, retains the worker handle, and blocks automatic retry until an operator reviews the task.
 
 Supporting methods: `execute_plan_step` (FSM executor role — ephemeral task/state, folds outcome into `{success, evidence, failure_class}`; scope blocks map to `scope_blocked`), `_dispatch_module_artifact` (prefers `suggested_command`, else writes `script` to `<workspace>/modules/` and dispatches), `_dispatch_block_reason` (fail-closed target lock before dispatch), `_snapshot_before_destructive` (fail-open auto-snapshot), `_run_critic` / `_apply_critic_modifications` / blackboard recorders / `_run_reflection` / `_record_lesson_on_success` (all no-ops when their agent/store is unwired).
 
@@ -166,7 +166,7 @@ Supporting methods: `execute_plan_step` (FSM executor role — ephemeral task/st
 | Handler | Gate | Behavior |
 |---|---|---|
 | `_phase_local_takeover` | `is_local_target(target)` | Best-effort local filesystem reads, then straight to privesc (scope gate still applies per task) |
-| `_phase_reconnaissance` | Always (skipped for local) | `ReconPipeline.recon_host`; reuses prior recon on resume; domain targets trigger crt.sh subdomain expansion with `add_discovered_target` auto-authorization |
+| `_phase_reconnaissance` | Always (skipped for local) | Uses the injected sandbox provider for MCP/Flow A target-active paths; if required with no provider, fails closed. Direct non-MCP library callers without a provider use `ReconPipeline.recon_host`. Reuses prior recon on resume. Domain targets trigger bounded host-side crt.sh discovery and DNS resolution, then `add_discovered_target` auto-authorization. |
 | `_phase_exploitation` | Open ports exist | `find_modules` ranking (top 15) plus deduped `_create_service_specific_tasks` on `(module_name, port)`; `skip_failed=True` drops already-failed modules in adaptive rounds; escalates aggression + retries when no access |
 | `_phase_privilege_escalation` | Access, privilege below admin/system/root | OS-appropriate privesc sets; cloud/container modules gated on ports `{2375, 2376, 10250, 6443, 443, 80}` or OS hint; advisory `LocalExploitSuggester` follow-up when flagged |
 | `_phase_lateral_movement` | `pivot_targets` non-empty | Max 5 pivots per level, visited-host skip, recursion capped at `max_pivot_depth`, never recurses from a local host |

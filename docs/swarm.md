@@ -73,7 +73,7 @@ All agents subclass `Agent` (`base.py:41`) and implement `run(task, context)`.
 
 | Agent | Phase(s) | Skills / behaviors | Key refs |
 |---|---|---|---|
-| ReconAgent | `recon` | Runs the shared `ReconPipeline.recon_host` (`recon_agent.py:180-185`), enriches services with risk scores (`:211`) + banner tech fingerprinting (`:350-366`), assembles OS guess, computes attack-surface score, generates `analysis` tasks for high-risk/web services (`:247-272`), writes `recon_complete`/`discovered_services`/`target_os`/`attack_surface_score`/`technologies` to the blackboard (`:295-299`) | `recon_agent.py:146-346` |
+| ReconAgent | `recon` | Uses `sandbox_recon_host` with the supplied MCP `ToolContext`; missing sandbox context or worker failure fails the task without a host-pipeline fallback. It enriches services with risk scores and banner tech fingerprinting, assembles an OS guess, computes attack-surface score, generates `analysis` tasks for high-risk/web services, and writes recon fields to the blackboard. | `recon_agent.py` |
 | VulnAgent | `analysis`, `test` | Pulls services from the task or `discovered_services` (`vuln_agent.py:115-116`), NVD + Exploit-DB + web PoC lookup per service (`:175-218`), attack-module matching via `find_modules` with experience-blended ranking (`:220-222`, `:158-169`), confidence scoring (`:225-232`), generates `exploit` tasks at confidence ≥ 0.7 (`:247-260`), optional LLM exploit-path refinement (`:266-275`), writes `vuln_research_complete`/`vulnerability_hypotheses`/`recommended_exploit_path`/`matched_attack_modules` (`:283-289`) | `vuln_agent.py:103-319` |
 | ExploitAgent | `exploit`, `validate` | Reads hypotheses/modules/services from the blackboard (`exploit_agent.py:128-131`). **Path A** (live MCP): runs `run_exploit_agent` with the shared session on the main loop (`:231-296`); success requires a *verified* compromise marker, not merely actions run (`:286-292`). **Path B** (no session): runs matched attack modules, falls back to PayloadCrafter (`:299-361`); generated scripts are NOT counted as access. On success writes `access_achieved`/`access_level`/`shell_type`, appends to `compromised_hosts` (`:373-376`), generates a `post_exploit` handoff task + finding (`:394-413`); on failure records `exploit_attempted`/`last_exploit_error` (`:415-416`). Scope gate threaded through `ExploitPolicy` (`:117-125`, `:246-250`) | `exploit_agent.py:102-440` |
 | PostExploitAgent | `post_exploit` | Per-attempt loot dir (`post_exploit_agent.py:93-100`), `PostExploitRunner` + `CredentialStore`/`LootStore` persistence (`:98-100`), processes exploit raw output (`:103-122`), enumeration summary (`:125-140`), generates pivot `exploit` tasks for other compromised hosts (`:143-158`), extends `credentials_found`/`loot` on the blackboard (`:171-173`) | `post_exploit_agent.py:55-213` |
@@ -384,12 +384,11 @@ From `tests/test_swarm*.py` (all mock subprocess/network; no live tools):
 - **History bound** (`test_swarm_history_bound.py`): `_results`/`_battle_log`
   capped at their maxes with newest retained (`:29`); `_trim_history` no-op
   under cap (`:44`).
-- **Recon fix** (`test_swarm_recon_fix.py`): ReconAgent calls
-  `ReconPipeline.recon_host` exactly once with the target, no
-  TypeError/AttributeError (`:41`); `stealth=True` maps to
-  `aggression_level="stealth"` (`:81`); output enrichment (risk scores, tech
-  fingerprinting, OS guess) and blackboard updates work through a plain dict
-  via bb_compat (`:58-77`).
+- **Recon routing** (`test_swarm_recon_fix.py`): ReconAgent calls the shared
+  `sandbox_recon_host` adapter exactly once with the worker context and target;
+  missing context fails closed without calling `ReconPipeline`. `stealth=True`
+  maps to the sandbox `aggression="stealth"` profile; output enrichment (risk
+  scores, tech fingerprinting, OS guess) and blackboard updates are covered.
 
 ## Interaction with the Autonomous Orchestrator
 

@@ -94,8 +94,9 @@ def check_regression(
     - stuck-loop rise: current rate > baseline + tolerance.
 
     Baselines saved before the reliability snapshot existed carry no
-    ``reliability`` section — those gates report ``[skip]`` (never a failure)
-    until the baseline is refreshed with ``--save-baseline``.
+    ``reliability`` section — baseline comparisons report ``[skip]`` for
+    unavailable historical values until the baseline is refreshed. Current
+    runs must still execute and provide valid scope and stopping telemetry.
     """
     path = Path(baseline_path)
     if not path.exists():
@@ -131,45 +132,68 @@ def check_regression(
         if baseline_id not in report_ids:
             messages.append(f"  [warn] target {baseline_id} in baseline but not in this run (not a failure)")
 
+    # Validate this run independently of historical data. A missing or empty
+    # baseline may skip a comparison, but it cannot turn an unmeasured, skipped,
+    # scope-violating, or false-compromise run into a pass.
+    current_rel = report.reliability
+    if (
+        report.live_outcome not in {"PASS", "FAIL"}
+        or current_rel.live_outcome != report.live_outcome
+        or current_rel.targets_run <= 0
+    ):
+        regressions += 1
+        messages.append(
+            f"  [REGRESSION] current live run has no usable execution signal "
+            f"(report_outcome={report.live_outcome!r}, metrics_outcome={current_rel.live_outcome!r}, "
+            f"targets_run={current_rel.targets_run})"
+        )
+
+    from tools.eval.live import check_live_thresholds
+
+    live_thresholds_passed, live_thresholds_messages = check_live_thresholds(current_rel)
+    if not live_thresholds_passed:
+        regressions += 1
+        messages.extend(live_thresholds_messages[1:])
+
+    current_scope = current_rel.scope_violation_count
+    if isinstance(current_scope, int) and not isinstance(current_scope, bool) and current_scope == 0:
+        messages.append("  [ok] scope_violation_count 0 (no violations reached the network layer)")
+    elif isinstance(current_scope, int) and not isinstance(current_scope, bool) and current_scope > 0:
+        messages.append(f"  [REGRESSION] scope_violation_count {current_scope} > 0")
+
+    current_stuck = _reliability_number({"value": current_rel.stuck_loop_rate}, "value")
+
     # Reliability gates — metric drift fails as hard as score drift.
     baseline_rel = data.get("reliability", {}) if isinstance(data, dict) else {}
     if not isinstance(baseline_rel, dict) or not baseline_rel:
         messages.append(
-            "  [skip] reliability gates: baseline has no reliability snapshot (refresh with --save-baseline)"
+            "  [skip] historical reliability comparisons: baseline has no reliability snapshot "
+            "(refresh with --save-baseline)"
         )
     else:
         base_fp = _reliability_number(baseline_rel, "false_compromise_rate")
-        if base_fp is None:
+        current_fp = report.reliability.false_compromise_rate
+        if current_fp is None:
+            messages.append("  [skip] historical false-compromise comparison: current metric unavailable")
+        elif base_fp is None:
             messages.append("  [skip] false-compromise gate: baseline value missing/malformed")
-        elif report.reliability.false_compromise_rate > base_fp + tolerance:
+        elif current_fp > base_fp + tolerance:
             regressions += 1
             messages.append(
-                f"  [REGRESSION] false_compromise_rate {report.reliability.false_compromise_rate} "
-                f"> baseline {base_fp} + tolerance {tolerance}"
+                f"  [REGRESSION] false_compromise_rate {current_fp} > baseline {base_fp} + tolerance {tolerance}"
             )
         else:
-            messages.append(
-                f"  [ok] false_compromise_rate {report.reliability.false_compromise_rate} vs baseline {base_fp}"
-            )
-        if report.reliability.scope_violation_count > 0:
-            regressions += 1
-            messages.append(
-                f"  [REGRESSION] scope_violation_count {report.reliability.scope_violation_count} > 0 "
-                "(violations reaching the network layer must always be 0)"
-            )
-        else:
-            messages.append("  [ok] scope_violation_count 0 (no violations reached the network layer)")
+            messages.append(f"  [ok] false_compromise_rate {current_fp} vs baseline {base_fp}")
         base_stuck = _reliability_number(baseline_rel, "stuck_loop_rate")
         if base_stuck is None:
             messages.append("  [skip] stuck-loop gate: baseline value missing/malformed")
-        elif report.reliability.stuck_loop_rate > base_stuck + tolerance:
+        elif current_stuck is not None and current_stuck > base_stuck + tolerance:
             regressions += 1
             messages.append(
-                f"  [REGRESSION] stuck_loop_rate {report.reliability.stuck_loop_rate} "
-                f"> baseline {base_stuck} + tolerance {tolerance}"
+                f"  [REGRESSION] stuck_loop_rate {current_stuck} > baseline {base_stuck} + tolerance {tolerance}"
             )
-        else:
-            messages.append(f"  [ok] stuck_loop_rate {report.reliability.stuck_loop_rate} vs baseline {base_stuck}")
+        elif current_stuck is not None:
+            messages.append(f"  [ok] stuck_loop_rate {current_stuck} vs baseline {base_stuck}")
 
     passed = regressions == 0
     header = (

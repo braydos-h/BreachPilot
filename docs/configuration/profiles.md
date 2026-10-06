@@ -19,7 +19,7 @@ lab profile only re-states it (changing the default would require updating
 |---------|---------|--------------------|
 | `lab` | Checked-in attack posture. Only run against systems you own or are explicitly authorized to test. | `exploit.permission: full_access`, `attack_mode: true`, `sandbox.enabled: true` |
 | `recon` | Propose-only reconnaissance. | `exploit.permission: read_only`, `attack_mode: false`, `auto_post_exploit: false` |
-| `ci` | Hermetic/deterministic runs. | `models.auto_update: false`, `sandbox.enabled: false`, `witness.enabled: false`, `multi_model.enabled: false`, `ultrathink/llm_reflection: false` |
+| `ci` | Hermetic/deterministic runs. | `models.auto_update: false`, required `sandbox.enabled: true`, `witness.enabled: false`, `multi_model.enabled: false`, `ultrathink/llm_reflection: false` |
 
 Keys a profile does not mention are left exactly as the file + schema
 defaults resolved them.

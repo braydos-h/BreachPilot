@@ -21,6 +21,8 @@ from tools.sandbox.network import (
     build_firewall_ruleset,
     build_ipv4_rules,
     build_ipv6_rules,
+    parse_drop_packet_count,
+    read_drop_packet_count,
 )
 
 
@@ -46,8 +48,17 @@ class TestIpv4Rules:
 
     def test_ends_with_default_drop(self):
         rules = build_ipv4_rules(_pol(["192.0.2.5"]))
-        assert rules[-2] == "-A NAI-OUTPUT -j DROP"
+        assert rules[-3] == "-A NAI-OUTPUT -j NAI-DROP"
+        assert rules[-2] == "-A NAI-DROP -j DROP"
         assert rules[-1] == "COMMIT"
+
+    def test_policy_refresh_keeps_a_stable_counter_chain(self):
+        rules = build_ipv4_rules(_pol(["192.0.2.5", "192.0.2.6"]), preserve_drop_counters=True)
+        assert rules[:2] == ["*filter", "-F NAI-OUTPUT"]
+        assert ":NAI-DROP" not in rules
+        assert "-A NAI-DROP -j DROP" not in rules
+        assert "-A NAI-OUTPUT -j NAI-DROP" in rules
+        assert "-A OUTPUT -j NAI-OUTPUT" not in rules
 
     def test_loopback_and_established_accepted(self):
         rules = build_ipv4_rules(_pol([]))
@@ -56,8 +67,8 @@ class TestIpv4Rules:
 
     def test_metadata_dropped(self):
         rules = "\n".join(build_ipv4_rules(_pol([])))
-        assert "-d 169.254.169.254 -j DROP" in rules
-        assert "-d 169.254.0.0/16 -j DROP" in rules
+        assert "-d 169.254.169.254 -j NAI-DROP" in rules
+        assert "-d 169.254.0.0/16 -j NAI-DROP" in rules
 
     def test_translated_metadata_drop_precedes_broad_nat64_allow(self):
         policy = NetworkPolicy(
@@ -67,7 +78,7 @@ class TestIpv4Rules:
             enforced=True,
         )
         rules = build_ipv6_rules(policy)
-        drop = "-A NAI-OUTPUT -d 64:ff9b::a9fe:a9fe -j DROP"
+        drop = "-A NAI-OUTPUT -d 64:ff9b::a9fe:a9fe -j NAI-DROP"
         allow = "-A NAI-OUTPUT -d 64:ff9b::/96 -j ACCEPT"
         assert drop in rules
         assert allow in rules
@@ -82,11 +93,12 @@ class TestIpv4Rules:
         )
         rules = build_ipv6_rules(policy)
         expected_drops = (
-            "-A NAI-OUTPUT -d 64:ff9b::a9fe:0/112 -j DROP",
-            "-A NAI-OUTPUT -d 64:ff9b:1:a9fe::/64 -j DROP",
-            "-A NAI-OUTPUT -d 2002:a9fe::/32 -j DROP",
-            "-A NAI-OUTPUT -d ::ffff:0:0/96 -j DROP",
-            "-A NAI-OUTPUT -d 2001::/32 -j DROP",
+            "-A NAI-OUTPUT -d 64:ff9b::a9fe:0/112 -j NAI-DROP",
+            "-A NAI-OUTPUT -d 64:ff9b:1:a9fe::/64 -j NAI-DROP",
+            "-A NAI-OUTPUT -d 64:ff9b:1:6464:64:c800::/88 -j NAI-DROP",
+            "-A NAI-OUTPUT -d 2002:a9fe::/32 -j NAI-DROP",
+            "-A NAI-OUTPUT -d ::ffff:0:0/96 -j NAI-DROP",
+            "-A NAI-OUTPUT -d 2001::/32 -j NAI-DROP",
         )
         for drop in expected_drops:
             assert drop in rules
@@ -99,6 +111,20 @@ class TestIpv4Rules:
             for drop in expected_drops:
                 assert rules.index(drop) < rules.index(allow)
 
+    def test_local_use_nat64_metadata_drop_precedes_authorized_prefix(self):
+        policy = NetworkPolicy(
+            authorized_destinations=["64:ff9b:1::/48"],
+            explicitly_blocked=[],
+            allow_dns="controlled",
+            enforced=True,
+        )
+        rules = build_ipv6_rules(policy)
+        metadata_drop = "-A NAI-OUTPUT -d 64:ff9b:1:6464:64:c800::/88 -j NAI-DROP"
+        broad_allow = "-A NAI-OUTPUT -d 64:ff9b:1::/48 -j ACCEPT"
+        assert metadata_drop in rules
+        assert broad_allow in rules
+        assert rules.index(metadata_drop) < rules.index(broad_allow)
+
     def test_authorized_destination_accepted(self):
         rules = "\n".join(build_ipv4_rules(_pol(["192.0.2.5", "10.0.0.0/24"])))
         assert "-A NAI-OUTPUT -d 192.0.2.5 -j ACCEPT" in rules
@@ -106,7 +132,7 @@ class TestIpv4Rules:
 
     def test_gateway_dropped_unless_explicitly_allowed(self):
         blocked = "\n".join(build_ipv4_rules(_pol([]), gateway="172.30.0.1"))
-        assert "-A NAI-OUTPUT -d 172.30.0.1 -j DROP" in blocked
+        assert "-A NAI-OUTPUT -d 172.30.0.1 -j NAI-DROP" in blocked
         allowed = "\n".join(build_ipv4_rules(_pol([], allow_gateway=True), gateway="172.30.0.1"))
         assert "172.30.0.1" not in allowed
 
@@ -115,7 +141,10 @@ class TestIpv4Rules:
         # Port-53 DROPs must PRECEDE the blanket lo ACCEPT (first-match-wins
         # would otherwise shadow them and leave a lo DNS bypass).
         lo_idx = rules.index("-A NAI-OUTPUT -o lo -j ACCEPT")
-        for drop in ("-A NAI-OUTPUT -p udp --dport 53 -j DROP", "-A NAI-OUTPUT -p tcp --dport 53 -j DROP"):
+        for drop in (
+            "-A NAI-OUTPUT -p udp --dport 53 -j NAI-DROP",
+            "-A NAI-OUTPUT -p tcp --dport 53 -j NAI-DROP",
+        ):
             assert drop in rules
             assert rules.index(drop) < lo_idx
 
@@ -135,12 +164,12 @@ class TestIpv4Rules:
         rules = build_ipv4_rules(pol)
         # Docker NAT rewrites DNS to a high port; the whole resolver address
         # must be blocked before lo ACCEPT, even with authorized domain names.
-        resolver_drop = "-A NAI-OUTPUT -d 127.0.0.11 -j DROP"
+        resolver_drop = "-A NAI-OUTPUT -d 127.0.0.11 -j NAI-DROP"
         assert resolver_drop in rules
         assert rules.index(resolver_drop) < rules.index("-A NAI-OUTPUT -o lo -j ACCEPT")
         assert not any("--dport 53" in rule and "-j ACCEPT" in rule for rule in rules)
-        assert "-A NAI-OUTPUT -p udp --dport 53 -j DROP" in rules
-        assert "-A NAI-OUTPUT -p tcp --dport 53 -j DROP" in rules
+        assert "-A NAI-OUTPUT -p udp --dport 53 -j NAI-DROP" in rules
+        assert "-A NAI-OUTPUT -p tcp --dport 53 -j NAI-DROP" in rules
         lo_idx = rules.index("-A NAI-OUTPUT -o lo -j ACCEPT")
         for r in rules:
             if "--dport 53" in r:
@@ -161,29 +190,32 @@ class TestIpv4Rules:
         port53 = [r for r in rules if "--dport 53" in r]
         assert port53, "controlled mode must emit explicit :53 rules"
         assert not any("-j ACCEPT" in rule for rule in port53)
-        assert "-A NAI-OUTPUT -d 127.0.0.11 -j DROP" in rules
+        assert "-A NAI-OUTPUT -d 127.0.0.11 -j NAI-DROP" in rules
         joined = "\n".join(rules)
         assert "-d 8.8.8.8" not in joined
         assert "-d 127.0.0.1 " not in joined and "-d 127.0.0.1 -p" not in joined
         # Blanket :53 DROPs precede the lo ACCEPT (first-match-wins).
         lo_idx = rules.index("-A NAI-OUTPUT -o lo -j ACCEPT")
-        for drop in ("-A NAI-OUTPUT -p udp --dport 53 -j DROP", "-A NAI-OUTPUT -p tcp --dport 53 -j DROP"):
+        for drop in (
+            "-A NAI-OUTPUT -p udp --dport 53 -j NAI-DROP",
+            "-A NAI-OUTPUT -p tcp --dport 53 -j NAI-DROP",
+        ):
             assert drop in rules
             assert rules.index(drop) < lo_idx
 
     def test_dns_controlled_with_no_names_fails_closed_to_none(self):
         # IP-only allowlist: DNS serves no authorized purpose → port-53 DROPs.
         rules = "\n".join(build_ipv4_rules(_pol(["192.0.2.5"], allow_dns="controlled")))
-        assert "-d 127.0.0.11 -j DROP" in rules
-        assert "-p udp --dport 53 -j DROP" in rules
-        assert "-p tcp --dport 53 -j DROP" in rules
+        assert "-d 127.0.0.11 -j NAI-DROP" in rules
+        assert "-p udp --dport 53 -j NAI-DROP" in rules
+        assert "-p tcp --dport 53 -j NAI-DROP" in rules
 
     def test_dns_v6_always_dropped(self):
         # The embedded resolver is IPv4-only: no legitimate v6 :53 path exists.
         for mode in ("controlled", "none"):
             rules = "\n".join(build_ipv6_rules(_pol([], allow_dns=mode)))
-            assert "-p udp --dport 53 -j DROP" in rules
-            assert "-p tcp --dport 53 -j DROP" in rules
+            assert "-p udp --dport 53 -j NAI-DROP" in rules
+            assert "-p tcp --dport 53 -j NAI-DROP" in rules
             assert "127.0.0.11" not in rules
 
     def test_empty_authorization_is_default_deny(self):
@@ -226,12 +258,13 @@ class TestIpv6Rules:
 
     def test_ends_with_default_drop(self):
         rules = build_ipv6_rules(_pol([]))
-        assert rules[-2] == "-A NAI-OUTPUT -j DROP"
+        assert rules[-3] == "-A NAI-OUTPUT -j NAI-DROP"
+        assert rules[-2] == "-A NAI-DROP -j DROP"
 
     def test_link_local_dropped(self):
         rules = "\n".join(build_ipv6_rules(_pol([])))
-        assert "-d fe80::/10 -j DROP" in rules
-        assert "-d fd00:ec2::254 -j DROP" in rules
+        assert "-d fe80::/10 -j NAI-DROP" in rules
+        assert "-d fd00:ec2::254 -j NAI-DROP" in rules
 
     def test_ipv6_destination_plumbed_only_in_v6(self):
         pol = _pol(["2001:db8::5", "192.0.2.5"])
@@ -249,8 +282,8 @@ class TestIpv6Rules:
         assert "192.0.2.5" not in rules
         assert "10.0.0.0/24" not in rules
         # v6 explicit DROPs still present.
-        assert "-d fe80::/10 -j DROP" in rules
-        assert "-d fd00:ec2::254 -j DROP" in rules
+        assert "-d fe80::/10 -j NAI-DROP" in rules
+        assert "-d fd00:ec2::254 -j NAI-DROP" in rules
 
     def test_ip_version_helper(self):
         from tools.sandbox.network import _ip_version
@@ -273,6 +306,33 @@ class TestApplyNetworkPolicy:
     def test_success_returns_true(self):
         pol = _pol(["192.0.2.5"])
         assert apply_network_policy(pol, container_id="abc123", image="img", run_sidecar=self._run_sidecar_ok) is True
+
+    def test_refresh_preserves_counter_chain_with_noflush(self):
+        calls: list[tuple[str, str, tuple[str, ...]]] = []
+
+        def recording_sidecar(container_id, image, binary, rules, args=()):
+            calls.append((binary, rules, args))
+            return 0, "", ""
+
+        assert apply_network_policy(
+            _pol(["192.0.2.5"]), container_id="abc123", image="img", run_sidecar=recording_sidecar
+        )
+        assert apply_network_policy(
+            _pol(["192.0.2.5", "192.0.2.6"]),
+            container_id="abc123",
+            image="img",
+            run_sidecar=recording_sidecar,
+            preserve_drop_counters=True,
+        )
+        assert len(calls) == 4
+        for _binary, rules, args in calls[:2]:
+            assert args == ()
+            assert ":NAI-DROP - [0:0]" in rules
+        for _binary, rules, args in calls[2:]:
+            assert args == ("--noflush",)
+            assert rules.splitlines()[1] == "-F NAI-OUTPUT"
+            assert ":NAI-DROP" not in rules
+            assert "-A NAI-OUTPUT -j NAI-DROP" in rules
 
     def test_sidecar_failure_fails_closed(self):
         def failing_sidecar(container_id, image, binary, rules):
@@ -325,3 +385,34 @@ class TestApplyNetworkPolicy:
         assert apply_network_policy(pol, container_id="abc123", image="img", run_sidecar=recording_sidecar) is True
         for binary in ("iptables-restore", "ip6tables-restore"):
             assert "-A OUTPUT -j NAI-OUTPUT" in seen[binary]
+
+
+def test_parse_drop_packet_count_requires_the_complete_counter_chain():
+    snapshot = """*filter
+:INPUT ACCEPT [0:0]
+:OUTPUT ACCEPT [0:0]
+:NAI-OUTPUT - [0:0]
+:NAI-DROP - [12:3456]
+[0:0] -A OUTPUT -j NAI-OUTPUT
+[0:0] -A NAI-OUTPUT -o lo -j ACCEPT
+[12:3456] -A NAI-OUTPUT -j NAI-DROP
+[12:3456] -A NAI-DROP -j DROP
+COMMIT
+"""
+    assert parse_drop_packet_count(snapshot) == 12
+    with pytest.raises(ValueError, match="hook"):
+        parse_drop_packet_count(snapshot.replace("[0:0] -A OUTPUT -j NAI-OUTPUT\n", ""))
+    with pytest.raises(ValueError, match="malformed"):
+        parse_drop_packet_count(snapshot.replace("[12:3456] -A NAI-DROP -j DROP\n", ""))
+    with pytest.raises(ValueError, match="malformed"):
+        parse_drop_packet_count(snapshot.replace("[12:3456] -A NAI-DROP", "[x:3456] -A NAI-DROP"))
+
+
+def test_read_drop_packet_count_sums_both_families_and_rejects_incomplete():
+    snapshots = {
+        "iptables-save": """*filter\n:OUTPUT ACCEPT [0:0]\n:NAI-OUTPUT - [0:0]\n:NAI-DROP - [2:22]\n[0:0] -A OUTPUT -j NAI-OUTPUT\n[2:22] -A NAI-OUTPUT -j NAI-DROP\n[2:22] -A NAI-DROP -j DROP\nCOMMIT\n""",
+        "ip6tables-save": """*filter\n:OUTPUT ACCEPT [0:0]\n:NAI-OUTPUT - [0:0]\n:NAI-DROP - [3:33]\n[0:0] -A OUTPUT -j NAI-OUTPUT\n[3:33] -A NAI-OUTPUT -j NAI-DROP\n[3:33] -A NAI-DROP -j DROP\nCOMMIT\n""",
+    }
+    assert read_drop_packet_count(lambda family: (0, snapshots[family], "")) == 5
+    with pytest.raises(ValueError, match="counter read failed"):
+        read_drop_packet_count(lambda family: (1, "", "counter unavailable"))

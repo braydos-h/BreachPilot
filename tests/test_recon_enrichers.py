@@ -7,6 +7,7 @@ note in the task brief — a failing test crashes pytest before naming itself).
 
 import pytest
 
+from tools import recon_enrichers
 from tools.recon_enrichers import (
     http_spider,
     parse_db_banner,
@@ -354,6 +355,45 @@ def test_http_spider_default_args_run_without_network_when_mocked():
     result = http_spider("10.0.0.5", 80, fetch_fn=lambda u: (200, ""))
     assert result["port"] == 80
     assert result["urls_visited"] == ["/"]
+
+
+def test_default_spider_fetch_returns_redirect_without_following(monkeypatch):
+    calls = []
+    pins = {}
+
+    def fake_fetch(url, **kwargs):
+        calls.append((url, kwargs))
+        return 302, {"Location": "http://169.254.169.254/latest/meta-data/"}, b"redirect page", url
+
+    monkeypatch.setattr(recon_enrichers, "fetch_response", fake_fetch)
+
+    status, body = recon_enrichers._default_fetch(
+        "http://10.0.0.5:8080/",
+        pin_cache=pins,
+        allow_local_fetch=True,
+    )
+
+    assert status == 302
+    assert body == ""
+    assert len(calls) == 1
+    policy = calls[0][1]["policy"]
+    assert policy.allowed_domains == ("10.0.0.5",)
+    assert policy.allow_local_fetch is True
+    assert calls[0][1]["pin_cache"] is pins
+
+
+def test_default_spider_fetch_rejects_private_dns_for_hostname(monkeypatch):
+    calls = []
+
+    def fake_fetch(url, **kwargs):
+        calls.append(kwargs)
+        raise ValueError("BLOCKED: hostname resolves to a private address")
+
+    monkeypatch.setattr(recon_enrichers, "fetch_response", fake_fetch)
+    status, body = recon_enrichers._default_fetch("https://target.example/")
+
+    assert (status, body) == (0, "")
+    assert calls[0]["policy"].allow_local_fetch is False
 
 
 # ---------------------------------------------------------------------------

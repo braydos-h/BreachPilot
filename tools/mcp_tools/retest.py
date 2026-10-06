@@ -1,13 +1,12 @@
-"""Closed-loop retest MCP tool ("prove the fix").
+"""Repeat a finding probe and persist a conservative retest result.
 
-``retest_finding`` reloads a confirmed finding's stored verification probe
+``retest_finding`` reloads a finding's stored verification probe
 from the run artifacts (``reports/<run_id>/enhanced/enhanced_report.json``)
-and re-executes ONLY that probe against the current target:
+and re-executes only that probe through the sandbox:
 
-- verdict ``STILL_OPEN`` — the PoC output still shows compromise/cred-dump;
-- verdict ``FIXED`` — the PoC demonstrably fails against the current target;
-- verdict ``INCONCLUSIVE`` — anything else (no stored probe, blocked or
-  sandbox-failed execution, ambiguous output).
+- verdict ``INCONCLUSIVE`` — generic sandbox worker output cannot establish
+  target state, whether it contains access-shaped markers or an apparent
+  failure. This tool does not currently have a target-bound verifier.
 
 Reuse (no new execution paths, no new stores):
 
@@ -149,12 +148,13 @@ def resolve_exec(probe: dict[str, Any], target_ip: str) -> str:
 
 
 def classify_retest_output(output: str) -> tuple[str, str]:
-    """Map fresh probe output to ``(verdict, detail)`` via outcome_truth.
+    """Map untrusted probe text to ``(verdict, detail)`` without claiming proof.
 
-    compromise/cred_dump → STILL_OPEN (conservative: any access signal keeps
-    the finding open); explicit failure → FIXED (the PoC demonstrably fails);
-    partial/unknown/none and every containment/policy marker →
-    INCONCLUSIVE (cannot prove the fix either way).
+    ``run_exploit_terminal`` returns output from the sandbox worker, not an
+    authenticated target shell. Neither access-shaped text nor a failed probe
+    establishes target state, so generic output can never prove a finding is
+    still open or fixed. Only containment markers receive a more specific
+    detail; all other text remains INCONCLUSIVE.
     """
     text = str(output or "")
     stripped = text.strip()
@@ -167,11 +167,7 @@ def classify_retest_output(output: str) -> tuple[str, str]:
             detail = next((ln for ln in lines if marker in ln), lines[0] if lines else marker)
             return INCONCLUSIVE, detail[:300]
     outcome = classify_exploit_outcome(text).get("outcome", ExploitOutcome.UNKNOWN)
-    if outcome in (ExploitOutcome.COMPROMISE, ExploitOutcome.CRED_DUMP):
-        return STILL_OPEN, f"outcome_truth={outcome}"
-    if outcome == ExploitOutcome.FAILURE:
-        return FIXED, f"outcome_truth={outcome}"
-    return INCONCLUSIVE, f"outcome_truth={outcome}"
+    return INCONCLUSIVE, f"unverified outcome_truth={outcome}"
 
 
 def record_retest(
@@ -382,7 +378,13 @@ def register_retest_tools(mcp: Any, *, ctx: ToolContext) -> None:
     @mcp.tool()
     @require_allowlist()
     def retest_finding(target_ip: str, finding_id: str, run_id: str = "") -> str:
-        """Re-run a confirmed finding's stored PoC probe against the current target (prove the fix). Reloads the finding's verification_probe from reports/<run_id>/enhanced/enhanced_report.json (latest run containing it when run_id is empty) and re-executes ONLY that probe via run_exploit_terminal, so the target-IP allowlist, audit trail, and sandbox funnel apply unchanged. Returns RETEST_VERDICT: with STILL_OPEN (PoC still lands) | FIXED (PoC demonstrably fails) | INCONCLUSIVE (no probe, blocked/sandbox-failed run, or ambiguous output), and persists the verdict into the finding's retest_status/retest_history.
+        """Repeat a stored finding probe and record an unverified diagnostic.
+
+        The probe runs only through ``run_exploit_terminal`` so allowlist,
+        audit, and sandbox controls apply. Its worker output is not target-bound
+        proof, so this tool currently returns INCONCLUSIVE for both success-
+        shaped and failure-shaped output. STILL_OPEN and FIXED require a trusted
+        target-bound verifier and are not produced by this execution path.
 
         Args:
             target_ip: Current address of the finding's asset (must equal the finding's affected_asset and be allowlisted).
@@ -473,10 +475,10 @@ __all__ = [
 
 
 def demo() -> None:
-    """Confirm finding on target A → patch target A → Retest → FIXED (no network)."""
+    """Show that raw probe text cannot prove open or fixed state (no network)."""
     import tempfile
 
-    print("retest demo: confirm -> patch -> FIXED")
+    print("retest demo: generic worker output stays INCONCLUSIVE")
     with tempfile.TemporaryDirectory(prefix="retest_demo_") as tmp:
         root = Path(tmp)
         run_dir = root / "runA"
@@ -497,22 +499,22 @@ def demo() -> None:
         json_path = run_dir / "enhanced" / "enhanced_report.json"
         json_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
 
-        # 1. confirm: unpatched target still yields a shell marker.
+        # Access-shaped worker output does not prove target state.
         verdict, _ = classify_retest_output("exploit ok\nuid=0(root) gid=0(root)")
-        assert verdict == STILL_OPEN, verdict
+        assert verdict == INCONCLUSIVE, verdict
         persist_retest(json_path, "F-10-0-0-50-poc", verdict, "demo confirm")
-        print(f"  unpatched target -> {verdict}")
+        print(f"  shell marker     -> {verdict}")
 
-        # 2. patch, then retest: the same probe now fails.
+        # A connection error is also insufficient to prove remediation.
         verdict, _ = classify_retest_output("curl: (7) Failed to connect: connection refused")
-        assert verdict == FIXED, verdict
+        assert verdict == INCONCLUSIVE, verdict
         finding = persist_retest(json_path, "F-10-0-0-50-poc", verdict, "demo patched")
-        print(f"  patched target   -> {verdict}")
+        print(f"  connection error -> {verdict}")
 
-        assert finding["retest_status"] == FIXED
-        assert [h["verdict"] for h in finding["retest_history"]] == [STILL_OPEN, FIXED]
+        assert finding["retest_status"] == INCONCLUSIVE
+        assert [h["verdict"] for h in finding["retest_history"]] == [INCONCLUSIVE, INCONCLUSIVE]
         print(f"  evidence refs: {json_path}")
-    print("demo OK: FIXED verdict persisted with evidence refs")
+    print("demo OK: raw output did not promote verification or remediation state")
 
 
 if __name__ == "__main__":

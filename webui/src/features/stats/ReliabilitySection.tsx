@@ -27,6 +27,10 @@ export function ReliabilitySection() {
   });
   const baseline = reliability.data?.baseline;
   const loading = reliability.isLoading && !reliability.data;
+  const verifiedRate = baseline?.verified_success_rate;
+  const falsePositiveRate = baseline?.false_positive_rate;
+  const hasVerifiedRate = verifiedRate != null;
+  const hasFalsePositiveRate = falsePositiveRate != null;
 
   return (
     <section aria-labelledby="eval-reliability-heading" className="space-y-3">
@@ -55,18 +59,36 @@ export function ReliabilitySection() {
           <StatCard
             icon={CheckCircle2}
             label="Verified success"
-            value={baseline && baseline.exists ? formatRate01(baseline.verified_success_rate) : "—"}
-            sub={baseline?.exists ? "baseline verified rate" : "No baseline saved yet"}
-            tone="success"
+            value={baseline && baseline.exists ? formatRate01(verifiedRate) : "—"}
+            sub={
+              baseline?.exists
+                ? hasVerifiedRate
+                  ? "baseline verified rate"
+                  : "unmeasured — no completed trials"
+                : "No baseline saved yet"
+            }
+            tone={baseline?.exists && hasVerifiedRate ? "success" : "neutral"}
             loading={loading}
             available={Boolean(baseline?.exists)}
           />
           <StatCard
             icon={AlertTriangle}
             label="False positives"
-            value={baseline && baseline.exists ? formatRate01(baseline.false_positive_rate) : "—"}
-            sub={baseline?.exists ? "claimed but unverified" : "No baseline saved yet"}
-            tone={baseline?.exists && (baseline.false_positive_rate ?? 0) > 0 ? "danger" : "success"}
+            value={baseline && baseline.exists ? formatRate01(falsePositiveRate) : "—"}
+            sub={
+              baseline?.exists
+                ? hasFalsePositiveRate
+                  ? "claimed but unverified"
+                  : "unmeasured — no completed trials"
+                : "No baseline saved yet"
+            }
+            tone={
+              !baseline?.exists || !hasFalsePositiveRate
+                ? "neutral"
+                : falsePositiveRate > 0
+                  ? "danger"
+                  : "success"
+            }
             loading={loading}
             available={Boolean(baseline?.exists)}
           />

@@ -31,6 +31,7 @@ from pathlib import Path
 from typing import Any
 
 from tools.benchmark.models import BenchmarkScenario
+from tools.eval.oracle import host_owned_when_met
 
 __all__ = ["ManifestError", "parse_manifest", "load_manifest_file"]
 
@@ -67,6 +68,11 @@ def parse_manifest(data: dict[str, Any], *, suite: str = "xben", source: str = "
     flags = [f for f in oracle.get("flags", []) if isinstance(f, dict)]
     if not flags:
         raise ManifestError(f"manifest {source!r}: oracle.flags contains no valid check objects")
+    host_owned_when = oracle.get("host_owned_when", "any")
+    try:
+        host_owned_when_met([], host_owned_when)
+    except ValueError as exc:
+        raise ManifestError(f"manifest {source!r}: {exc}") from exc
     timeout = data.get("timeout", data.get("timeout_seconds", 1800))
     try:
         timeout_seconds = int(timeout)
@@ -89,7 +95,7 @@ def parse_manifest(data: dict[str, Any], *, suite: str = "xben", source: str = "
         target_ports=ports,
         goal=str(data.get("goal", "initial_access") or "initial_access"),
         expected_flags=_as_list(data.get("expected_flags")),
-        oracle={"flags": flags, "host_owned_when": oracle.get("host_owned_when", "any")},
+        oracle={"flags": flags, "host_owned_when": host_owned_when},
         tags=_as_list(data.get("tags")),
         difficulty=str(data.get("difficulty", "unknown") or "unknown"),
         reset_strategy=str(data.get("reset_strategy", "recreate") or "recreate"),

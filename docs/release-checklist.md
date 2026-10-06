@@ -41,6 +41,8 @@ Green: exit 0. Strict subsystems (`tools/validation_utils.py`,
 
 ## 4. Coverage
 
+CI-only coverage reference; local checks use approved targeted slices above.
+
 ```bash
 python3 -m coverage run -m pytest tests/ -q -m "not integration and not live_llm"
 python3 -m coverage report --fail-under=80
@@ -70,6 +72,11 @@ python scripts/bump-version.py --check                # pyproject == tools/cli_a
 python scripts/docs_truth_audit.py                    # links + versions (CI lint job runs this too)
 python scripts/generate_config_reference.py --check   # generated config reference matches schema + config.yaml
 python scripts/generate_safety_defaults.py --check    # generated safety defaults match schema
+python scripts/generate_source_map.py --check         # generated source map matches source tree
+python scripts/generate_cli_reference.py --check      # generated CLI reference matches parser
+python scripts/generate_mcp_tool_catalog.py --check   # generated MCP catalog matches tool registrations
+python scripts/generate_skill_catalog.py --check      # generated skill catalog matches installed skills
+python scripts/generate_capability_counts.py --check  # generated capability counts match registrations
 ```
 
 Green: all exit 0. README flags/config match `config.yaml`;

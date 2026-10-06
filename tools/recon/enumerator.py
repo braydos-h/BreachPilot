@@ -11,10 +11,12 @@ import re
 import shutil
 import subprocess
 from typing import Any, Coroutine
+from urllib.parse import urlsplit
 
 from tools.logging_setup import get_logger
 from tools.recon.config import HostReconResult, ReconConfig, ServiceInfo, ToolAvailability
 from tools.recon.scanner import _kill_process, run_command
+from tools.research.http_fetch import FetchPolicy, fetch_response
 from tools.validation_utils import is_fqdn, is_subdomain_of, validate_ipv4
 
 logger = get_logger()
@@ -29,6 +31,7 @@ class SecondaryEnumerator:
 
     def __init__(self, config: ReconConfig) -> None:
         self._config = config
+        self._fetch_pins: dict[tuple[str, int], tuple[tuple[int, str], ...]] = {}
 
     async def enumerate_host(self, primary_result: HostReconResult) -> HostReconResult:
         """Run all applicable secondary enumeration against a host.
@@ -41,6 +44,10 @@ class SecondaryEnumerator:
         them immediately, defeating the semaphore).
         """
         result = primary_result
+        # Reuse the first validated DNS answer set throughout this host's
+        # extended HTTP enumeration; a later DNS change cannot retarget a
+        # second request in the same recon pass.
+        self._fetch_pins.clear()
         coros: list[Coroutine[Any, Any, HostReconResult]] = []
 
         # HTTP/HTTPS enumeration
@@ -283,7 +290,9 @@ class SecondaryEnumerator:
                 cmd = [
                     self._config.curl_path,
                     "-sI",
-                    "-L",
+                    # Never follow a redirect from a scoped service: the
+                    # destination would bypass the target resolver/allowlist
+                    # checks applied before host-side recon begins.
                     "--max-time",
                     "10",
                     "--connect-timeout",
@@ -968,27 +977,37 @@ class SecondaryEnumerator:
     # key into ``result.extended`` and never raises out of the enumerator.
     # -----------------------------------------------------------------------
 
-    @staticmethod
     def _stdlib_fetch(
-        url: str, *, timeout: int = 15, method: str = "GET", headers: dict[str, str] | None = None
+        self,
+        url: str,
+        *,
+        timeout: int = 15,
+        method: str = "GET",
+        headers: dict[str, str] | None = None,
+        allowed_domains: tuple[str, ...] = (),
+        allow_local_fetch: bool = False,
     ) -> tuple[int, dict[str, str], str]:
-        """Default HTTP fetch (urllib). Returns (status, headers, body)."""
-        import urllib.error
-        import urllib.request
-
-        req = urllib.request.Request(url, method=method)
-        for k, v in (headers or {}).items():
-            req.add_header(k, v)
+        """Fetch one bounded, DNS-pinned HTTP response without redirects."""
         try:
-            with urllib.request.urlopen(req, timeout=timeout) as resp:
-                body = resp.read(200000).decode(errors="replace")
-                return resp.status, dict(resp.headers.items()), body
-        except urllib.error.HTTPError as e:
-            return (
-                e.code,
-                dict(e.headers.items()) if e.headers else {},
-                (e.read(2000).decode(errors="replace") if e.fp else ""),
+            host = urlsplit(url).hostname
+            if not host:
+                return 0, {}, ""
+            status, response_headers, body, _clean_url = fetch_response(
+                url,
+                policy=FetchPolicy(
+                    allow_local_fetch=allow_local_fetch,
+                    allowed_domains=allowed_domains or (host,),
+                ),
+                timeout=float(timeout),
+                user_agent="BreachPilot-Recon/1.0",
+                max_bytes=200_000,
+                headers=headers,
+                method=method,
+                pin_cache=self._fetch_pins,
             )
+            if 300 <= status < 400:
+                body = b""
+            return status, response_headers, body.decode(errors="replace")
         except Exception:
             return 0, {}, ""
 
@@ -1061,10 +1080,21 @@ class SecondaryEnumerator:
             for svc in services:
                 scheme = "https" if svc.port in (443, 8443) else "http"
                 base = f"{scheme}://{result.target_ip}:{svc.port}/"
-                _s, _h, base_body = fetch(base, timeout=10)
+                _s, _h, base_body = fetch(
+                    base,
+                    timeout=10,
+                    allowed_domains=(result.target_ip,),
+                    allow_local_fetch=True,
+                )
                 for w in words:
                     host = f"{w}.{domain}"
-                    s, _h, body = fetch(base, timeout=10, headers={"Host": host})
+                    s, _h, body = fetch(
+                        base,
+                        timeout=10,
+                        headers={"Host": host},
+                        allowed_domains=(result.target_ip,),
+                        allow_local_fetch=True,
+                    )
                     if s and (s not in (404,) and (len(body) != len(base_body))):
                         found.append({"vhost": host, "port": svc.port, "status": s, "length": len(body)})
             result.extended["vhosts"] = {"enabled": True, "count": len(found), "vhosts": found}
@@ -1094,7 +1124,12 @@ class SecondaryEnumerator:
             for svc in services:
                 scheme = "https" if svc.port in (443, 8443) else "http"
                 url = f"{scheme}://{result.target_ip}:{svc.port}/"
-                _s, hdrs, _b = fetch(url, timeout=10)
+                _s, hdrs, _b = fetch(
+                    url,
+                    timeout=10,
+                    allowed_domains=(result.target_ip,),
+                    allow_local_fetch=True,
+                )
                 low = {k.lower(): str(v) for k, v in hdrs.items()}
                 for name, test in _SIGS.items():
                     try:

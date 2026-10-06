@@ -22,6 +22,11 @@ subsystem: webui
 
 ## Scripts (`webui/package.json:6`)
 
+Use Node 20.19+ on the 20.x line, 22.12+ on the 22.x line, or 24+ with the
+locked dependencies for the full install/build/test workflow. Vite 6 and the
+installer's current version check accept Node 18+, but the frontend lockfile
+contains packages with newer engine ranges (including jsdom). CI uses Node 22.
+
 | Script | Command | Purpose |
 |--------|---------|---------|
 | `dev` | `vite` | dev server `http://127.0.0.1:5173 strictPort` + `/api` proxy (`VITE_API_URL` or `DEFAULT_API http://127.0.0.1:8765`) |
@@ -43,7 +48,7 @@ preview{same proxy}, build{outDir:"dist", sourcemap:false, target:"es2020"}
 
 `target` env: `loadEnv(mode, cwd, "VITE_")` (`vite.config.ts:10`) → `VITE_API_URL` overrides `DEFAULT_API`. The `ws:true` flag proxies WebSocket upgrades for `useRunEvents`.
 
-Production serving: `python main.py --web` auto-builds `webui/dist/` if missing (`npm install && npm run build`, requires Node+npm) and mounts it at `/` with SPA fallback in the `create_app` factory (`docs/api.md: api.serve_webui`).
+Production serving: `python main.py --web` from a source checkout builds `webui/dist/` if it is missing (`npm ci && npm run build`, requires Node+npm) and mounts it at `/` with SPA fallback in the `create_app` factory (`docs/api.md: api.serve_webui`). Release wheels install the CI-built SPA under the Python environment's data prefix (`webui/dist`); both the CLI bootstrap and `create_app` resolve that location through `tools.paths.get_webui_dist_dir()`, so normal `breachpilot --web` works from an installed wheel without Node.js or a repository checkout. `--rebuild` requires the source checkout and Node/npm.
 
 ## TypeScript (`webui/tsconfig.json`, `tsconfig.app.json`, `tsconfig.node.json`)
 
@@ -52,7 +57,7 @@ Production serving: `python main.py --web` auto-builds `webui/dist/` if missing 
 | File | Key compilerOptions | Notes |
 |------|----------------------|-------|
 | `tsconfig.app.json:2` | `target ES2021`, `useDefineForClassFields`, `lib [ES2023, DOM, DOM.Iterable]`, `module ESNext`, `skipLibCheck`, `moduleResolution Bundler`, `allowImportingTsExtensions`, `isolatedModules`, `moduleDetection force`, `noEmit`, `jsx react-jsx`, `strict`, `noUnusedLocals/Parameters`, `noFallthroughCasesInSwitch`, `baseUrl .`, `paths {"@/*":["src/*"]}`, `include ["src"]` | strict tree used for bundle; `baseUrl/paths` mirrors vite alias |
-| `tsconfig.node.json` | includes `vite.config.ts`, `vitest.config.ts`, `postcss.config.js`, `tailwind.config.ts`; `composite`, `allowSyntheticDefaultImports`, `module ESNext` | node tooling only |
+| `tsconfig.node.json` | includes `vite.config.ts`; strict, no-emit ESNext/Bundler settings | node tooling only |
 
 CI scoped checks: `ruff`/`mypy` scopes listed in `README §CI`; `tsc -b` is the only typed build gate for the SPA.
 
@@ -70,20 +75,29 @@ CI scoped checks: `ruff`/`mypy` scopes listed in `README §CI`; `tsc -b` is the 
 | `theme.extend.fontFamily.mono` | `ui-monospace,SFMono-Regular,Menlo,Consolas,monospace` |
 | plugins | `[typography, animate]` |
 
-`postcss.config.js` — `{plugins:{tailwindcss:{}, autoprefixer:{}}}`.
+Tailwind 4 is processed through `@tailwindcss/postcss` in `postcss.config.js`.
+`src/index.css` imports Tailwind and explicitly loads the legacy JS config with
+`@config "../tailwind.config.ts"`; this preserves the existing HSL theme and
+`typography` / `animate` plugin setup during the Tailwind 4 migration.
 
-`src/index.css` (`@tailwind base/components/utilities` + `@layer base` vars `:root` light + `.dark` dark (`:6`/`:29`), `@layer utilities` `bg-grid/grid-sm/radial-fade/glow-primary/skeleton/scrollbar-thin/animate-*`). `index.html` has `color-scheme dark light` + `referrer no-referrer` + inline `localStorage "breachpilot.theme"` script to remove `dark` on light preference before paint.
+`src/index.css` (`@import "tailwindcss"` + `@layer base` HSL vars in `:root`
+and `.dark`, `@layer utilities` `bg-grid/grid-sm/radial-fade/glow-primary/
+skeleton/scrollbar-thin/animate-*`). `index.html` sets `color-scheme: dark`; the
+theme is dark-only and has no toggle or local-storage persistence.
 
 Deps (`package.json:13`):
 
 | Family | Packages |
 |--------|----------|
-| UI primitives | `@radix-ui/react-{checkbox,dialog,label,popover,scroll-area,select,separator,slot,switch,tabs,toast,tooltip}` + `class-variance-authority@0.7.0`, `clsx 2.1.1`, `tailwind-merge 2.5.4` |
-| Graph | `reactflow@11.11.4` |
-| Data | `@tanstack/react-query@5.59.16`, `@tanstack/react-virtual@3.14.10` |
-| Markdown | `react-markdown@9.0.1`, `remark-gfm@4.0.0`, `@tailwindcss/typography@0.5.15` |
-| Icons/routing | `lucide-react@0.454.0`, `react-router-dom@6.27.0` |
-| Dev | `typescript 5.6.3`, `vite 5.4.10`, `@vitejs/plugin-react 4.3.3`, `tailwindcss 3.4.14`, `autoprefixer 10.4.20`, `vitest 2.1.8`, `@testing-library/{react,dom,user-event}`, `jsdom 29.1.1`, `@types/*`, `tailwindcss-animate 1.0.7` |
+| UI primitives | `@radix-ui/react-{checkbox,dialog,label,popover,scroll-area,select,separator,slot,switch,tabs,toast,tooltip}` + `class-variance-authority`, `clsx`, `tailwind-merge` |
+| Graph | `reactflow` |
+| Data | `@tanstack/react-query`, `@tanstack/react-virtual` |
+| Markdown | `react-markdown`, `remark-gfm`, `@tailwindcss/typography` |
+| Icons/routing | `lucide-react`, `react-router-dom` |
+| Dev | TypeScript, Vite, `@vitejs/plugin-react`, Tailwind 4 + `@tailwindcss/postcss`, Autoprefixer, Vitest, Testing Library, jsdom, `@types/*`, `tailwindcss-animate` |
+
+Declared dependency ranges and exact lockfile resolutions are maintained in
+`webui/package.json` and `webui/package-lock.json`.
 
 ## Vitest (`webui/vitest.config.ts:1`)
 

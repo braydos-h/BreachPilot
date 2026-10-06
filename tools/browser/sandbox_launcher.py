@@ -556,31 +556,44 @@ def resolve_browser_launcher(ctx: Any, config: dict[str, Any] | None) -> tuple[A
 
     Returns ``(launcher, "")`` on success, or ``(None, block)`` where ``block``
     is a ``SANDBOX_*`` result string the tool must return verbatim. Browser
-    execution is STRICT fail-closed: when the sandbox is enabled but unusable
-    it blocks even if ``sandbox.fallback_native`` is true (the native fallback
-    covers terminal/Python execution only — never Chromium).
+    execution always uses the contained worker and fails closed when its
+    configuration or runtime is unavailable.
     """
-    from tools.browser.playwright_backend import InProcessPlaywrightLauncher
     from tools.sandbox.mcp_bridge import manager_from_ctx, sandbox_block
     from tools.sandbox.models import SandboxConfig
 
-    sandbox_cfg = SandboxConfig.from_config(config)
-    if not sandbox_cfg.enabled:
-        # Explicit operator opt-out (documented legacy host-execution mode).
-        return InProcessPlaywrightLauncher(), ""
+    try:
+        SandboxConfig.from_config(config)
+    except (TypeError, ValueError):
+        from tools.sandbox.exceptions import SandboxUnavailableError as _Unavailable
+
+        return None, sandbox_block(
+            _Unavailable("invalid sandbox configuration; browser execution is blocked"),
+            tool_name="browser",
+        )
     manager = manager_from_ctx(ctx)
     if manager is None:
         from tools.sandbox.exceptions import SandboxUnavailableError as _Unavailable
 
         return None, sandbox_block(
             _Unavailable(
-                "browser execution requires the sandbox worker, but no session manager is attached "
-                "(sandbox.enabled:true with an unusable Docker stack). Refusing host Chromium execution "
-                "(fail closed — the browser never inherits the native fallback)."
+                "browser execution requires the sandbox worker, but no session manager is attached. "
+                "Refusing host Chromium execution (fail closed)."
             ),
             tool_name="browser",
         )
-    image = str(getattr(getattr(manager, "cfg", None), "image", "") or browser_worker_image(config))
+    expected_image = browser_worker_image(config)
+    image = str(getattr(getattr(manager, "cfg", None), "image", "") or expected_image)
+    if image != expected_image:
+        from tools.sandbox.exceptions import SandboxUnavailableError as _Unavailable
+
+        return None, sandbox_block(
+            _Unavailable(
+                f"browser requires sandbox.image={expected_image!r}, but the session worker uses {image!r}. "
+                "Configure sandbox.image to the browser worker image and restart the assessment."
+            ),
+            tool_name="browser",
+        )
     if not _worker_has_playwright(manager, image):
         from tools.sandbox.exceptions import SandboxUnavailableError as _Unavailable
 

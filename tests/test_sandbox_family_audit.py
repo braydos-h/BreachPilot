@@ -43,13 +43,37 @@ def test_registered_entries_reference_real_registry():
             assert row["reason"], "host exceptions must document a reason"
 
 
+def test_credentials_family_is_sandboxed():
+    """Credential-backed remote execution stays on the sandbox argv seam."""
+    assert "credentials" in SANDBOXED_FAMILIES
+
+
+def test_recon_family_is_audited_as_sandboxed():
+    """Target-active recon is worker-contained; UDP is explicitly unsupported."""
+    assert "recon" in SANDBOXED_FAMILIES
+    assert "recon" not in HOST_EXCEPTIONS
+    rows = {row["module"]: row for row in audit_families()}
+    assert rows["recon"]["status"] == "sandboxed"
+    notes = " ".join(rows["recon"]["notes"])
+    assert "run_argv_in_sandbox" in notes
+    assert "drops NET_RAW" in notes
+    assert "bounded passive" in notes
+    assert "campaign and opt-in swarm paths remain host-side" in notes
+
+
 def test_sandboxed_families_use_the_sandbox_funnel():
     """Families registered as sandboxed must import the sandbox_exec seam."""
     import ast
     from pathlib import Path
 
     mcp_tools = Path("tools/mcp_tools")
-    seam_symbols = {"run_command_in_sandbox", "run_argv_in_sandbox", "manager_from_ctx", "sandbox_error_block"}
+    seam_symbols = {
+        "run_command_in_sandbox",
+        "run_argv_in_sandbox",
+        "run_tool_argv_in_sandbox",
+        "manager_from_ctx",
+        "sandbox_error_block",
+    }
     for name in SANDBOXED_FAMILIES:
         path = mcp_tools / f"{name}.py"
         if not path.exists():
@@ -65,18 +89,15 @@ def test_sandboxed_families_use_the_sandbox_funnel():
 
 def test_target_touching_exceptions_are_documented_gaps():
     """Target-touching host exceptions must say they are pending migration or
-    the explicit sandbox-disabled opt-out — never silent host execution."""
+    another concrete containment gap; disabled sandbox config never authorizes
+    host execution."""
     for name, entry in HOST_EXCEPTIONS.items():
         if entry.target_touching:
-            ok = (
-                "sandbox migration" in entry.reason
-                or "pending" in entry.reason
-                or "sandbox.enabled is false" in entry.reason
-            )
+            ok = "sandbox migration" in entry.reason or "pending" in entry.reason
             assert ok, (
-                f"{name}: target-touching host exceptions must state the migration plan "
-                "or the explicit opt-out condition"
+                f"{name}: target-touching host exceptions must state the migration plan or concrete containment gap"
             )
+            assert "sandbox.enabled is false" not in entry.reason
 
 
 def test_audit_summary_shape():

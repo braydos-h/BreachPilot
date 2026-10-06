@@ -17,6 +17,7 @@ from tools.kernel.audit import make_audit_tool, make_require_allowlist
 
 ALLOW_CONFIG = {
     "exploit": {"require_explicit_allowlist": True, "allowed_targets": ["10.0.0.50"]},
+    "sandbox": {"enabled": True, "image": "breachpilot-sandbox:browser"},
     "browser": {
         "enabled": True,
         "backend": "playwright",
@@ -50,7 +51,7 @@ class FakeCtx:
         self.workspace = workspace
         self.config = config
         # NOTE: no ``sandbox`` attribute unless passed — manager_from_ctx then
-        # resolves None, exactly like a sandbox-disabled server.
+        # resolves None, exactly like a server whose worker is unavailable.
         if sandbox is not None:
             self.sandbox = sandbox
         self.audit_tool = make_audit_tool(workspace)
@@ -163,24 +164,38 @@ def test_no_registration_when_disabled(tmp_path):
 
 
 def test_no_registration_when_runtime_unavailable(tmp_path, monkeypatch):
-    """SDK absent + sandbox disabled: declared but not runnable registers nothing."""
+    """SDK and contained worker unavailable: declared browser tools do not register."""
     import copy
 
+    from tools.browser import capabilities as _capabilities
     from tools.browser import playwright_backend as _mod
 
     monkeypatch.setattr(_mod, "playwright_present", lambda: False)
-    # Explicit host-mode fixture: absent section now means contained (BP-02).
+    monkeypatch.setattr(_capabilities, "_sandbox_execution_possible", lambda _config: False)
     config = copy.deepcopy(ALLOW_CONFIG)
-    config["sandbox"] = {"enabled": False}
+    config["sandbox"] = {"enabled": True, "image": "breachpilot-sandbox:browser"}
     mcp, _ctx = _register(config, tmp_path)
     assert mcp.tools == {}
 
 
-def test_registration_when_host_sdk_present(tmp_path, monkeypatch):
+def test_registration_when_sandbox_worker_is_configured(tmp_path, monkeypatch):
+    import copy
+
+    from tools.browser import capabilities as _capabilities
     from tools.browser import playwright_backend as _mod
 
-    monkeypatch.setattr(_mod, "playwright_present", lambda: True)
-    mcp, _ctx = _register(ALLOW_CONFIG, tmp_path)
+    monkeypatch.setattr(_mod, "playwright_present", lambda: False)
+    monkeypatch.setattr(
+        _capabilities,
+        "_sandbox_execution_possible",
+        lambda config: bool(
+            config.get("sandbox", {}).get("enabled")
+            and config.get("sandbox", {}).get("image") == "breachpilot-sandbox:browser"
+        ),
+    )
+    config = copy.deepcopy(ALLOW_CONFIG)
+    config["sandbox"] = {"enabled": True, "image": "breachpilot-sandbox:browser"}
+    mcp, _ctx = _register(config, tmp_path)
     assert set(mcp.tools) == {
         "browser_start",
         "browser_navigate",
@@ -530,7 +545,7 @@ def test_strict_no_host_fallback_when_sandbox_unusable(tmp_path):
     import copy
 
     config = copy.deepcopy(ALLOW_CONFIG)
-    config["sandbox"] = {"enabled": True}
+    config["sandbox"] = {"enabled": True, "image": "breachpilot-sandbox:browser"}
     from tools.browser.capabilities import register_playwright_backend
 
     # Registration itself succeeds (a configured sandbox counts as runnable)...
@@ -540,4 +555,4 @@ def test_strict_no_host_fallback_when_sandbox_unusable(tmp_path):
     # ...but execution refuses the host fallback.
     result = mcp.tools["browser_start"]("10.0.0.50")
     assert "SANDBOX" in result
-    assert "fallback" in result.lower()
+    assert "stays blocked" in result.lower()

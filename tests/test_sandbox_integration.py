@@ -17,22 +17,24 @@ What they prove (things mocks cannot):
   /workspace (read-only rootfs), and carries the configured resource limits.
 - A destroyed sandbox leaves no containers or networks behind.
 
-Unauthorized destinations use TEST-NET addresses (RFC 5737, 192.0.2.0/24):
-the firewall DROPs them, so no packet ever leaves the docker host.
+Unauthorized destinations use a ready local helper on the worker bridge. A
+peer helper first proves it reachable, so connection failure cannot be
+explained by an absent service or Docker inter-network isolation.
 """
 
 from __future__ import annotations
 
 import json
-import shutil
+import os
+import secrets
 import subprocess
+import time
 from typing import Any
 
 import pytest
 
 SANDBOX_IMAGE = "breachpilot-sandbox:latest"
-TARGET_NAME = "breachpilot-sandbox-it-target"
-UNAUTHORIZED_IP = "192.0.2.1"  # TEST-NET-1: reserved, never routed
+REQUIRED_ENV = "BREACHPILOT_REQUIRE_SANDBOX_INTEGRATION"
 METADATA_IP = "169.254.169.254"
 
 
@@ -57,154 +59,156 @@ def _image_ok() -> bool:
         return False
 
 
-_DAEMON = _daemon_ok()
-_IMAGE = _image_ok()
-
-pytestmark = pytest.mark.skipif(
-    not (_DAEMON and _IMAGE),
-    reason=(
-        "sandbox integration requires a reachable Docker daemon and the "
-        f"{SANDBOX_IMAGE} image (docker build -t {SANDBOX_IMAGE} docker/sandbox)"
-    ),
-)
+pytestmark = pytest.mark.integration
 
 
-def _target_ip_on(network: str) -> str:
-    """IP of the helper target container on ``network`` (empty when detached).
+def _require_prerequisites() -> None:
+    """Optional locally; the dedicated containment CI job must run, never skip."""
+    if _daemon_ok() and _image_ok():
+        return
+    reason = f"sandbox integration requires Docker and {SANDBOX_IMAGE}; build docker/sandbox"
+    if os.environ.get(REQUIRED_ENV) == "1":
+        pytest.fail(reason)
+    pytest.skip(reason)
 
-    Fail-closed: reads the address on the NAMED network only (the first
-    network in the inspect map may be a leftover bridge attachment, not the
-    sandbox bridge the firewall authorizes).
-    """
-    rc, out, _err = _docker(
+
+@pytest.fixture(scope="module", autouse=True)
+def integration_prerequisites() -> None:
+    # Probe from a fixture, never during offline collection.
+    _require_prerequisites()
+
+
+def _target_ip_on(network: str, name: str) -> str:
+    rc, out, err = _docker(
         "inspect",
         "-f",
-        f"{{{{with index .NetworkSettings.Networks {network!r}}}}}{{{{.IPAddress}}}}{{{{end}}}}",
-        TARGET_NAME,
+        f'{{{{with index .NetworkSettings.Networks "{network}"}}}}{{{{.IPAddress}}}}{{{{end}}}}',
+        name,
     )
-    if rc != 0:
-        return ""
+    assert rc == 0 and out.strip(), f"helper has no IP on {network}: {err[:200]}"
     return out.strip()
 
 
-def _tcp_reachable(host: str, port: int, timeout: float = 3.0) -> bool:
-    """True when host:port accepts TCP within timeout (no curl dependency)."""
-    import socket
-
-    try:
-        with socket.create_connection((host, port), timeout=timeout):
-            return True
-    except OSError:
-        return False
-
-
-def _ensure_target_container() -> None:
-    rc, _out, _err = _docker("inspect", TARGET_NAME)
-    if rc != 0:
-        rc, _o, err = _docker(
-            "run",
-            "-d",
-            "--name",
-            TARGET_NAME,
-            "--label",
-            "breachpilot=true",
-            SANDBOX_IMAGE,
+def _ensure_target_container(name: str, network: str, *, alias: str = "") -> str:
+    # Unique names and ownership recording in it_env avoid reusing user resources.
+    argv = [
+        "run",
+        "-d",
+        "--name",
+        name,
+        "--label",
+        "breachpilot=true",
+        "--network",
+        network,
+    ]
+    if alias:
+        argv += ["--network-alias", alias]
+    argv += [SANDBOX_IMAGE, "python3", "-m", "http.server", "8090", "--bind", "0.0.0.0"]
+    rc, _, err = _docker(*argv)
+    assert rc == 0, f"cannot start integration helper on owned bridge: {err[:200]}"
+    ip = _target_ip_on(network, name)
+    deadline = time.monotonic() + 15
+    while time.monotonic() < deadline:
+        rc, _, _ = _docker(
+            "exec",
+            name,
             "python3",
-            "-m",
-            "http.server",
-            "8090",
-            "--bind",
-            "0.0.0.0",
+            "-c",
+            "import socket;socket.create_connection(('127.0.0.1',8090),1).close()",
         )
-        if rc != 0:
-            pytest.skip(f"cannot start integration target container: {err[:200]}")
-        # Ready-wait: http.server has no readiness signal; retry TCP connect
-        # up to 15s before any test touches it (flake source on loaded CI).
-        import time
-
-        deadline = time.monotonic() + 15.0
-        while time.monotonic() < deadline:
-            rc, out, _err = _docker("inspect", "-f", "{{.State.Running}}", TARGET_NAME)
-            if rc == 0 and out.strip() == "true":
-                tip = _target_ip_on_default()
-                if tip and _tcp_reachable(tip, 8090):
-                    return
-            time.sleep(0.5)
-        pytest.skip("integration target container did not become reachable on :8090 within 15s")
-    else:
-        # Reuse from a previous module run: make sure it is up.
-        _docker("start", TARGET_NAME)
+        if rc == 0:
+            return ip
+        time.sleep(0.25)
+    pytest.fail(f"integration helper {name} did not become ready on :8090")
 
 
-def _target_ip_on_default() -> str:
-    """First IP across all attached networks (best-effort pre-attach probe)."""
-    rc, out, _err = _docker(
-        "inspect",
-        "-f",
-        "{{range $k, $v := .NetworkSettings.Networks}}{{$v.IPAddress}} {{end}}",
-        TARGET_NAME,
+def _verify_helper_reachable(source: str, destination: str) -> None:
+    """Positive control: same-bridge path works before worker-only denial."""
+    rc, _, err = _docker(
+        "exec",
+        source,
+        "python3",
+        "-c",
+        f"import socket;socket.create_connection(('{destination}',8090),5).close()",
     )
-    if rc != 0:
-        return ""
-    for entry in out.split():
-        return entry
-    return ""
+    assert rc == 0, f"unauthorized helper is not reachable from its bridge peer: {err[:200]}"
 
 
 @pytest.fixture(scope="module")
 def it_env(tmp_path_factory) -> dict[str, Any]:
-    """One sandbox worker + one authorized helper target, shared by the module.
-
-    Fail-safe teardown: the worker is destroyed and the target removed even
-    when setup skips partway (skip paths destroy before raising, so a
-    half-built module never leaks labeled resources into the next run).
-    """
+    """Own every partial resource through setup, execution and teardown."""
     from tools.sandbox import resolve_manager
 
     ws = tmp_path_factory.mktemp("sandbox_it") / "ws"
     ws.mkdir(parents=True)
-    _ensure_target_container()
-
+    telemetry_path = ws.parent / "network-scope.json"
+    suffix = secrets.token_hex(6)
+    target_name = f"breachpilot-it-allowed-{suffix}"
+    denied_name = f"breachpilot-it-denied-{suffix}"
+    denied_alias = f"denied-{suffix}"
     mgr = None
-    try:
-        config: dict[str, Any] = {
-            "exploit": {"allowed_targets": ["192.0.2.10"]},  # placeholder; real IP set below
-            "sandbox": {
-                "enabled": True,
-                "image": SANDBOX_IMAGE,
-                "resources": {"memory_mb": 1024, "cpus": 1.0, "pids": 256, "timeout_seconds": 60},
-                "network": {"allow_research_hosts": False},
-            },
-        }
-        mgr = resolve_manager(ws, config)
-        assert mgr is not None, "sandbox manager must build when enabled"
-
-        # Bring the worker up once, attach the helper target to ITS network, then
-        # authorize the target's concrete IP (worker + target share a bridge, so
-        # Docker inter-network isolation never confounds the firewall results).
-        mgr.execute("true", timeout=30)
-        rc, _o, err = _docker("network", "connect", mgr.network_name, TARGET_NAME)
-        if rc != 0:
-            pytest.skip(f"cannot attach target container: {err[:200]}")
-        target_ip = _target_ip_on(mgr.network_name)
-        if not target_ip:
-            pytest.skip("target container has no IP on the sandbox network")
-        mgr.config_dict["exploit"]["allowed_targets"] = [target_ip]
-    except Exception:
-        if mgr is not None:
-            mgr.destroy()
-        _docker("rm", "-f", TARGET_NAME)
-        raise
-
-    try:
-        yield {"mgr": mgr, "target_ip": target_ip, "ws": ws}
-    finally:
+    owned_helpers: list[str] = []
+    with pytest.MonkeyPatch.context() as patch:
+        for key in (
+            "EXPLOIT_TARGET",
+            "EXPLOIT_TARGET_IP",
+            "EXPLOIT_TARGET_DOMAIN",
+            "EXPLOIT_DISCOVERED_TARGETS",
+            "EXPLOIT_ALLOWED_TARGETS",
+        ):
+            patch.delenv(key, raising=False)
         try:
-            _docker("network", "disconnect", "-f", mgr.network_name, TARGET_NAME)
-        except Exception:  # noqa: BLE001 -- teardown best-effort
-            pass
-        mgr.destroy()
-        _docker("rm", "-f", TARGET_NAME)
+            config: dict[str, Any] = {
+                "exploit": {"allowed_targets": ["192.0.2.10"]},
+                "sandbox": {
+                    "enabled": True,
+                    "image": SANDBOX_IMAGE,
+                    "resources": {"memory_mb": 1024, "cpus": 1.0, "pids": 256, "timeout_seconds": 60},
+                    "network": {"allow_research_hosts": False},
+                },
+            }
+            mgr = resolve_manager(ws, config, network_telemetry_path=telemetry_path)
+            assert mgr is not None
+            result = mgr.execute("true", timeout=30)
+            assert result.status == "completed"
+            # Record attempted names before setup so even partial failures clean up.
+            owned_helpers.append(target_name)
+            target_ip = _ensure_target_container(target_name, mgr.network_name)
+            owned_helpers.append(denied_name)
+            denied_ip = _ensure_target_container(denied_name, mgr.network_name, alias=denied_alias)
+            _verify_helper_reachable(target_name, denied_ip)
+            mgr.config_dict["exploit"]["allowed_targets"] = [target_ip]
+            # Initialization used a placeholder; install the final policy explicitly
+            # rather than depending on the production policy-cache TTL.
+            mgr._apply_policy(force=True)
+            yield {
+                "mgr": mgr,
+                "target_ip": target_ip,
+                "unauthorized_ip": denied_ip,
+                "unauthorized_name": denied_alias,
+                "ws": ws,
+                "telemetry_path": telemetry_path,
+            }
+        finally:
+            cleanup_errors = []
+            try:
+                for name in reversed(owned_helpers):
+                    try:
+                        rc, _, err = _docker("rm", "-f", name)
+                        if rc != 0 and "No such container" not in err:
+                            cleanup_errors.append(f"helper cleanup failed: {err[:200]}")
+                    except (OSError, subprocess.TimeoutExpired) as exc:
+                        cleanup_errors.append(f"helper cleanup failed: {exc}")
+            finally:
+                if mgr is not None:
+                    cleanup = mgr.destroy()
+                    assert cleanup.get("container_removed") and cleanup.get("network_removed"), cleanup
+                    from tools.sandbox.telemetry import read_network_scope_measurement
+
+                    assert isinstance(read_network_scope_measurement(telemetry_path), int), (
+                        "Docker integration must produce a complete host-side per-run counter"
+                    )
+            assert not cleanup_errors, cleanup_errors
 
 
 def _run(it_env: dict, command: str, timeout: int = 40) -> Any:
@@ -218,6 +222,17 @@ def _run(it_env: dict, command: str, timeout: int = 40) -> Any:
 
 
 class TestNetworkBoundary:
+    def test_packet_socket_capability_is_unavailable(self, it_env):
+        result = _run(
+            it_env,
+            'python3 -c "import socket\n'
+            "try:\n  socket.socket(socket.AF_PACKET,socket.SOCK_RAW,socket.htons(3))\n"
+            "  print('RAW_SOCKET_ALLOWED')\n"
+            "except PermissionError:\n  print('RAW_SOCKET_BLOCKED')\"",
+        )
+        assert "RAW_SOCKET_BLOCKED" in result.stdout
+        assert "RAW_SOCKET_ALLOWED" not in result.stdout
+
     def test_allowed_target_reachable(self, it_env):
         ip = it_env["target_ip"]
         result = _run(
@@ -229,10 +244,37 @@ class TestNetworkBoundary:
     def test_unauthorized_ip_blocked(self, it_env):
         result = _run(
             it_env,
-            f"python3 -c \"import socket\ntry:\n  socket.create_connection(('{UNAUTHORIZED_IP}',8090),3)\n  print('LEAK')\nexcept Exception as e:\n  print('BLOCKED', type(e).__name__)\"",
+            f"python3 -c \"import socket\ntry:\n  socket.create_connection(('{it_env['unauthorized_ip']}',8090),3)\n  print('LEAK')\nexcept Exception as e:\n  print('BLOCKED', type(e).__name__)\"",
         )
         assert "LEAK" not in result.stdout
         assert "BLOCKED" in result.stdout
+
+    def test_blocked_packet_counter_survives_policy_refresh(self, it_env):
+        mgr = it_env["mgr"]
+        before = mgr.read_network_scope_drop_count()
+        assert isinstance(before, int), "trusted sidecar must read both firewall-family counters"
+
+        _run(
+            it_env,
+            f"python3 -c \"import socket\ntry:\n  socket.create_connection(('{it_env['unauthorized_ip']}',8090),2)\n"
+            'except OSError:\n  pass"',
+        )
+        after_first_drop = mgr.read_network_scope_drop_count()
+        assert isinstance(after_first_drop, int) and after_first_drop > before
+
+        # A forced allowlist refresh flushes only NAI-OUTPUT. NAI-DROP lives
+        # outside that chain, so the cumulative counter must remain monotonic.
+        mgr._apply_policy(force=True)
+        after_refresh = mgr.read_network_scope_drop_count()
+        assert after_refresh == after_first_drop
+
+        _run(
+            it_env,
+            f"python3 -c \"import socket\ntry:\n  socket.create_connection(('{it_env['unauthorized_ip']}',8090),2)\n"
+            'except OSError:\n  pass"',
+        )
+        after_second_drop = mgr.read_network_scope_drop_count()
+        assert isinstance(after_second_drop, int) and after_second_drop > after_refresh
 
     def test_destinationless_script_blocked(self, it_env):
         # THE critical case: the command string contains NO destination — the
@@ -240,7 +282,7 @@ class TestNetworkBoundary:
         # still blocks the egress attempt.
         script = (
             "import socket\n"
-            f"try:\n    socket.create_connection(('{UNAUTHORIZED_IP}', 8090), 3)\n"
+            f"try:\n    socket.create_connection(('{it_env['unauthorized_ip']}', 8090), 3)\n"
             "    print('LEAK')\n"
             "except Exception as exc:\n"
             "    print('BLOCKED', type(exc).__name__)\n"
@@ -251,27 +293,30 @@ class TestNetworkBoundary:
         assert "BLOCKED" in result.stdout
 
     def test_obfuscated_destination_blocked(self, it_env):
-        # Hex-encoded TEST-NET IP (192.0.2.2), decoded at runtime: the parser
-        # sees nothing; the firewall still does.
+        # Encode the reachable denied helper address; decode only in the worker.
+        octets = [f"{int(part):02x}" for part in it_env["unauthorized_ip"].split(".")]
         result = _run(
             it_env,
-            "python3 -c \"import socket;ip='.'.join(str(int(x,16)) for x in ['c0','00','02','02'])\n"
+            f"python3 -c \"import socket;ip='.'.join(str(int(x,16)) for x in {octets!r})\n"
             "try:\n  socket.create_connection((ip,8090),3)\n  print('LEAK')\nexcept Exception as e:\n  print('BLOCKED', type(e).__name__)\"",
         )
         assert "LEAK" not in result.stdout
         assert "BLOCKED" in result.stdout
 
     def test_unauthorized_hostname_blocked(self, it_env):
-        # Controlled DNS resolves (docker embedded resolver on loopback), but
-        # the resolved foreign IP is not authorized => connect fails.
+        # The local Docker alias refers to the ready denied helper. DNS is
+        # independently denied for this IP-only mission; no external host is used.
         result = _run(
-            it_env, "curl --max-time 8 -sS -o /dev/null -w '%{http_code}' http://example.com/ || echo CURL_BLOCKED"
+            it_env,
+            f"curl --max-time 8 -sS -o /dev/null -w '%{{http_code}}' http://{it_env['unauthorized_name']}:8090/ || echo CURL_BLOCKED",
         )
         assert "CURL_BLOCKED" in result.stdout or "000" in result.stdout
         assert "200" not in result.stdout
 
     def test_dev_tcp_blocked(self, it_env):
-        result = _run(it_env, f"timeout 8 bash -c 'echo > /dev/tcp/{UNAUTHORIZED_IP}/80' && echo LEAK || echo BLOCKED")
+        result = _run(
+            it_env, f"timeout 8 bash -c 'echo > /dev/tcp/{it_env['unauthorized_ip']}/8090' && echo LEAK || echo BLOCKED"
+        )
         assert "LEAK" not in result.stdout
         assert "BLOCKED" in result.stdout
 
