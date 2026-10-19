@@ -5,7 +5,6 @@ Open-source autonomous security-testing operator for authorized environments. Pl
 [![CI](https://github.com/braydos-h/BreachPilot/actions/workflows/ci.yml/badge.svg)](https://github.com/braydos-h/BreachPilot/actions/workflows/ci.yml)
 ![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB?style=flat-square&logo=python&logoColor=white)
 ![License](https://img.shields.io/badge/license-Apache--2.0-blue?style=flat-square)
-[![Release](https://img.shields.io/github/v/release/braydos-h/BreachPilot?style=flat-square)](https://github.com/braydos-h/BreachPilot/releases)
 
 **[Quick start](#quick-start) · [Documentation](docs/README.md) · [Architecture](#how-it-works) · [Safety model](#safety-and-containment) · [Reliability metrics](docs/reliability-metrics.md) · [Live demo](https://breachpilot-site.vercel.app/)**
 
