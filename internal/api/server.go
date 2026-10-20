@@ -43,12 +43,14 @@ type Server struct {
 	SkillsRoots []string
 	// SecretsPath overrides the secr.json location (default secrets.Path()).
 	SecretsPath string
+	// PluginsDir feeds plugin discovery (default "plugins", repo-root relative).
+	PluginsDir string
 }
 
 // New builds routes.
 func New(cfg config.Config, token string, db *store.DB, reg *events.Registry) *Server {
 	s := &Server{Cfg: cfg, Token: token, DB: db, Events: reg, mux: http.NewServeMux(),
-		ConfigPath: "config.yaml", SkillsRoots: []string{"skills"}}
+		ConfigPath: "config.yaml", SkillsRoots: []string{"skills"}, PluginsDir: "plugins"}
 	s.routes()
 	return s
 }
@@ -807,7 +809,7 @@ func (s *Server) plugins(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 405, "method_not_allowed", "Method not allowed")
 		return
 	}
-	found := plugins.Discover("plugins")
+	found := plugins.Discover(s.PluginsDir)
 	out := make([]map[string]any, 0, len(found))
 	for _, p := range found {
 		out = append(out, map[string]any{

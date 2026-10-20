@@ -90,12 +90,9 @@ func (st *Store) Search(q string) ([]Skill, error) {
 	q = strings.ToLower(q)
 	var out []Skill
 	for _, sk := range all {
-		if q == "" {
-			continue
-		}
 		hay := strings.ToLower(sk.Name + " " + sk.Description + " " + strings.Join(sk.Tags, " "))
 		if strings.Contains(hay, q) {
-			out = append(out, map[string]anyToSkill(sk))
+			out = append(out, sk)
 			if len(out) >= 20 {
 				break
 			}
@@ -106,8 +103,6 @@ func (st *Store) Search(q string) ([]Skill, error) {
 	}
 	return out, nil
 }
-
-func anyToSkill(sk Skill) Skill { return sk }
 
 // Get returns the full skill including body and sections.
 func (st *Store) Get(name string) (*Skill, error) {

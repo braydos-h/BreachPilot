@@ -1,24 +1,7 @@
-// Package api manifests: compile-time registries replacing Python
-// importlib/pkgutil/AST discovery. Identities preserved from tools/
-// attack_modules/registry.py, plugins/*/plugin.py, skills/*/SKILL.md.
+// Package api manifests: compile-time registry for attack-module families
+// (tools/attack_modules/ identities). Skills and plugins are discovered from
+// disk (internal/skills, internal/plugins), not hardcoded here.
 package api
-
-func skillManifest() []map[string]any {
-	return []map[string]any{
-		{"name": "recon-basics", "description": "Baseline recon playbook", "tags": []string{"recon"}},
-		{"name": "web-enum", "description": "Web enumeration playbook", "tags": []string{"web", "recon"}},
-		{"name": "triage", "description": "Finding triage playbook", "tags": []string{"triage"}},
-	}
-}
-
-func pluginManifest() []map[string]any {
-	names := []string{"zap_scan", "spiderfoot", "shodan_recon", "github_dorks", "bloodhound_ce", "caldera", "sliver_c2", "atomic_red_team", "mobile_attack", "browser_attack", "snmp", "wireless", "firmware_analysis", "webhook_notify", "example_recon_report"}
-	out := make([]map[string]any, 0, len(names))
-	for _, n := range names {
-		out = append(out, map[string]any{"name": n, "enabled": false})
-	}
-	return out
-}
 
 func attackModuleManifest() []map[string]any {
 	// Family names mirror tools/attack_modules/modules/*; each entry is a
