@@ -3,23 +3,19 @@
 package main
 
 import (
-	"context"
 	"flag"
 	"fmt"
-	"net"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
-	"github.com/braydos-h/BreachPilot/internal/allowlist"
 	"github.com/braydos-h/BreachPilot/internal/api"
 	"github.com/braydos-h/BreachPilot/internal/auth"
+	"github.com/braydos-h/BreachPilot/internal/bench"
 	"github.com/braydos-h/BreachPilot/internal/config"
+	"github.com/braydos-h/BreachPilot/internal/diag"
 	"github.com/braydos-h/BreachPilot/internal/events"
-	"github.com/braydos-h/BreachPilot/internal/ollama"
-	"github.com/braydos-h/BreachPilot/internal/recon"
 	"github.com/braydos-h/BreachPilot/internal/runner"
 	"github.com/braydos-h/BreachPilot/internal/store"
 )
@@ -100,111 +96,19 @@ func main() {
 }
 
 func runDoctor(cfg config.Config) {
-	fail := false
-	check := func(name string, err error) {
-		if err != nil {
-			fmt.Printf("doctor: FAIL %s: %v\n", name, err)
-			fail = true
-			return
-		}
-		fmt.Printf("doctor: ok %s\n", name)
-	}
-	check("loopback-bind", auth.AssertLoopback(cfg.API.Host))
-	check("sqlite-store", doctorStore())
-	sidecar := "unreachable"
-	if dialSidecar() {
-		sidecar = "reachable"
-	}
-	fmt.Printf("doctor: sidecar %s (sandbox.enabled=%v)\n", sidecar, cfg.Sandbox.Enabled)
-	if cfg.Sandbox.Enabled && sidecar == "unreachable" {
-		fmt.Println("doctor: WARN sandbox enabled but sidecar unreachable; runs will fail closed at exec time")
-	}
-	if cfg.Models.Provider == "ollama" {
-		check("ollama-tags", doctorOllama(cfg))
-	} else {
-		fmt.Printf("doctor: skip ollama-tags (provider %s)\n", cfg.Models.Provider)
-	}
-	check("allowlist-gate", doctorAllowlist(cfg))
-	if fail {
+	code, out := diag.Doctor(cfg)
+	fmt.Print(out)
+	if code != 0 {
 		os.Exit(1)
 	}
-	fmt.Println("doctor: done")
-}
-
-func doctorStore() error {
-	dir, err := os.MkdirTemp("", "bp-doctor")
-	if err != nil {
-		return err
-	}
-	defer os.RemoveAll(dir)
-	db, err := store.Open(dir+"/doctor.db", dir+"/reports")
-	if err != nil {
-		return err
-	}
-	return db.Close()
-}
-
-func dialSidecar() bool {
-	addr := os.Getenv("BP_SIDECAR_ADDR")
-	if addr == "" {
-		addr = "127.0.0.1:18765"
-	}
-	conn, err := net.DialTimeout("tcp", addr, 500*time.Millisecond)
-	if err != nil {
-		return false
-	}
-	_ = conn.Close()
-	return true
-}
-
-func doctorOllama(cfg config.Config) error {
-	keyEnv := "OLLAMA_API_KEY"
-	if v, ok := cfg.Providers["ollama"]; ok {
-		if e, ok := v["api_key_env"].(string); ok && e != "" {
-			keyEnv = e
-		}
-	}
-	_, err := ollama.ListModels(cfg.Ollama.Host, keyEnv, 5*time.Second)
-	return err
-}
-
-func doctorAllowlist(cfg config.Config) error {
-	entries := allowlist.ApprovalEntries(cfg.Exploit.AllowedTargets, nil)
-	if cfg.Exploit.RequireExplicitAllowlist && len(entries) == 0 {
-		return fmt.Errorf("empty allowlist with require_explicit_allowlist=true (fail-closed: no attack targets authorized)")
-	}
-	// Self-test vector: explicit grant must authorize, others must not.
-	if !allowlist.Check("127.0.0.1", append(entries, "127.0.0.1"), true) {
-		return fmt.Errorf("allowlist self-check failed")
-	}
-	return nil
 }
 
 func runSelfTest(cfg config.Config) {
-	// Safe localhost smoke: resolve + closed-port scan + gated allowlist +
-	// store round-trip, all against loopback only. Mirrors --self-test.
-	fail := func(format string, a ...any) {
-		fmt.Printf("self-test: FAIL "+format+"\n", a...)
+	code, out := diag.SelfTest(cfg)
+	fmt.Print(out)
+	if code != 0 {
 		os.Exit(1)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	ip, _, err := recon.Resolve(ctx, "127.0.0.1")
-	if err != nil || ip != "127.0.0.1" {
-		fail("resolve loopback: %v", err)
-	}
-	res := recon.ScanPorts(ctx, "127.0.0.1", []int{1})
-	if len(res) != 1 || res[0].Open {
-		fail("closed-port scan unexpected: %+v", res)
-	}
-	entries := allowlist.ApprovalEntries(append(cfg.Exploit.AllowedTargets, "127.0.0.1"), nil)
-	if !allowlist.Check("127.0.0.1", entries, true) {
-		fail("allowlist gate rejected loopback")
-	}
-	if err := doctorStore(); err != nil {
-		fail("store: %v", err)
-	}
-	fmt.Println("self-test: PASS loopback resolve + scan + allowlist + store")
 }
 
 func serve(cfg config.Config, configPath string) {
@@ -223,6 +127,7 @@ func serve(cfg config.Config, configPath string) {
 	srv := api.New(cfg, token, db, reg)
 	srv.ConfigPath = configPath
 	srv.ReportsDir = "reports"
+	srv.Bench = bench.New(filepath.Join("reports", "benchmarks"), cfg.Exploit.AllowedTargets, cfg.Exploit.RequireExplicitAllowlist, reg)
 	srv.Runner = runner.New(db, reg, "reports", cfg.Exploit.AllowedTargets, cfg.Exploit.RequireExplicitAllowlist, 4)
 	srv.Runner.Attack = runner.NativeAttack
 	root := http.NewServeMux()

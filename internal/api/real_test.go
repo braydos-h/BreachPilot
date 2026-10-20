@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/braydos-h/BreachPilot/internal/api"
+	"github.com/braydos-h/BreachPilot/internal/bench"
 	"github.com/braydos-h/BreachPilot/internal/config"
 	"github.com/braydos-h/BreachPilot/internal/events"
 	"github.com/braydos-h/BreachPilot/internal/runner"
@@ -50,6 +51,7 @@ func testServerWithFiles(t *testing.T) (*api.Server, string, string) {
 	_ = os.MkdirAll(filepath.Join(dir, "skills"), 0o755)
 	_ = os.MkdirAll(filepath.Join(dir, "plugins"), 0o755)
 	s.ReportsDir = repDir
+	s.Bench = bench.New(filepath.Join(repDir, "benchmarks"), []string{"127.0.0.1", "localhost", "::1"}, true, reg)
 	s.Runner = runner.New(db, reg, repDir, []string{"127.0.0.1", "localhost", "::1"}, true, 2)
 	return s, token, repDir
 }
@@ -297,11 +299,74 @@ func TestProvidersHonest(t *testing.T) {
 
 func TestHonestUnsupported(t *testing.T) {
 	s, token, _ := testServerWithFiles(t)
-	if rec := doReq(t, s.Handler(), "POST", "/api/v1/benchmarks/run", token, "{}"); rec.Code != 501 {
-		t.Fatalf("benchmark run = %d, want 501", rec.Code)
+	if rec := doReq(t, s.Handler(), "POST", "/api/v1/benchmarks/run", token, "{}"); rec.Code != 400 {
+		t.Fatalf("benchmark run empty = %d, want 400 missing_suite", rec.Code)
+	}
+	if rec := doReq(t, s.Handler(), "POST", "/api/v1/benchmarks/run", token, `{"suite":"nope"}`); rec.Code != 404 {
+		t.Fatalf("benchmark unknown suite = %d, want 404", rec.Code)
 	}
 	if rec := doReq(t, s.Handler(), "GET", "/api/v1/connections/xyz", token, ""); rec.Code != 404 {
 		t.Fatalf("unknown connection = %d, want 404", rec.Code)
+	}
+}
+
+func pollBench(t *testing.T, s *api.Server, token, id, want string) map[string]any {
+	t.Helper()
+	deadline := time.Now().Add(60 * time.Second)
+	for {
+		rec := doReq(t, s.Handler(), "GET", "/api/v1/benchmarks/runs/"+id, token, "")
+		if rec.Code != 200 {
+			t.Fatalf("bench get: %d", rec.Code)
+		}
+		v := decode(t, rec)
+		if v["status"] == want {
+			return v
+		}
+		if v["status"] == "failed" || v["status"] == "error" {
+			t.Fatalf("bench failed: %s", rec.Body.String())
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("timeout waiting for bench %s: %s", want, rec.Body.String())
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+}
+
+// Native smoke benchmark: real trials against loopback, oracle solved,
+// baseline save + compare gate.
+func TestBenchmarkSmokeEndToEnd(t *testing.T) {
+	s, token, _ := testServerWithFiles(t)
+	rec := doReq(t, s.Handler(), "GET", "/api/v1/benchmarks", token, "")
+	suites, _ := decode(t, rec)["suites"].([]any)
+	if len(suites) != 1 {
+		t.Fatalf("suites: %s", rec.Body.String())
+	}
+	rec = doReq(t, s.Handler(), "GET", "/api/v1/benchmarks/suites/native-smoke/scenarios", token, "")
+	if len(decode(t, rec)["scenarios"].([]any)) != 1 {
+		t.Fatalf("scenarios: %s", rec.Body.String())
+	}
+	rec = doReq(t, s.Handler(), "GET", "/api/v1/benchmarks/suites/native-smoke/readiness", token, "")
+	if decode(t, rec)["ready"] != true {
+		t.Fatalf("readiness: %s", rec.Body.String())
+	}
+	rec = doReq(t, s.Handler(), "POST", "/api/v1/benchmarks/run", token, `{"suite":"native-smoke","trials":2}`)
+	if rec.Code != 200 {
+		t.Fatalf("bench run = %d %s", rec.Code, rec.Body.String())
+	}
+	id, _ := decode(t, rec)["run_id"].(string)
+	v := pollBench(t, s, token, id, "completed")
+	sum, _ := v["summary"].(map[string]any)
+	if int(sum["solved"].(float64)) != 2 || sum["verified_success_rate"] != 1.0 {
+		t.Fatalf("summary: %s", rec.Body.String())
+	}
+	rec = doReq(t, s.Handler(), "POST", "/api/v1/benchmarks/baseline", token, `{"run_id":"`+id+`"}`)
+	if rec.Code != 200 {
+		t.Fatalf("baseline save = %d %s", rec.Code, rec.Body.String())
+	}
+	rec = doReq(t, s.Handler(), "GET", "/api/v1/benchmarks/compare?run_a="+id+"&run_b="+id, token, "")
+	comp, _ := decode(t, rec)["comparison"].([]any)
+	if len(comp) != 1 || comp[0].(map[string]any)["severity"] != "unchanged" {
+		t.Fatalf("compare: %s", rec.Body.String())
 	}
 }
 

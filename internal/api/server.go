@@ -22,7 +22,9 @@ import (
 	"github.com/braydos-h/BreachPilot/internal/allowlist"
 	"github.com/braydos-h/BreachPilot/internal/audit"
 	"github.com/braydos-h/BreachPilot/internal/auth"
+	"github.com/braydos-h/BreachPilot/internal/bench"
 	"github.com/braydos-h/BreachPilot/internal/config"
+	"github.com/braydos-h/BreachPilot/internal/diag"
 	"github.com/braydos-h/BreachPilot/internal/events"
 	"github.com/braydos-h/BreachPilot/internal/goals"
 	"github.com/braydos-h/BreachPilot/internal/modules"
@@ -54,6 +56,8 @@ type Server struct {
 	PluginsDir string
 	// ReportsDir locates per-run artifacts (default "reports").
 	ReportsDir string
+	// Bench runs benchmark suites. Nil reports not_ported.
+	Bench *bench.Service
 	// Runner executes confirmed runs. Nil disables background execution
 	// (decisions still persist; runs stay queued).
 	Runner *runner.Runner
@@ -855,21 +859,216 @@ func (s *Server) opsSummary(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) doctor(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, 200, map[string]any{"exit_code": 0, "output": "doctor: go-native ok"})
+	if r.Method != http.MethodPost {
+		writeErr(w, 405, "method_not_allowed", "Method not allowed")
+		return
+	}
+	code, out := diag.Doctor(s.Cfg)
+	writeJSON(w, 200, map[string]any{"exit_code": code, "output": out})
 }
 
 func (s *Server) selfTest(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, 200, map[string]any{"exit_code": 0, "output": "self-test: loopback + allowlist + store ok"})
+	if r.Method != http.MethodPost {
+		writeErr(w, 405, "method_not_allowed", "Method not allowed")
+		return
+	}
+	code, out := diag.SelfTest(s.Cfg)
+	writeJSON(w, 200, map[string]any{"exit_code": code, "output": out})
 }
 
 func (s *Server) benchmarks(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, 200, map[string]any{"suites": []any{}, "runs": []any{}, "active": nil})
+	if r.Method != http.MethodGet {
+		writeErr(w, 405, "method_not_allowed", "Method not allowed")
+		return
+	}
+	if s.Bench == nil {
+		writeErr(w, 501, "not_ported", "Benchmark service not configured")
+		return
+	}
+	suites := s.Bench.Suites()
+	runs := []map[string]any{}
+	for _, br := range s.Bench.List() {
+		runs = append(runs, map[string]any{"run_id": br.RunID, "suite": br.Suite, "status": br.State,
+			"trials_total": len(br.Trials), "verified_success_rate": br.Summary.VerifiedSuccessRate})
+	}
+	base, ok := s.Bench.LoadBaseline()
+	writeJSON(w, 200, map[string]any{"suites": suites, "runs": runs, "active": nil,
+		"baseline": map[string]any{"exists": ok, "path": "reports/benchmarks/baseline.json", "baseline": base}})
 }
 
 func (s *Server) benchmarksSub(w http.ResponseWriter, r *http.Request) {
-	// No native benchmark suites are registered yet. Explicit unsupported
-	// instead of fake success; the overview shape above reports real state.
-	writeErr(w, 501, "not_ported", "Benchmark execution is not ported to the native backend yet")
+	if s.Bench == nil {
+		writeErr(w, 501, "not_ported", "Benchmark service not configured")
+		return
+	}
+	rest := strings.TrimPrefix(r.URL.Path, "/api/v1/benchmarks/")
+	switch {
+	case rest == "suites" && r.Method == http.MethodGet:
+		writeJSON(w, 200, map[string]any{"suites": s.Bench.Suites()})
+		return
+	case strings.HasPrefix(rest, "suites/") && strings.HasSuffix(rest, "/scenarios") && r.Method == http.MethodGet:
+		id := strings.TrimSuffix(strings.TrimPrefix(rest, "suites/"), "/scenarios")
+		for _, su := range s.Bench.Suites() {
+			if su.ID == id {
+				writeJSON(w, 200, map[string]any{"suite": su.ID, "scenarios": su.Scenarios})
+				return
+			}
+		}
+		writeErr(w, 404, "not_found", "Unknown suite")
+		return
+	case strings.HasPrefix(rest, "suites/") && strings.HasSuffix(rest, "/readiness") && r.Method == http.MethodGet:
+		id := strings.TrimSuffix(strings.TrimPrefix(rest, "suites/"), "/readiness")
+		for _, su := range s.Bench.Suites() {
+			if su.ID == id {
+				writeJSON(w, 200, benchReadiness(su, s.Cfg.Exploit.AllowedTargets, s.Cfg.Exploit.RequireExplicitAllowlist))
+				return
+			}
+		}
+		writeErr(w, 404, "not_found", "Unknown suite")
+		return
+	case rest == "run" && r.Method == http.MethodPost:
+		var body struct {
+			Suite          string `json:"suite"`
+			Scenarios      []string `json:"scenarios"`
+			Tags           []string `json:"tags"`
+			Trials         int    `json:"trials"`
+			TimeoutSeconds int    `json:"timeout_seconds"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Suite == "" {
+			writeErr(w, 400, "missing_suite", "Body must include suite")
+			return
+		}
+		if body.Trials == 0 {
+			body.Trials = 1
+		}
+		run, err := s.Bench.Start(body.Suite, body.Trials, body.TimeoutSeconds)
+		if err != nil {
+			msg := err.Error()
+			switch {
+			case strings.HasPrefix(msg, "unknown_suite"):
+				writeErr(w, 404, "unknown_suite", msg)
+			case strings.HasPrefix(msg, "conflict:"):
+				writeErr(w, 409, "conflict", "Benchmark already running: "+strings.TrimPrefix(msg, "conflict:"))
+			default:
+				writeErr(w, 400, "invalid_request", msg)
+			}
+			return
+		}
+		writeJSON(w, 200, map[string]any{"run_id": run.RunID, "state": run.State})
+		return
+	case strings.HasPrefix(rest, "runs/") && strings.HasSuffix(rest, "/cancel") && r.Method == http.MethodPost:
+		id := strings.TrimSuffix(strings.TrimPrefix(rest, "runs/"), "/cancel")
+		if !s.Bench.Cancel(id) {
+			writeErr(w, 404, "not_found", "Benchmark run not found or not running")
+			return
+		}
+		writeJSON(w, 200, map[string]any{"run_id": id, "state": "cancelling"})
+		return
+	case strings.HasPrefix(rest, "runs/") && r.Method == http.MethodGet && !strings.Contains(strings.TrimPrefix(rest, "runs/"), "/"):
+		id := strings.TrimPrefix(rest, "runs/")
+		br := s.Bench.Get(id)
+		if br == nil {
+			writeErr(w, 404, "not_found", "Benchmark run not found")
+			return
+		}
+		writeJSON(w, 200, map[string]any{"run_id": br.RunID, "suite": br.Suite, "status": br.State,
+			"config": br.Config, "summary": br.Summary, "trials": br.Trials})
+		return
+	case rest == "runs" && r.Method == http.MethodGet:
+		runs := []map[string]any{}
+		for _, br := range s.Bench.List() {
+			runs = append(runs, map[string]any{"run_id": br.RunID, "suite": br.Suite, "status": br.State})
+		}
+		writeJSON(w, 200, map[string]any{"runs": runs})
+		return
+	case rest == "baseline" && r.Method == http.MethodGet:
+		base, ok := s.Bench.LoadBaseline()
+		writeJSON(w, 200, map[string]any{"exists": ok, "path": "reports/benchmarks/baseline.json", "baseline": base})
+		return
+	case rest == "baseline" && r.Method == http.MethodPost:
+		var body struct {
+			RunID string `json:"run_id"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		b, err := s.Bench.SaveBaseline(body.RunID)
+		if err != nil {
+			writeErr(w, 404, "not_found", "Benchmark run not found")
+			return
+		}
+		writeJSON(w, 200, map[string]any{"saved": true, "path": "reports/benchmarks/baseline.json", "run_id": b.RunID})
+		return
+	case rest == "compare" && r.Method == http.MethodGet:
+		q := r.URL.Query()
+		a := s.Bench.Get(q.Get("run_a"))
+		b := s.Bench.Get(q.Get("run_b"))
+		if a == nil || b == nil {
+			writeErr(w, 404, "not_found", "Benchmark run not found")
+			return
+		}
+		findings, err := s.Bench.Compare(b.RunID)
+		if err != nil {
+			writeErr(w, 404, "not_found", err.Error())
+			return
+		}
+		writeJSON(w, 200, map[string]any{
+			"run_a": map[string]any{"run_id": a.RunID, "suite": a.Suite, "summary": a.Summary},
+			"run_b": map[string]any{"run_id": b.RunID, "suite": b.Suite, "summary": b.Summary},
+			"comparison": findings})
+		return
+	}
+	writeErr(w, 404, "not_found", "Not found")
+}
+
+// benchReadiness reports per-target TCP reachability plus suite readiness.
+// Readiness means trials CAN execute: the host resolves and the allowlist
+// permits it. An individual closed port does NOT make the suite unready —
+// recon reports closed ports as data — it only flips reachable:false.
+func benchReadiness(su bench.Suite, entries []string, require bool) map[string]any {
+	type target struct {
+		ScenarioID string `json:"scenario_id"`
+		TargetHost string `json:"target_host"`
+		TargetPort int    `json:"target_port"`
+		Reachable  bool   `json:"reachable"`
+		Detail     string `json:"detail"`
+	}
+	var targets []target
+	ready := len(su.Scenarios) > 0
+	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
+	defer cancel()
+	for _, sc := range su.Scenarios {
+		t := target{ScenarioID: sc.ScenarioID, TargetHost: sc.TargetHost, TargetPort: sc.TargetPort}
+		if _, _, err := recon.Resolve(ctx, sc.TargetHost); err != nil {
+			t.Detail = "unresolvable: " + err.Error()
+			ready = false
+		} else if !allowlist.Check(sc.TargetHost, allowlist.ApprovalEntries(entries, nil), require) {
+			t.Detail = "not in allowlist"
+			ready = false
+		} else if conn, err := net.DialTimeout("tcp", net.JoinHostPort(sc.TargetHost, itoaPort2(sc.TargetPort)), 500*time.Millisecond); err != nil {
+			t.Detail = "tcp closed (recon still runs): " + err.Error()
+		} else {
+			_ = conn.Close()
+			t.Reachable = true
+			t.Detail = "tcp connect ok"
+		}
+		targets = append(targets, t)
+	}
+	if targets == nil {
+		targets = []target{}
+	}
+	return map[string]any{"suite": su.ID, "ready": ready,
+		"lab_command": "docker compose -f eval_targets/docker-compose.yml up -d", "targets": targets}
+}
+
+func itoaPort2(n int) string {
+	if n == 0 {
+		return "0"
+	}
+	s := ""
+	for n > 0 {
+		s = string(rune('0'+n%10)) + s
+		n /= 10
+	}
+	return s
 }
 
 func (s *Server) connections(w http.ResponseWriter, r *http.Request) {
