@@ -58,8 +58,8 @@ pub fn execute(req: &ExecRequest) -> Result<ExecResult, ExecError> {
             req.targets
         )));
     }
-    let timeout = Duration::from_secs(req.timeout_seconds.max(1).min(3600));
-    let cap = req.max_output_bytes.max(1024).min(4_000_000);
+    let timeout = Duration::from_secs(req.timeout_seconds.clamp(1, 3600));
+    let cap = req.max_output_bytes.clamp(1024, 4_000_000);
     let start = Instant::now();
     let mut child = Command::new(&req.argv[0])
         .args(&req.argv[1..])
@@ -76,9 +76,14 @@ pub fn execute(req: &ExecRequest) -> Result<ExecResult, ExecError> {
             let _ = child.wait();
             return Err(ExecError::Timeout);
         }
-        match child.try_wait().map_err(|e| ExecError::Spawn(e.to_string()))? {
+        match child
+            .try_wait()
+            .map_err(|e| ExecError::Spawn(e.to_string()))?
+        {
             Some(status) => {
-                let out = child.wait_with_output().map_err(|e| ExecError::Spawn(e.to_string()))?;
+                let out = child
+                    .wait_with_output()
+                    .map_err(|e| ExecError::Spawn(e.to_string()))?;
                 let mut so = String::from_utf8_lossy(&out.stdout).into_owned();
                 let mut se = String::from_utf8_lossy(&out.stderr).into_owned();
                 so.truncate(cap);
@@ -134,6 +139,9 @@ mod tests {
         // sleep may not exist on Windows CI; accept spawn-fail or timeout.
         match execute(&r) {
             Err(ExecError::Timeout) | Err(ExecError::Spawn(_)) => {}
+            Err(ExecError::ScopeDenied(_)) => {
+                panic!("empty targets must pass when allowlist not required")
+            }
             Ok(_) => panic!("sleep 30 should not finish in 1s"),
         }
     }

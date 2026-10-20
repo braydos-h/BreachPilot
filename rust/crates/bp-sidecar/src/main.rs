@@ -1,7 +1,7 @@
 //! bp-sidecar: loopback TCP server speaking the v1 JSON IPC envelope.
 //! Ops: health, exec. One JSON object per line. Version mismatch => error.
 
-use bp_exec::{ExecRequest, execute};
+use bp_exec::{execute, ExecRequest};
 use serde::{Deserialize, Serialize};
 use std::io::{BufRead, BufReader, Write};
 use std::net::TcpListener;
@@ -39,7 +39,10 @@ fn handle(env: Envelope) -> RespEnvelope {
             id: env.id,
             ok: false,
             result: None,
-            error: Some(ErrBody { code: "SANDBOX_INVALID", message: "version must be v1".into() }),
+            error: Some(ErrBody {
+                code: "SANDBOX_INVALID",
+                message: "version must be v1".into(),
+            }),
         };
     }
     match env.op.as_str() {
@@ -58,7 +61,10 @@ fn handle(env: Envelope) -> RespEnvelope {
                     id: env.id,
                     ok: false,
                     result: None,
-                    error: Some(ErrBody { code: "SANDBOX_INVALID", message: e.to_string() }),
+                    error: Some(ErrBody {
+                        code: "SANDBOX_INVALID",
+                        message: e.to_string(),
+                    }),
                 },
                 Ok(r) => match execute(&r) {
                     Ok(res) => RespEnvelope {
@@ -79,7 +85,10 @@ fn handle(env: Envelope) -> RespEnvelope {
                             id: env.id,
                             ok: false,
                             result: None,
-                            error: Some(ErrBody { code, message: e.to_string() }),
+                            error: Some(ErrBody {
+                                code,
+                                message: e.to_string(),
+                            }),
                         }
                     }
                 },
@@ -90,7 +99,10 @@ fn handle(env: Envelope) -> RespEnvelope {
             id: env.id,
             ok: false,
             result: None,
-            error: Some(ErrBody { code: "SANDBOX_INVALID", message: "unknown op".into() }),
+            error: Some(ErrBody {
+                code: "SANDBOX_INVALID",
+                message: "unknown op".into(),
+            }),
         },
     }
 }
@@ -116,7 +128,10 @@ fn main() {
                         id: String::new(),
                         ok: false,
                         result: None,
-                        error: Some(ErrBody { code: "SANDBOX_INVALID", message: e.to_string() }),
+                        error: Some(ErrBody {
+                            code: "SANDBOX_INVALID",
+                            message: e.to_string(),
+                        }),
                     },
                 };
                 let mut out = serde_json::to_string(&resp).unwrap();

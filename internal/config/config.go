@@ -25,7 +25,7 @@ type Config struct {
 	Exploit struct {
 		AllowedTargets []string `yaml:"allowed_targets"`
 		// RequireExplicitAllowlist fail-closes the allowlist when empty.
-		RequireExplicitAllowlist bool `yaml:"require_explicit_allowlist"`
+		RequireExplicitAllowlist bool   `yaml:"require_explicit_allowlist"`
 		WorkspaceDir             string `yaml:"workspace_dir"`
 		CommandTimeoutSeconds    int    `yaml:"command_timeout_seconds"`
 	} `yaml:"exploit"`

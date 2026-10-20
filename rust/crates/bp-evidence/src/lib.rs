@@ -27,7 +27,10 @@ fn hash_of(run_id: &str, seq: u64, kind: &str, body: &str, prev: &str) -> String
 
 /// Append a record to the chain.
 pub fn append(chain: &mut Vec<Record>, run_id: &str, kind: &str, body: &str) -> Record {
-    let prev = chain.last().map(|r| r.hash.clone()).unwrap_or_else(|| "GENESIS".into());
+    let prev = chain
+        .last()
+        .map(|r| r.hash.clone())
+        .unwrap_or_else(|| "GENESIS".into());
     let rec = Record {
         run_id: run_id.into(),
         sequence: chain.len() as u64 + 1,

@@ -19,8 +19,8 @@ func TestCheckVectors(t *testing.T) {
 		{"a.example.com", []string{"*.example.com"}, true, true},
 		{"example.com", []string{"*.example.com"}, true, false},
 		{"notevil.com", []string{"*.evil.com"}, true, false},
-		{"10.0.0.1", nil, true, false},  // empty fails closed
-		{"10.0.0.1", nil, false, true},  // permissive when not required
+		{"10.0.0.1", nil, true, false}, // empty fails closed
+		{"10.0.0.1", nil, false, true}, // permissive when not required
 		{"Example.COM", []string{"example.com"}, true, true},
 	}
 	for _, c := range cases {
