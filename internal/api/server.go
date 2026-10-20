@@ -59,6 +59,9 @@ type Server struct {
 	PluginsDir string
 	// ReportsDir locates per-run artifacts (default "reports").
 	ReportsDir string
+	// OperatorDir locates the operator-connection registry (default
+	// exploit.workspace_dir, else "exploit_workspace").
+	OperatorDir string
 	// Bench runs benchmark suites. Always available: handlers lazily create
 	// the default service when it was not explicitly wired, so the API
 	// never reports the suite as unported.

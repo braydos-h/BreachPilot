@@ -47,6 +47,16 @@ explicit `501 not_ported` — never fabricated data.
 
 ## Explicitly pending (Python reference retained, native returns real empty/501)
 
+> Update 2026-10-20: several rows below are now done natively — see the
+> `done` table (`cmd/bp-mcp-*` binaries) and `docs/native-migration/`
+> (swarm execution + resume, UDP sweep, CVE/EPSS/KEV + OSV/GHSA intel,
+> memory store, reporting export, `bp --eval`, operator registry, attack
+> graph + traversal, recon-first goal auto-select). Remaining honest gaps:
+> 83 attack-module classes beyond the network family; 15 plugin behaviors;
+> ~174 skill executor scripts; Docker worker lifecycle + netns firewall;
+> OS fingerprinting beyond banner heuristics; report PDF; docker-oracle
+> graded eval; multi-model consult; parallel_swarm variant; masscan/rustscan.
+
 - Swarm/campaign orchestration, checkpoints beyond resume-adopt (`--swarm` recorded, not executed)
 - 83 attack-module classes beyond the network family; 15 plugin behaviors (manifests discovered)
 - ~174 skill `scripts/*.py`: XSS-style checkers → future `modules` web families; KEV/EPSS-style processors → future native enrichment. SKILL.md metadata is native today.

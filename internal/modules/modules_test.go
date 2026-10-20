@@ -9,13 +9,13 @@ import (
 )
 
 func TestRegistryHasNetworkFamily(t *testing.T) {
-	for _, name := range []string{"resolve", "tcp_scan", "http_probe", "tls_probe"} {
+	for _, name := range []string{"resolve", "tcp_scan", "http_probe", "tls_probe", "dns_enum"} {
 		tool, ok := modules.Registry[name]
 		if !ok || tool.Family != "network" || tool.Description == "" {
 			t.Fatalf("tool %q missing metadata", name)
 		}
 	}
-	if len(modules.List()) != 4 {
+	if len(modules.List()) != 5 {
 		t.Fatalf("registry size: %d", len(modules.List()))
 	}
 }
