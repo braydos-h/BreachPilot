@@ -373,18 +373,145 @@ func (s *Server) modelsSub(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) providers(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeErr(w, 405, "method_not_allowed", "Method not allowed")
+		return
+	}
+	chatgptEnabled := false
+	if v, ok := s.Cfg.Providers["chatgpt"]; ok {
+		if e, ok := v["enabled"].(bool); ok {
+			chatgptEnabled = e
+		}
+	}
 	writeJSON(w, 200, map[string]any{
 		"provider": s.Cfg.Models.Provider, "active": s.Cfg.Models.Provider,
 		"providers": []string{"ollama", "opencode_go", "chatgpt"},
-		"chatgpt":   map[string]any{"enabled": false, "authenticated": false},
+		"chatgpt": map[string]any{
+			"enabled": chatgptEnabled, "authenticated": chatgptAuthenticated(s.Cfg),
+			"proxy_running": chatgptProxyRunning(s.Cfg), "we_started": false,
+		},
 		"opencode_go": map[string]any{
 			"enabled": s.Cfg.Models.Provider == "opencode_go",
 		},
 	})
 }
 
+// chatgptAuthenticated mirrors is_authenticated: file existence only, the
+// token file is never read.
+func chatgptAuthenticated(cfg config.Config) bool {
+	candidates := []string{}
+	if v, ok := cfg.Providers["chatgpt"]; ok {
+		if f, ok := v["oauth_file"].(string); ok && f != "" {
+			candidates = append(candidates, f)
+		}
+	}
+	if home, err := os.UserHomeDir(); err == nil {
+		candidates = append(candidates, home+"/.codex/auth.json")
+	}
+	for _, c := range candidates {
+		if fi, err := os.Stat(c); err == nil && !fi.IsDir() {
+			return true
+		}
+	}
+	return false
+}
+
+func chatgptProxyRunning(cfg config.Config) bool {
+	host, port := "127.0.0.1", 10531
+	if v, ok := cfg.Providers["chatgpt"]; ok {
+		if h, ok := v["host"].(string); ok && h != "" {
+			host = h
+		}
+		switch p := v["port"].(type) {
+		case int:
+			port = p
+		case float64:
+			port = int(p)
+		}
+	}
+	conn, err := net.DialTimeout("tcp", fmt.Sprintf("%s:%d", host, port), 500*time.Millisecond)
+	if err != nil {
+		return false
+	}
+	_ = conn.Close()
+	return true
+}
+
+func (s *Server) providersSub(w http.ResponseWriter, r *http.Request) {
+	p := strings.TrimPrefix(r.URL.Path, "/api/v1/providers/")
+	if r.Method != http.MethodPost {
+		writeErr(w, 405, "method_not_allowed", "Method not allowed")
+		return
+	}
+	switch p {
+	case "chatgpt/login":
+		// The browser OAuth flow lives in the vendored oauth runtime, which
+		// has no native port yet. Explicit unsupported, not fake success.
+		writeErr(w, 501, "not_ported", "ChatGPT browser login is not ported to the native backend yet")
+	case "chatgpt/proxy/start":
+		if chatgptProxyRunning(s.Cfg) {
+			writeJSON(w, 200, map[string]any{"ok": true, "base_url": chatgptBaseURL(s.Cfg), "reason": "already_running"})
+			return
+		}
+		writeErr(w, 501, "not_ported", "Starting the ChatGPT proxy requires the oauth runtime, not ported yet")
+	case "chatgpt/proxy/stop":
+		// We never started it in this process, so there is nothing to stop
+		// (mirrors the _we_started guard).
+		writeJSON(w, 200, map[string]any{"ok": true, "stopped": false})
+	default:
+		writeErr(w, 404, "not_found", "Not found")
+	}
+}
+
+func chatgptBaseURL(cfg config.Config) string {
+	if v, ok := cfg.Providers["chatgpt"]; ok {
+		if b, ok := v["base_url"].(string); ok && b != "" {
+			return b
+		}
+	}
+	return "http://127.0.0.1:10531/v1"
+}
+
 func (s *Server) sysInfo(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, 200, map[string]any{"hostname": "localhost", "platform": "go-native", "local_ips": []string{"127.0.0.1"}, "public_ip": nil})
+	if r.Method != http.MethodGet {
+		writeErr(w, 405, "method_not_allowed", "Method not allowed")
+		return
+	}
+	host, _ := os.Hostname()
+	writeJSON(w, 200, map[string]any{
+		"hostname": host, "platform": runtime.GOOS + "/" + runtime.GOARCH,
+		"go": runtime.Version(), "local_ips": loopbackIPs(), "public_ip": nil,
+	})
+}
+
+func loopbackIPs() []string {
+	var out []string
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		return []string{"127.0.0.1"}
+	}
+	for _, iface := range ifaces {
+		addrs, err := iface.Addrs()
+		if err != nil {
+			continue
+		}
+		for _, a := range addrs {
+			var ip net.IP
+			switch v := a.(type) {
+			case *net.IPNet:
+				ip = v.IP
+			case *net.IPAddr:
+				ip = v.IP
+			}
+			if ip != nil && ip.IsLoopback() {
+				out = append(out, ip.String())
+			}
+		}
+	}
+	if len(out) == 0 {
+		out = []string{"127.0.0.1"}
+	}
+	return out
 }
 
 func (s *Server) telemetry(w http.ResponseWriter, r *http.Request) {
@@ -396,7 +523,30 @@ func (s *Server) memory(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) sandbox(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, 200, map[string]any{"enabled": s.Cfg.Sandbox.Enabled, "backend": s.Cfg.Sandbox.Backend, "image": s.Cfg.Sandbox.Image, "network": map[string]any{}, "resources": map[string]any{}})
+	if r.Method != http.MethodGet {
+		writeErr(w, 405, "method_not_allowed", "Method not allowed")
+		return
+	}
+	writeJSON(w, 200, map[string]any{
+		"enabled": s.Cfg.Sandbox.Enabled, "backend": s.Cfg.Sandbox.Backend,
+		"image": s.Cfg.Sandbox.Image, "sidecar_reachable": sidecarReachable(),
+		"network": map[string]any{}, "resources": map[string]any{},
+	})
+}
+
+// sidecarReachable dials the Rust execution sidecar briefly. False means the
+// sandbox backend is configured but not currently reachable — never faked.
+func sidecarReachable() bool {
+	addr := os.Getenv("BP_SIDECAR_ADDR")
+	if addr == "" {
+		addr = "127.0.0.1:18765"
+	}
+	conn, err := net.DialTimeout("tcp", addr, 300*time.Millisecond)
+	if err != nil {
+		return false
+	}
+	_ = conn.Close()
+	return true
 }
 
 func (s *Server) browser(w http.ResponseWriter, r *http.Request) {
@@ -406,56 +556,268 @@ func (s *Server) browser(w http.ResponseWriter, r *http.Request) {
 func (s *Server) goals(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
-		writeJSON(w, 200, map[string]any{"goals": []any{}, "custom_goals": []any{}})
+		customs, err := s.DB.ListCustomGoals()
+		if err != nil {
+			writeErr(w, 500, "internal_error", "Goals lookup failed")
+			return
+		}
+		customOut := []map[string]any{}
+		for _, g := range customs {
+			customOut = append(customOut, map[string]any{
+				"id": g.ID, "name": g.Name, "objective": g.Objective,
+				"created_at": g.CreatedAt, "updated_at": g.UpdatedAt, "source": "custom",
+			})
+		}
+		presets := make([]map[string]any, 0, len(goals.Presets))
+		for _, p := range goals.Presets {
+			presets = append(presets, map[string]any{
+				"name": p.Name, "description": p.Description, "risk": p.Risk,
+				"compatible": p.Compatible, "source": p.Source,
+			})
+		}
+		writeJSON(w, 200, map[string]any{"goals": presets, "custom_goals": customOut})
 	case http.MethodPost:
 		var body struct {
 			Name      string `json:"name"`
 			Objective string `json:"objective"`
 		}
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Name == "" {
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil || strings.TrimSpace(body.Name) == "" {
 			writeErr(w, 400, "invalid_goal", "Body must include name")
 			return
 		}
-		writeJSON(w, 201, map[string]any{"id": "goal-" + body.Name, "name": body.Name, "objective": body.Objective})
+		if len(body.Name) > 100 || len(body.Objective) > 2000 {
+			writeErr(w, 400, "invalid_goal", "name <= 100 chars, objective <= 2000 chars")
+			return
+		}
+		customs, err := s.DB.ListCustomGoals()
+		if err != nil {
+			writeErr(w, 500, "internal_error", "Goals lookup failed")
+			return
+		}
+		if store.GoalNameTaken(customs, goals.Names(), body.Name) {
+			writeErr(w, 409, "duplicate_goal", "Goal name already exists")
+			return
+		}
+		g, err := s.DB.CreateCustomGoal(newGoalID(), body.Name, body.Objective)
+		if err != nil {
+			if strings.Contains(err.Error(), "duplicate_goal") {
+				writeErr(w, 409, "duplicate_goal", "Goal name already exists")
+				return
+			}
+			writeErr(w, 500, "internal_error", "Create failed")
+			return
+		}
+		writeJSON(w, 201, map[string]any{
+			"id": g.ID, "name": g.Name, "objective": g.Objective,
+			"created_at": g.CreatedAt, "updated_at": g.UpdatedAt, "source": "custom",
+		})
 	default:
 		writeErr(w, 405, "method_not_allowed", "Method not allowed")
 	}
+}
+
+func newGoalID() string {
+	return fmt.Sprintf("goal-%d", time.Now().UnixNano())
 }
 
 func (s *Server) goalsSub(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, 200, map[string]any{"deleted": true})
-}
-
-func (s *Server) skills(w http.ResponseWriter, r *http.Request) {
+	id := strings.TrimPrefix(r.URL.Path, "/api/v1/goals/")
+	if id == "" {
+		writeErr(w, 404, "not_found", "Not found")
+		return
+	}
 	switch r.Method {
 	case http.MethodGet:
-		if q := r.URL.Query().Get("q"); q != "" && strings.HasSuffix(r.URL.Path, "/search") {
-			writeJSON(w, 200, map[string]any{"results": []any{}})
+		g, err := s.DB.GetCustomGoal(id)
+		if err != nil || g == nil {
+			writeErr(w, 404, "not_found", "Goal not found")
 			return
 		}
-		writeJSON(w, 200, map[string]any{"skills": skillManifest()})
-	case http.MethodPost:
-		writeJSON(w, 200, map[string]any{"name": "custom", "description": "", "tags": []string{}})
+		writeJSON(w, 200, map[string]any{
+			"id": g.ID, "name": g.Name, "objective": g.Objective,
+			"created_at": g.CreatedAt, "updated_at": g.UpdatedAt, "source": "custom",
+		})
+	case http.MethodPatch:
+		var body struct {
+			Name      string `json:"name"`
+			Objective string `json:"objective"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			writeErr(w, 400, "invalid_goal", "Invalid body")
+			return
+		}
+		g, err := s.DB.GetCustomGoal(id)
+		if err != nil || g == nil {
+			writeErr(w, 404, "not_found", "Goal not found")
+			return
+		}
+		if body.Name != "" && !strings.EqualFold(body.Name, g.Name) {
+			customs, err := s.DB.ListCustomGoals()
+			if err != nil {
+				writeErr(w, 500, "internal_error", "Goals lookup failed")
+				return
+			}
+			others := customs[:0:0]
+			for _, c := range customs {
+				if c.ID != id {
+					others = append(others, c)
+				}
+			}
+			if store.GoalNameTaken(others, goals.Names(), body.Name) {
+				writeErr(w, 409, "duplicate_goal", "Goal name already exists")
+				return
+			}
+		}
+		updated, err := s.DB.UpdateCustomGoal(id, body.Name, body.Objective)
+		if err != nil {
+			if strings.Contains(err.Error(), "duplicate_goal") {
+				writeErr(w, 409, "duplicate_goal", "Goal name already exists")
+				return
+			}
+			writeErr(w, 500, "internal_error", "Update failed")
+			return
+		}
+		writeJSON(w, 200, map[string]any{
+			"id": updated.ID, "name": updated.Name, "objective": updated.Objective,
+			"created_at": updated.CreatedAt, "updated_at": updated.UpdatedAt, "source": "custom",
+		})
+	case http.MethodDelete:
+		deleted, err := s.DB.DeleteCustomGoal(id)
+		if err != nil {
+			writeErr(w, 500, "internal_error", "Delete failed")
+			return
+		}
+		if !deleted {
+			writeErr(w, 404, "not_found", "Goal not found")
+			return
+		}
+		writeJSON(w, 200, map[string]any{"deleted": true, "id": id})
 	default:
 		writeErr(w, 405, "method_not_allowed", "Method not allowed")
 	}
 }
 
+func skillStore(s *Server) *skills.Store {
+	return skills.NewStore(s.SkillsRoots)
+}
+
+func (s *Server) skills(w http.ResponseWriter, r *http.Request) {
+	st := skillStore(s)
+	switch r.Method {
+	case http.MethodGet:
+		if strings.HasSuffix(r.URL.Path, "/search") {
+			results, err := st.Search(r.URL.Query().Get("q"))
+			if err != nil {
+				writeErr(w, 500, "internal_error", "Search failed")
+				return
+			}
+			writeJSON(w, 200, map[string]any{"results": skillList(results)})
+			return
+		}
+		all, err := st.List()
+		if err != nil {
+			writeErr(w, 500, "internal_error", "List failed")
+			return
+		}
+		writeJSON(w, 200, map[string]any{"skills": skillList(all)})
+	case http.MethodPost:
+		var body struct {
+			Name     string `json:"name"`
+			Markdown string `json:"markdown"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Name == "" || body.Markdown == "" {
+			writeErr(w, 400, "invalid_skill", "Body must include name and markdown")
+			return
+		}
+		sk, err := st.Create(body.Name, body.Markdown)
+		if err != nil {
+			msg := err.Error()
+			switch {
+			case strings.HasPrefix(msg, "skill_exists"):
+				writeErr(w, 409, "skill_exists", msg)
+			default:
+				writeErr(w, 400, "invalid_skill", msg)
+			}
+			return
+		}
+		writeJSON(w, 200, map[string]any{"name": sk.Name, "description": sk.Description, "tags": sk.Tags})
+	default:
+		writeErr(w, 405, "method_not_allowed", "Method not allowed")
+	}
+}
+
+func skillList(in []skills.Skill) []map[string]any {
+	out := make([]map[string]any, 0, len(in))
+	for _, sk := range in {
+		out = append(out, map[string]any{"name": sk.Name, "description": sk.Description, "tags": sk.Tags})
+	}
+	return out
+}
+
 func (s *Server) skillsSub(w http.ResponseWriter, r *http.Request) {
+	st := skillStore(s)
 	name := strings.TrimPrefix(r.URL.Path, "/api/v1/skills/")
 	if name == "search" {
-		writeJSON(w, 200, map[string]any{"results": []any{}})
+		if r.Method != http.MethodGet {
+			writeErr(w, 405, "method_not_allowed", "Method not allowed")
+			return
+		}
+		results, err := st.Search(r.URL.Query().Get("q"))
+		if err != nil {
+			writeErr(w, 500, "internal_error", "Search failed")
+			return
+		}
+		writeJSON(w, 200, map[string]any{"results": skillList(results)})
 		return
 	}
-	if r.Method == http.MethodDelete {
+	switch r.Method {
+	case http.MethodGet:
+		sk, err := st.Get(name)
+		if err != nil || sk == nil {
+			writeErr(w, 404, "not_found", "Skill not found")
+			return
+		}
+		writeJSON(w, 200, map[string]any{
+			"name": sk.Name, "description": sk.Description, "body": sk.Body,
+			"sections": sk.Sections, "tags": sk.Tags, "references": sk.References,
+			"nist_csf": sk.NistCsf, "mitre_attack": sk.MitreAttack,
+			"domain": sk.Domain, "subdomain": sk.Subdomain, "version": sk.Version,
+		})
+	case http.MethodDelete:
+		if err := st.Delete(name); err != nil {
+			msg := err.Error()
+			switch {
+			case strings.HasPrefix(msg, "not_found"):
+				writeErr(w, 404, "not_found", "Skill not found")
+			case strings.HasPrefix(msg, "skill_not_writable"):
+				writeErr(w, 400, "skill_not_writable", msg)
+			default:
+				writeErr(w, 400, "invalid_skill", msg)
+			}
+			return
+		}
 		writeJSON(w, 200, map[string]any{"name": name, "deleted": true})
-		return
+	default:
+		writeErr(w, 405, "method_not_allowed", "Method not allowed")
 	}
-	writeJSON(w, 200, map[string]any{"name": name, "description": "", "body": "", "sections": []any{}, "tags": []string{}})
 }
 
 func (s *Server) plugins(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, 200, map[string]any{"plugins": pluginManifest()})
+	if r.Method != http.MethodGet {
+		writeErr(w, 405, "method_not_allowed", "Method not allowed")
+		return
+	}
+	found := plugins.Discover("plugins")
+	out := make([]map[string]any, 0, len(found))
+	for _, p := range found {
+		out = append(out, map[string]any{
+			"name": p.Name, "version": p.Version, "description": p.Description,
+			"author": p.Author, "capabilities": p.Capabilities, "enabled": p.Enabled,
+			"needs_host_fs": p.NeedsHostFS, "needs_net": p.NeedsNet,
+			"target_touching": p.TargetTouching, "provides_mcp_tools": p.ProvidesMCPTools,
+		})
+	}
+	writeJSON(w, 200, map[string]any{"plugins": out})
 }
 
 func (s *Server) attackModules(w http.ResponseWriter, r *http.Request) {
@@ -463,12 +825,17 @@ func (s *Server) attackModules(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) opsSummary(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeErr(w, 405, "method_not_allowed", "Method not allowed")
+		return
+	}
 	writeJSON(w, 200, map[string]any{
-		"killchain": map[string]any{"enabled": true},
+		"killchain": map[string]any{"enabled": true, "goal_state": "standard_authorized"},
 		"snapshots": map[string]any{"enabled": false},
 		"eval":      map[string]any{"enabled": true},
 		"browser":   map[string]any{"enabled": false},
 		"provider":  map[string]any{"active": s.Cfg.Models.Provider},
+		"sandbox":   map[string]any{"enabled": s.Cfg.Sandbox.Enabled, "sidecar_reachable": sidecarReachable()},
 	})
 }
 
@@ -485,7 +852,9 @@ func (s *Server) benchmarks(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) benchmarksSub(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, 200, map[string]any{"ok": true})
+	// No native benchmark suites are registered yet. Explicit unsupported
+	// instead of fake success; the overview shape above reports real state.
+	writeErr(w, 501, "not_ported", "Benchmark execution is not ported to the native backend yet")
 }
 
 func (s *Server) connections(w http.ResponseWriter, r *http.Request) {
@@ -493,7 +862,9 @@ func (s *Server) connections(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) connectionsSub(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, 200, map[string]any{"connection": map[string]any{}})
+	// No native operator-connection tracking yet: every id is unknown.
+	// Honest 404, never an empty fabricated record.
+	writeErr(w, 404, "not_found", "Connection not found")
 }
 
 func (s *Server) graph(w http.ResponseWriter, r *http.Request) {
