@@ -902,15 +902,15 @@ func (s *Server) runs(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, map[string]any{"runs": runs, "sort": q.Get("sort"), "total": total})
 	case http.MethodPost:
 		var body struct {
-			Target      string   `json:"target"`
-			Mode        string   `json:"mode"`
-			Goal        string   `json:"goal"`
-			CustomGoal  string   `json:"custom_goal"`
-			Kind        string   `json:"kind"`
-			Yes         bool     `json:"yes"`
-			Resume      string   `json:"resume"`
-			Swarm       bool     `json:"swarm"`
-			Title       string   `json:"-"`
+			Target     string `json:"target"`
+			Mode       string `json:"mode"`
+			Goal       string `json:"goal"`
+			CustomGoal string `json:"custom_goal"`
+			Kind       string `json:"kind"`
+			Yes        bool   `json:"yes"`
+			Resume     string `json:"resume"`
+			Swarm      bool   `json:"swarm"`
+			Title      string `json:"-"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil || strings.TrimSpace(body.Target) == "" {
 			writeErr(w, 400, "invalid_request", "Body must include target")

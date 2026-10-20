@@ -12,16 +12,18 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/braydos-h/BreachPilot/internal/api"
 	"github.com/braydos-h/BreachPilot/internal/config"
 	"github.com/braydos-h/BreachPilot/internal/events"
+	"github.com/braydos-h/BreachPilot/internal/runner"
 	"github.com/braydos-h/BreachPilot/internal/store"
 )
 
 const testCfgYAML = "api:\n  host: 127.0.0.1\n  port: 8765\nmodels:\n  provider: ollama\n  default_alias: glm\n  registry:\n    glm: glm-5.0:cloud\nsandbox:\n  enabled: true\n"
 
-func testServerWithFiles(t *testing.T) (*api.Server, string) {
+func testServerWithFiles(t *testing.T) (*api.Server, string, string) {
 	t.Helper()
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "config.yaml")
@@ -38,14 +40,17 @@ func testServerWithFiles(t *testing.T) (*api.Server, string) {
 	}
 	t.Cleanup(func() { _ = db.Close() })
 	const token = "abcdefghijklmnopqrstuvwxyz0123456789ABCD"
-	s := api.New(cfg, token, db, events.NewRegistry())
+	reg := events.NewRegistry()
+	s := api.New(cfg, token, db, reg)
 	s.ConfigPath = cfgPath
 	s.SecretsPath = filepath.Join(dir, "secr.json")
 	s.SkillsRoots = []string{filepath.Join(dir, "skills")}
 	s.PluginsDir = filepath.Join(dir, "plugins")
+	repDir := filepath.Join(dir, "reports")
 	_ = os.MkdirAll(filepath.Join(dir, "skills"), 0o755)
 	_ = os.MkdirAll(filepath.Join(dir, "plugins"), 0o755)
-	return s, token
+	s.Runner = runner.New(db, reg, repDir, []string{"127.0.0.1", "localhost", "::1"}, true, 2)
+	return s, token, repDir
 }
 
 func decode(t *testing.T, rec *httptest.ResponseRecorder) map[string]any {
@@ -58,7 +63,7 @@ func decode(t *testing.T, rec *httptest.ResponseRecorder) map[string]any {
 }
 
 func TestGoalsPresetsAndCustomCRUD(t *testing.T) {
-	s, token := testServerWithFiles(t)
+	s, token, _ := testServerWithFiles(t)
 	rec := doReq(t, s.Handler(), "GET", "/api/v1/goals", token, "")
 	if rec.Code != 200 {
 		t.Fatalf("goals = %d", rec.Code)
@@ -108,7 +113,7 @@ func TestGoalsPresetsAndCustomCRUD(t *testing.T) {
 }
 
 func TestSecretsRealStore(t *testing.T) {
-	s, token := testServerWithFiles(t)
+	s, token, _ := testServerWithFiles(t)
 	rec := doReq(t, s.Handler(), "GET", "/api/v1/secrets", token, "")
 	keys, _ := decode(t, rec)["keys"].(map[string]any)
 	if keys["NVD_API_KEY"] != "missing" || keys["OLLAMA_API_KEY"] != "missing" {
@@ -133,7 +138,7 @@ func TestSecretsRealStore(t *testing.T) {
 }
 
 func TestSkillsRealDiscovery(t *testing.T) {
-	s, token := testServerWithFiles(t)
+	s, token, _ := testServerWithFiles(t)
 	skillMD := "---\nname: web-enum\ndescription: Web enumeration.\ntags: [web, recon]\n---\n# Web enum\n\n## Workflow\nDo it.\n"
 	rec := doReq(t, s.Handler(), "POST", "/api/v1/skills", token,
 		`{"name":"web-enum","markdown":`+jsonString(skillMD)+`}`)
@@ -169,7 +174,7 @@ func jsonString(s string) string {
 }
 
 func TestPluginsRealDiscovery(t *testing.T) {
-	s, token := testServerWithFiles(t)
+	s, token, _ := testServerWithFiles(t)
 	plugDir := filepath.Join(s.PluginsDir, "demo")
 	_ = os.MkdirAll(plugDir, 0o755)
 	_ = os.WriteFile(filepath.Join(plugDir, "plugin.yaml"),
@@ -182,7 +187,7 @@ func TestPluginsRealDiscovery(t *testing.T) {
 }
 
 func TestModelsPersist(t *testing.T) {
-	s, token := testServerWithFiles(t)
+	s, token, _ := testServerWithFiles(t)
 	rec := doReq(t, s.Handler(), "POST", "/api/v1/models", token, `{"alias":"kimi","model":"kimi-k2.6:cloud"}`)
 	if rec.Code != 200 {
 		t.Fatalf("alias = %d %s", rec.Code, rec.Body.String())
@@ -228,7 +233,7 @@ func ollamaStub(models []string, status int) *httptest.Server {
 }
 
 func TestModelsLiveAndRefresh(t *testing.T) {
-	s, token := testServerWithFiles(t)
+	s, token, _ := testServerWithFiles(t)
 	srv := ollamaStub([]string{"glm-5.2:cloud", "glm-5.1:cloud"}, 200)
 	defer srv.Close()
 	s.Cfg.Ollama.Host = srv.URL
@@ -264,7 +269,7 @@ func TestModelsLiveAndRefresh(t *testing.T) {
 }
 
 func TestProvidersHonest(t *testing.T) {
-	s, token := testServerWithFiles(t)
+	s, token, _ := testServerWithFiles(t)
 	rec := doReq(t, s.Handler(), "GET", "/api/v1/providers", token, "")
 	chatgpt, _ := decode(t, rec)["chatgpt"].(map[string]any)
 	// Authenticated iff a candidate auth file exists (mirrors the backend:
@@ -290,11 +295,128 @@ func TestProvidersHonest(t *testing.T) {
 }
 
 func TestHonestUnsupported(t *testing.T) {
-	s, token := testServerWithFiles(t)
+	s, token, _ := testServerWithFiles(t)
 	if rec := doReq(t, s.Handler(), "POST", "/api/v1/benchmarks/run", token, "{}"); rec.Code != 501 {
 		t.Fatalf("benchmark run = %d, want 501", rec.Code)
 	}
 	if rec := doReq(t, s.Handler(), "GET", "/api/v1/connections/xyz", token, ""); rec.Code != 404 {
 		t.Fatalf("unknown connection = %d, want 404", rec.Code)
 	}
+}
+
+func pollState(t *testing.T, s *api.Server, token, id, want string) {
+	t.Helper()
+	deadline := time.Now().Add(40 * time.Second)
+	for {
+		rec := doReq(t, s.Handler(), "GET", "/api/v1/runs/"+id, token, "")
+		if rec.Code != 200 {
+			t.Fatalf("get run: %d", rec.Code)
+		}
+		if decode(t, rec)["state"] == want {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("timeout waiting for %s: %s", want, rec.Body.String())
+		}
+		time.Sleep(300 * time.Millisecond)
+	}
+}
+
+// Full vertical slice over HTTP: create (yes) -> runner executes real recon
+// against loopback -> artifacts on disk -> completion visible via API.
+func TestRunExecutesReconEndToEnd(t *testing.T) {
+	s, token, repDir := testServerWithFiles(t)
+	rec := doReq(t, s.Handler(), "POST", "/api/v1/runs", token,
+		`{"target":"127.0.0.1","mode":"recon","kind":"agent","yes":true}`)
+	if rec.Code != 201 {
+		t.Fatalf("create = %d %s", rec.Code, rec.Body.String())
+	}
+	id, _ := decode(t, rec)["run_id"].(string)
+	pollState(t, s, token, id, "completed")
+	for _, f := range []string{"recon_assessment.json", "goal_suggestions.json", "run.json", "session_summary.md"} {
+		if _, err := os.Stat(filepath.Join(repDir, id, f)); err != nil {
+			t.Fatalf("missing artifact %s: %v", f, err)
+		}
+	}
+	rec = doReq(t, s.Handler(), "GET", "/api/v1/runs/"+id+"/events?after=0", token, "")
+	types := map[string]bool{}
+	for _, e := range decode(t, rec)["events"].([]any) {
+		types[e.(map[string]any)["type"].(string)] = true
+	}
+	if !types["run_created"] || !types["recon_completed"] || !types["run_completed"] {
+		t.Fatalf("event trail: %s", rec.Body.String())
+	}
+}
+
+// Decision gate: attack start_confirm requires the exact text; answering it
+// queues the run and the runner completes it.
+func TestDecisionGateAndConfirm(t *testing.T) {
+	s, token, _ := testServerWithFiles(t)
+	rec := doReq(t, s.Handler(), "POST", "/api/v1/runs", token,
+		`{"target":"127.0.0.1","mode":"attack","kind":"agent"}`)
+	if rec.Code != 201 {
+		t.Fatalf("create = %d", rec.Code)
+	}
+	v := decode(t, rec)
+	id, _ := v["run_id"].(string)
+	dec, _ := v["decision"].(map[string]any)
+	decID, _ := dec["id"].(string)
+	if v["state"] != "awaiting_confirmation" || decID == "" {
+		t.Fatalf("create: %s", rec.Body.String())
+	}
+	// Wrong answer on attack mode: rejected.
+	rec = doReq(t, s.Handler(), "GET", "/api/v1/runs/"+id+"/decisions", token, "")
+	if len(decode(t, rec)["decisions"].([]any)) != 1 {
+		t.Fatalf("decisions: %s", rec.Body.String())
+	}
+	rec = doReq(t, s.Handler(), "POST", "/api/v1/runs/"+id+"/decisions/"+decID, token, `{"answer":"yes"}`)
+	if rec.Code != 400 {
+		t.Fatalf("weak confirm on attack = %d, want 400", rec.Code)
+	}
+	// Exact text: answered -> queued -> runner picks up. Attack has no engine
+	// plugged in, so it completes with attack_executed:false recorded.
+	rec = doReq(t, s.Handler(), "POST", "/api/v1/runs/"+id+"/decisions/"+decID, token, `{"answer":"ALLOW 127.0.0.1"}`)
+	if rec.Code != 200 {
+		t.Fatalf("confirm = %d %s", rec.Code, rec.Body.String())
+	}
+	pollState(t, s, token, id, "completed")
+	rec = doReq(t, s.Handler(), "POST", "/api/v1/runs/"+id+"/decisions/"+decID, token, `{"answer":"ALLOW 127.0.0.1"}`)
+	if rec.Code != 409 {
+		t.Fatalf("re-answer = %d, want 409", rec.Code)
+	}
+}
+
+// Invalid targets are rejected at create with 400, never queued.
+func TestInvalidTargetRejected(t *testing.T) {
+	s, token, _ := testServerWithFiles(t)
+	rec := doReq(t, s.Handler(), "POST", "/api/v1/runs", token, `{"target":"not a host!","mode":"recon"}`)
+	if rec.Code != 400 {
+		t.Fatalf("bad target = %d, want 400", rec.Code)
+	}
+}
+
+// Resume creates a re-confirmation run linked to the source; out-of-allowlist
+// resume targets fail closed in the worker.
+func TestResumeFlow(t *testing.T) {
+	s, token, _ := testServerWithFiles(t)
+	rec := doReq(t, s.Handler(), "POST", "/api/v1/runs", token,
+		`{"target":"127.0.0.1","mode":"recon","kind":"agent","yes":true}`)
+	id, _ := decode(t, rec)["run_id"].(string)
+	pollState(t, s, token, id, "completed")
+	rec = doReq(t, s.Handler(), "POST", "/api/v1/runs/"+id+"/resume", token, "")
+	if rec.Code != 200 {
+		t.Fatalf("resume = %d %s", rec.Code, rec.Body.String())
+	}
+	v := decode(t, rec)
+	newID, _ := v["run_id"].(string)
+	if v["resumed_from"] != id || newID == id {
+		t.Fatalf("resume: %s", rec.Body.String())
+	}
+	dec, _ := v["decision"].(map[string]any)
+	decID, _ := dec["id"].(string)
+	rec = doReq(t, s.Handler(), "POST", "/api/v1/runs/"+newID+"/decisions/"+decID, token, `{"answer":"y"}`)
+	if rec.Code != 200 {
+		t.Fatalf("resume confirm = %d %s", rec.Code, rec.Body.String())
+	}
+	pollState(t, s, token, newID, "completed")
 }

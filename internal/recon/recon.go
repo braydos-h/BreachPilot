@@ -98,8 +98,8 @@ type Service struct {
 
 // ScanResult is one port outcome.
 type ScanResult struct {
-	Port int
-	Open bool
+	Port   int
+	Open   bool
 	Banner string
 }
 

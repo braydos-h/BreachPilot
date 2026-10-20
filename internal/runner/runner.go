@@ -157,7 +157,7 @@ func (r *Runner) runRecon(ctx context.Context, runID string) (map[string]any, er
 	if req.Target == "" {
 		return nil, fmt.Errorf("run has no target")
 	}
-	host, isIP, err := recon.ParseTarget(req.Target)
+	host, _, err := recon.ParseTarget(req.Target)
 	if err != nil {
 		return nil, err
 	}
@@ -166,16 +166,11 @@ func (r *Runner) runRecon(ctx context.Context, runID string) (map[string]any, er
 		failDir(r.ReportsDir, runID, "resolution", err.Error())
 		return nil, err
 	}
-	entries := allowlist.EffectiveEntries(r.AllowedTargets)
-	entries = append(entries, host)
-	if ip != "" && ip != host {
-		entries = append(entries, ip)
-	}
+	entries := allowlist.ApprovalEntries(r.AllowedTargets, nil)
 	gate := ip
 	if gate == "" {
 		gate = host
 	}
-	_ = isIP
 	if !allowlist.Check(gate, entries, r.RequireAllowlist) {
 		msg := fmt.Sprintf("target %s not in allowlist", req.Target)
 		failDir(r.ReportsDir, runID, "scope", msg)

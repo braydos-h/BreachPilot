@@ -12,6 +12,7 @@ import (
 	"github.com/braydos-h/BreachPilot/internal/auth"
 	"github.com/braydos-h/BreachPilot/internal/config"
 	"github.com/braydos-h/BreachPilot/internal/events"
+	"github.com/braydos-h/BreachPilot/internal/runner"
 	"github.com/braydos-h/BreachPilot/internal/store"
 )
 
@@ -87,7 +88,7 @@ func main() {
 	if *target != "" {
 		fmt.Printf("run queued: target=%s mode=%s (use WebUI to confirm)\n", *target, *mode)
 	}
-	serve(cfg)
+	serve(cfg, *configPath)
 }
 
 func runDoctor(cfg config.Config) {
@@ -108,7 +109,7 @@ func runSelfTest(cfg config.Config) {
 	fmt.Println("self-test: loopback + allowlist + store ok")
 }
 
-func serve(cfg config.Config) {
+func serve(cfg config.Config, configPath string) {
 	token, err := auth.LoadOrCreate(cfg.API.TokenFile)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "auth:", err)
@@ -122,6 +123,8 @@ func serve(cfg config.Config) {
 	defer db.Close()
 	reg := events.NewRegistry()
 	srv := api.New(cfg, token, db, reg)
+	srv.ConfigPath = configPath
+	srv.Runner = runner.New(db, reg, "reports", cfg.Exploit.AllowedTargets, cfg.Exploit.RequireExplicitAllowlist, 4)
 	addr := fmt.Sprintf("%s:%d", cfg.API.Host, cfg.API.Port)
 	fmt.Printf("BreachPilot native daemon on http://%s\n", addr)
 	_ = http.ListenAndServe(addr, srv.Handler())

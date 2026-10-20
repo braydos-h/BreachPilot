@@ -45,6 +45,36 @@ func CheckAll(targets []string, entries []string, required bool) bool {
 	return true
 }
 
+// ApprovalEntries returns the set that can AUTHORIZE a target: the config
+// list plus the explicit env grants EXPLOIT_ALLOWED_TARGETS/ALLOWED_TARGETS.
+// Critically, the run's own EXPLOIT_TARGET/_IP/_DOMAIN/DISCOVERED values are
+// NEVER included: a target cannot self-authorize (mirrors
+// _explicit_ip_allowlist_targets). lookup supplies env (os.Getenv in
+// production, stubbed in tests for hermeticity).
+func ApprovalEntries(configured []string, lookup func(string) string) []string {
+	if lookup == nil {
+		lookup = os.Getenv
+	}
+	seen := map[string]bool{}
+	var out []string
+	add := func(v string) {
+		for _, part := range strings.FieldsFunc(v, func(r rune) bool { return r == ',' || r == ' ' || r == '\n' || r == '\t' }) {
+			p := strings.TrimSpace(part)
+			if p == "" || seen[p] {
+				continue
+			}
+			seen[p] = true
+			out = append(out, p)
+		}
+	}
+	for _, e := range configured {
+		add(e)
+	}
+	add(lookup("EXPLOIT_ALLOWED_TARGETS"))
+	add(lookup("ALLOWED_TARGETS"))
+	return out
+}
+
 // EffectiveEntries returns the union of config entries and the documented
 // environment widenings: EXPLOIT_TARGET, EXPLOIT_TARGET_IP,
 // EXPLOIT_TARGET_DOMAIN, EXPLOIT_DISCOVERED_TARGETS, EXPLOIT_ALLOWED_TARGETS.
