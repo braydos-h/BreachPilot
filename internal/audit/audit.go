@@ -47,6 +47,9 @@ func Append(runDir, runID, tool, target, status, command, attemptID string) (Rec
 		Command: command, AttemptID: attemptID, PrevHash: prev,
 	}
 	rec.Hash = hashOf(runID, rec.Sequence, tool, status, command, prev)
+	if err := os.MkdirAll(filepath.Clean(runDir), 0o755); err != nil {
+		return Record{}, err
+	}
 	f, err := os.OpenFile(filepath.Clean(pathOf(runDir)), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 	if err != nil {
 		return Record{}, err

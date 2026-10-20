@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/braydos-h/BreachPilot/internal/api"
 	"github.com/braydos-h/BreachPilot/internal/auth"
@@ -124,9 +126,62 @@ func serve(cfg config.Config, configPath string) {
 	reg := events.NewRegistry()
 	srv := api.New(cfg, token, db, reg)
 	srv.ConfigPath = configPath
+	srv.ReportsDir = "reports"
 	srv.Runner = runner.New(db, reg, "reports", cfg.Exploit.AllowedTargets, cfg.Exploit.RequireExplicitAllowlist, 4)
 	srv.Runner.Attack = runner.NativeAttack
-	addr := fmt.Sprintf("%s:%d", cfg.API.Host, cfg.API.Port)
+	root := http.NewServeMux()
+	root.Handle("/api/", srv.Handler())
+	root.Handle("/openapi.json", srv.Handler())
+	root.Handle("/", spaHandler(findDist()))
+	addr := fmt.Sprintf("%s:%s", cfg.API.Host, itoaPort(cfg.API.Port))
 	fmt.Printf("BreachPilot native daemon on http://%s\n", addr)
-	_ = http.ListenAndServe(addr, srv.Handler())
+	_ = http.ListenAndServe(addr, root)
+}
+
+func itoaPort(n int) string {
+	if n == 0 {
+		return "0"
+	}
+	s := ""
+	for n > 0 {
+		s = string(rune('0'+n%10)) + s
+		n /= 10
+	}
+	return s
+}
+
+// findDist locates the built WebUI: repo webui/dist first, then the
+// container path. Empty means the frontend was not built.
+func findDist() string {
+	for _, d := range []string{"webui/dist", "/opt/breachpilot/webui/dist"} {
+		if fi, err := os.Stat(d + "/index.html"); err == nil && !fi.IsDir() {
+			return d
+		}
+	}
+	return ""
+}
+
+// spaHandler serves the built SPA without auth (the login page itself is
+// public; the API underneath stays bearer-gated). Unknown paths fall back
+// to index.html for client-side routing.
+func spaHandler(dist string) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if dist == "" {
+			http.Error(w, "WebUI not built (npm run build in webui/)", http.StatusServiceUnavailable)
+			return
+		}
+		clean := filepath.Clean("/" + r.URL.Path)[1:]
+		full := filepath.Join(dist, filepath.FromSlash(clean))
+		absDist, _ := filepath.Abs(dist)
+		absFull, _ := filepath.Abs(full)
+		if absFull != absDist && !strings.HasPrefix(absFull, absDist+string(os.PathSeparator)) {
+			http.Error(w, "Not found", http.StatusNotFound)
+			return
+		}
+		if fi, err := os.Stat(full); err == nil && !fi.IsDir() {
+			http.ServeFile(w, r, full)
+			return
+		}
+		http.ServeFile(w, r, filepath.Join(dist, "index.html"))
+	})
 }

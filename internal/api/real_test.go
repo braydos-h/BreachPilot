@@ -21,7 +21,7 @@ import (
 	"github.com/braydos-h/BreachPilot/internal/store"
 )
 
-const testCfgYAML = "api:\n  host: 127.0.0.1\n  port: 8765\nmodels:\n  provider: ollama\n  default_alias: glm\n  registry:\n    glm: glm-5.0:cloud\nsandbox:\n  enabled: true\n"
+const testCfgYAML = "api:\n  host: 127.0.0.1\n  port: 8765\nmodels:\n  provider: ollama\n  default_alias: glm\n  registry:\n    glm: glm-5.0:cloud\nexploit:\n  allowed_targets: [127.0.0.1, localhost, '::1']\n  require_explicit_allowlist: true\nsandbox:\n  enabled: true\n"
 
 func testServerWithFiles(t *testing.T) (*api.Server, string, string) {
 	t.Helper()
@@ -49,6 +49,7 @@ func testServerWithFiles(t *testing.T) (*api.Server, string, string) {
 	repDir := filepath.Join(dir, "reports")
 	_ = os.MkdirAll(filepath.Join(dir, "skills"), 0o755)
 	_ = os.MkdirAll(filepath.Join(dir, "plugins"), 0o755)
+	s.ReportsDir = repDir
 	s.Runner = runner.New(db, reg, repDir, []string{"127.0.0.1", "localhost", "::1"}, true, 2)
 	return s, token, repDir
 }
@@ -373,13 +374,22 @@ func TestDecisionGateAndConfirm(t *testing.T) {
 	if rec.Code != 400 {
 		t.Fatalf("weak confirm on attack = %d, want 400", rec.Code)
 	}
-	// Exact text: answered -> queued -> runner picks up. Attack has no engine
-	// plugged in, so it completes with attack_executed:false recorded.
+	// Exact text: answered -> queued -> runner picks up the attack phase,
+	// which runs real safe probes and records proposed findings.
 	rec = doReq(t, s.Handler(), "POST", "/api/v1/runs/"+id+"/decisions/"+decID, token, `{"answer":"ALLOW 127.0.0.1"}`)
 	if rec.Code != 200 {
 		t.Fatalf("confirm = %d %s", rec.Code, rec.Body.String())
 	}
 	pollState(t, s, token, id, "completed")
+	rec = doReq(t, s.Handler(), "GET", "/api/v1/runs/"+id+"/proposed", token, "")
+	v = decode(t, rec)
+	if _, ok := v["proposed"].([]any); !ok {
+		t.Fatalf("proposed must be a list: %s", rec.Body.String())
+	}
+	rec = doReq(t, s.Handler(), "GET", "/api/v1/runs/"+id+"/audit", token, "")
+	if decode(t, rec)["chain_valid"] != true {
+		t.Fatalf("audit chain: %s", rec.Body.String())
+	}
 	rec = doReq(t, s.Handler(), "POST", "/api/v1/runs/"+id+"/decisions/"+decID, token, `{"answer":"ALLOW 127.0.0.1"}`)
 	if rec.Code != 409 {
 		t.Fatalf("re-answer = %d, want 409", rec.Code)
@@ -419,4 +429,75 @@ func TestResumeFlow(t *testing.T) {
 		t.Fatalf("resume confirm = %d %s", rec.Code, rec.Body.String())
 	}
 	pollState(t, s, token, newID, "completed")
+}
+
+// Manual tool calls: unknown tool 404, non-running run 409, out-of-scope
+// target 403 with audit row, in-scope target executes for real.
+func TestManualToolCalls(t *testing.T) {
+	s, token, repDir := testServerWithFiles(t)
+	rec := doReq(t, s.Handler(), "GET", "/api/v1/runs/nonexistent/tools", token, "")
+	_ = rec
+	// Seed a run row stuck in running state (no worker) for determinism.
+	db := s.DB
+	req := `{"target":"127.0.0.1","mode":"recon","kind":"agent","yes":true}`
+	if err := db.CreateRun("run-manual", "running", "127.0.0.1", "recon", "", req); err != nil {
+		t.Fatal(err)
+	}
+	_ = repDir
+	rec = doReq(t, s.Handler(), "GET", "/api/v1/runs/run-manual/tools", token, "")
+	if len(decode(t, rec)["tools"].([]any)) != 4 {
+		t.Fatalf("tools: %s", rec.Body.String())
+	}
+	rec = doReq(t, s.Handler(), "POST", "/api/v1/runs/run-manual/tools/nope/calls", token, `{"arguments":{"target":"127.0.0.1"}}`)
+	if rec.Code != 404 {
+		t.Fatalf("unknown tool = %d, want 404", rec.Code)
+	}
+	rec = doReq(t, s.Handler(), "POST", "/api/v1/runs/run-manual/tools/tcp_scan/calls", token, `{"arguments":{"target":"10.9.9.9","ports":"1"}}`)
+	if rec.Code != 403 {
+		t.Fatalf("out-of-scope = %d, want 403", rec.Code)
+	}
+	rec = doReq(t, s.Handler(), "POST", "/api/v1/runs/run-manual/tools/tcp_scan/calls", token, `{"arguments":{"target":"127.0.0.1","ports":"1"}}`)
+	if rec.Code != 200 {
+		t.Fatalf("call = %d %s", rec.Code, rec.Body.String())
+	}
+	if decode(t, rec)["tool"] != "tcp_scan" {
+		t.Fatalf("result: %s", rec.Body.String())
+	}
+	rec = doReq(t, s.Handler(), "GET", "/api/v1/runs/run-manual/audit", token, "")
+	v := decode(t, rec)
+	if v["chain_valid"] != true || len(v["records"].([]any)) != 2 {
+		t.Fatalf("audit rows (blocked+completed): %s", rec.Body.String())
+	}
+	// Completed run: manual calls are 409 no_session.
+	_ = db.SetRunState("run-manual", "completed")
+	rec = doReq(t, s.Handler(), "POST", "/api/v1/runs/run-manual/tools/tcp_scan/calls", token, `{"arguments":{"target":"127.0.0.1"}}`)
+	if rec.Code != 409 {
+		t.Fatalf("post-run call = %d, want 409", rec.Code)
+	}
+}
+
+// HITL finding decisions persist to proposed.json and emit events.
+func TestHitlDecide(t *testing.T) {
+	s, token, repDir := testServerWithFiles(t)
+	req := `{"target":"127.0.0.1","mode":"recon","kind":"agent","yes":true}`
+	if err := s.DB.CreateRun("run-hitl", "completed", "127.0.0.1", "recon", "", req); err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Join(repDir, "run-hitl")
+	_ = os.MkdirAll(dir, 0o755)
+	_ = os.WriteFile(filepath.Join(dir, "proposed.json"),
+		[]byte(`[{"id":"finding-web-80","service":"http","port":80,"summary":"x","evidence":"e","status":"proposed"}]`), 0o644)
+	rec := doReq(t, s.Handler(), "POST", "/api/v1/runs/run-hitl/decide", token, `{"finding_id":"finding-web-80","decision":"confirm","note":"verified"}`)
+	if rec.Code != 200 {
+		t.Fatalf("decide = %d %s", rec.Code, rec.Body.String())
+	}
+	rec = doReq(t, s.Handler(), "GET", "/api/v1/runs/run-hitl/proposed", token, "")
+	found := decode(t, rec)["proposed"].([]any)
+	if len(found) != 1 || found[0].(map[string]any)["status"] != "confirmed" {
+		t.Fatalf("proposed after decide: %s", rec.Body.String())
+	}
+	rec = doReq(t, s.Handler(), "POST", "/api/v1/runs/run-hitl/decide", token, `{"finding_id":"nope","decision":"confirm"}`)
+	if rec.Code != 404 {
+		t.Fatalf("unknown finding = %d, want 404", rec.Code)
+	}
 }

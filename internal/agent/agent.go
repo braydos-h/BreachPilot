@@ -108,8 +108,8 @@ func probeService(ctx context.Context, env RunEnv, svc ServiceView, out *Outcome
 			title, _ := res["title"].(string)
 			if status != 0 {
 				out.Findings = append(out.Findings, Finding{
-					ID:       "finding-" + shortID(svc.Port, "web"),
-					Service:  "http", Port: port,
+					ID:      "finding-" + shortID(svc.Port, "web"),
+					Service: "http", Port: port,
 					Summary:  "HTTP service responds",
 					Evidence: "status=" + itoa(status) + " server=" + server + " title=" + title,
 					Status:   "proposed",
@@ -122,8 +122,8 @@ func probeService(ctx context.Context, env RunEnv, svc ServiceView, out *Outcome
 				if certs, ok := res["certs"].([]any); ok && len(certs) > 0 {
 					first, _ := certs[0].(map[string]any)
 					out.Findings = append(out.Findings, Finding{
-						ID:       "finding-" + shortID(svc.Port, "tls"),
-						Service:  "tls", Port: svc.Port,
+						ID:      "finding-" + shortID(svc.Port, "tls"),
+						Service: "tls", Port: svc.Port,
 						Summary:  "TLS certificate presented",
 						Evidence: "subject=" + str(first["subject"]) + " not_after=" + str(first["not_after"]),
 						Status:   "proposed",
@@ -137,8 +137,8 @@ func probeService(ctx context.Context, env RunEnv, svc ServiceView, out *Outcome
 	if svc.Banner != "" || svc.Service != "" {
 		out.Probes++
 		out.Findings = append(out.Findings, Finding{
-			ID:       "finding-" + shortID(svc.Port, "banner"),
-			Service:  svc.Service, Port: svc.Port,
+			ID:      "finding-" + shortID(svc.Port, "banner"),
+			Service: svc.Service, Port: svc.Port,
 			Summary:  "Service banner observed",
 			Evidence: svc.Banner,
 			Status:   "proposed",
