@@ -106,8 +106,10 @@ func (s *Server) routes() {
 	m.HandleFunc("/api/v1/providers/", s.providersSub)
 	m.HandleFunc("/api/v1/system/info", s.sysInfo)
 	m.HandleFunc("/api/v1/system/telemetry", s.telemetry)
-	m.HandleFunc("/api/v1/system/memory", s.memory)
-	m.HandleFunc("/api/v1/system/sandbox", s.sandbox)
+	m.HandleFunc("/api/v1/system/memory", s.memoryExt)
+	m.HandleFunc("/api/v1/system/sandbox", s.sandboxExt)
+	m.HandleFunc("/api/v1/system/sandbox/", s.sandboxSub)
+	m.HandleFunc("/api/v1/system/reset", s.resetSystem)
 	m.HandleFunc("/api/v1/system/browser", s.browser)
 	m.HandleFunc("/api/v1/goals", s.goals)
 	m.HandleFunc("/api/v1/goals/", s.goalsSub)
@@ -859,6 +861,7 @@ func (s *Server) plugins(w http.ResponseWriter, r *http.Request) {
 		out = append(out, map[string]any{
 			"name": p.Name, "version": p.Version, "description": p.Description,
 			"author": p.Author, "capabilities": p.Capabilities, "enabled": p.Enabled,
+			"loaded": p.Enabled, "config_section": p.ConfigSection,
 			"needs_host_fs": p.NeedsHostFS, "needs_net": p.NeedsNet,
 			"target_touching": p.TargetTouching, "provides_mcp_tools": p.ProvidesMCPTools,
 		})
@@ -1575,6 +1578,9 @@ func (s *Server) runsSub(w http.ResponseWriter, r *http.Request) {
 		s.toolCall(w, r, runID, run, strings.TrimSuffix(strings.TrimPrefix(sub, "tools/"), "/calls"))
 	case sub == "artifacts" && r.Method == http.MethodGet:
 		writeJSON(w, 200, map[string]any{"artifacts": listArtifacts(s.runDir(runID))})
+	case strings.HasPrefix(sub, "artifacts/"):
+		s.serveArtifact(w, r, runID, strings.TrimPrefix(sub, "artifacts/"))
+		return
 	case sub == "audit" && r.Method == http.MethodGet:
 		records, _ := audit.List(s.runDir(runID))
 		out := make([]map[string]any, 0, len(records))
@@ -1586,17 +1592,20 @@ func (s *Server) runsSub(w http.ResponseWriter, r *http.Request) {
 		valid, reason, _ := audit.Verify(s.runDir(runID))
 		writeJSON(w, 200, map[string]any{"records": out, "chain_valid": valid, "chain_reason": reason})
 	case sub == "sandbox" && r.Method == http.MethodGet:
-		writeJSON(w, 200, map[string]any{"run_id": runID, "found": false, "config": map[string]any{"enabled": s.Cfg.Sandbox.Enabled}})
+		s.serveRunSandbox(w, runID)
 	case sub == "proposed" && r.Method == http.MethodGet:
 		writeJSON(w, 200, map[string]any{"run_id": runID, "proposed": readProposed(s.runDir(runID))})
 	case sub == "decide" && r.Method == http.MethodPost:
 		s.hitlDecide(w, r, runID)
 	case sub == "swarm" && r.Method == http.MethodGet:
-		writeJSON(w, 200, map[string]any{"state": map[string]any{}})
+		s.serveStateJSON(w, runID, "swarm_state.json")
 	case sub == "campaign" && r.Method == http.MethodGet:
-		writeJSON(w, 200, map[string]any{"state": map[string]any{}})
+		s.serveStateJSON(w, runID, "attack_states.json")
 	case sub == "witness" && r.Method == http.MethodGet:
-		writeJSON(w, 404, map[string]any{"error": map[string]any{"code": "not_found", "message": "No witness log"}})
+		s.serveWitness(w, runID)
+		return
+	case sub == "errors":
+		s.serveErrors(w, r, runID)
 		return
 	case strings.HasPrefix(sub, "events") || strings.HasPrefix(sub, "ws/"):
 		s.eventsSub(w, r, runID, sub)
@@ -1605,16 +1614,16 @@ func (s *Server) runsSub(w http.ResponseWriter, r *http.Request) {
 		s.decisionsSub(w, r, runID, sub)
 		return
 	case strings.HasPrefix(sub, "logs"):
-		writeJSON(w, 200, map[string]any{"name": "tail", "lines": []string{}, "total_lines_returned": 0, "total_lines_in_file": 0})
+		s.serveLog(w, r, runID, sub)
 		return
 	case strings.HasPrefix(sub, "credentials"):
-		writeJSON(w, 200, map[string]any{"credentials": []any{}})
+		s.serveCredentials(w, r, runID, sub)
 		return
 	case sub == "loot" && r.Method == http.MethodGet:
-		writeJSON(w, 200, map[string]any{"loot": []any{}})
+		s.serveLoot(w, runID)
 		return
-	case sub == "workspace" && r.Method == http.MethodGet:
-		writeJSON(w, 200, map[string]any{"files": []any{}})
+	case sub == "workspace" || strings.HasPrefix(sub, "workspace/"):
+		s.serveWorkspace(w, r, runID, sub)
 		return
 	case sub == "graph" && r.Method == http.MethodGet:
 		writeJSON(w, 200, map[string]any{"run_id": runID, "nodes": []any{}, "edges": []any{}})
@@ -1745,7 +1754,7 @@ func listArtifacts(runDir string) []map[string]any {
 	whitelist := []string{"session_summary.md", "run.json", "recon_assessment.json", "fast_recon.json",
 		"goal_suggestions.json", "activity.jsonl", "exploit_audit.jsonl", "events.jsonl",
 		"errors.jsonl", "session_error.log", "recon_first_error.log", "proposed.json",
-		"enhanced_report.json", "enhanced_report.md", "enhanced_report.html"}
+		"enhanced_report.json", "enhanced_report.md", "enhanced_report.html", "enhanced_report.pdf"}
 	out := []map[string]any{}
 	for _, name := range whitelist {
 		fi, err := os.Stat(filepath.Join(runDir, name))

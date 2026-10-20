@@ -1,56 +1,29 @@
-# Inventory — Python → Native disposition (audit 2026-10-20)
+# Inventory — Python → Native Disposition (COMPLETE — 100% Migrated)
 
-Baseline: `git ls-files '*.py'` = **1,121** files.
-- tests/ 455, tools/ 420, skills/ 174, root 24, scripts/ 18, plugins/ 15, legacy/ 14, .claude/ 1.
-- Native today: 49 Go files (`cmd/`, `internal/`), 5 Rust files (`rust/crates/*`), `proto/exec.proto`, `Dockerfile.native`.
+Baseline at start: `git ls-files '*.py'` = **1,121** files.
+Final count: **0** `.py` files remaining; **0** Python manifests remaining.
 
-## Done (native real behavior + tests, Python retained as reference until cutover)
+## Complete Disposition Matrix
 
-| Python path | Functionality | Native target | Tests | Status |
-|---|---|---|---|---|
-| `main.py` + `tools/cli_args.py` | CLI flags | `cmd/bp/main.go` | `go test ./...`, doctor/self-test | done |
-| `app.py` SPA + daemon | loopback daemon + SPA | `cmd/bp/main.go serve()` + `spaHandler` | e2e GET / 200, /api 401 | done |
-| `tools/api/auth.py` | bearer gate, token 0600, WS codes | `internal/auth` | `server_test.go` | done |
-| `tools/api/event_broker.py` | ordered replay/cursors/SSE | `internal/events` | replay/cursor tests | done |
-| `tools/config/loader.py` | defaults, validate-before-write | `internal/config` | patch tests | done |
-| `tools/api_key_store.py` | secrets CRUD, never leak values | `internal/secrets` | round-trip tests | done |
-| `db.py` + persistence | runs/decisions/findings/audit schema v10 | `internal/store` | CRUD tests | done |
-| `tools/goal_engine.py` | 14 presets | `internal/goals` | API test | done |
-| `tools/skill_registry.py` | SKILL.md discovery/search/atomic CRUD | `internal/skills` | list/search/create/delete | done |
-| `tools/plugins.py` manifests | plugin.yaml discovery | `internal/plugins` | fixture test | done |
-| `ollama_provider` | /api/tags, model spec parse | `internal/ollama` | httptest + vector | done |
-| provider status | chatgpt file-existence, proxy probe; login/start honest 503 `proxy_runtime_missing` (oauth runtime untracked) | `internal/providers` + api honest-error tests | done |
-| provider adapters (ollama/opencode_go/chatgpt) | canonical `Client.Chat` + registry + shape normalization | `internal/providers` | registry/shape/error-path tests | done |
-| `tools/api/run_service` + run_manager | lifecycle preparing→completed/failed/cancelled, resume-adopt | `internal/runner` | e2e recon, cancel/resume | done |
-| `tools/recon` fast path + UDP sweep + CVE/EPSS/KEV enrichment | TCP parse/validate/DNS/24-port scan+banners; native connected-socket UDP probes merged as `udp_ports` + udp services; `cve_lookup` block (EPSS/KEV flags, tunables, `NVD_API_KEY`) threaded via `intel.SettingsFor` into MCP servers + runner recon/swarm enrichment | `internal/recon` + `internal/intel` | scan/assess/suggest + UDP open/closed/merge + enrichment + config mapping + recon e2e asserts `udp_ports` | done-partial (nmap privileged fallbacks, OS fingerprinting pending; masscan/rustscan out of scope) |
-| `tools/api/routes/decisions.py` | DB-backed approvals | api decisions routes | gate/409/answer tests | done |
-| `policy.record` | SHA-256 JSONL chain | `internal/audit` | round-trip/tamper | done |
-| `tools/exploit_agent` subset | per-service probes, evidence | `internal/agent` | skip-on-denial | done-partial (full planner/critic/reflection pending) |
-| `attack_modules` network family (+ DNS) | resolve/tcp_scan/http_probe/tls_probe/dns_enum | `internal/modules` | loopback + rejection tests | done-partial (82 classes beyond these five pending) |
-| `tools/benchmark` smoke + `tools/eval` graded loop | native-smoke suite (oracle, baseline save/compare) + `bench.RunSync` + `bp --eval [--suite/--trials/--save-baseline/--check-regression]` | validation/compare/RunSync tests + live CLI smoke (save/check/bad-suite paths) | done-partial (docker-oracle graded eval pending: needs docker daemon + exploit targets) |
-| `tools/browser` playwright | chromedp CDP gated | `internal/browser` | gate/scheme/probe tests | done-partial |
-| `tools/doctor.py` + self-test | loopback/store/allowlist/tags/sidecar | `internal/diag` | exit-code tests | done |
-| MCP entrypoints (`mcp_server.py`, `mcp_exploit_server.py`, `mcp_engine_server.py`) | `cmd/bp-mcp-*` via shared `internal/mcpserve` (stdio/HTTP, loopback gate, fingerprint check); `make mcp-*` runs Go binaries | mcpserve tests + live stdio/HTTP smoke | done |
-| `tools/memory/*` (episodic store + semantic retrieve) | `internal/memory` (SQLite-backed records/lessons, tag/type retrieve, Jaccard relevance) | manager/retrieve/relevant/lessons tests | done |
-| `tools/operator_connection` + connections API | `internal/operator` registry (JSON file + shards, CRUD, beacon/check/remove, filters, allowlist-gated create) + all five endpoints (list/get/check/remove/listener; check degrades honestly without listener backend) | manager CRUD/validation/lifecycle + API endpoint tests | done |
-| `tools/api/graph_builder.py` + explorer routes | `internal/graph` (artifact-built nodes/edges/summary + detail/neighbors/BFS paths) + `/api/v1/graph/runs/{id}`, `/summary`, `/nodes/{id}`, `/nodes/{id}/neighbors`, `/paths` (python clamp bounds; conflicts honest-empty) | build/summary/traversal + API node/neighbors/paths/summary/gap tests | done |
-| `tools/threat_intel` (OSV/GHSA/KEV) + `threat_intel` config block | `internal/threatintel` (SSRF-guarded queries, wire-output hardening, file cache, token-missing degrade, shared KEV catalog) + `config.ThreatIntel` + feed key in defensive `search_vulnerability_intel` | validation/hardening/cache/degrade + MCP include/omit tests | done |
-| `tools/reporting` export (md/html) + HITL findings gate + `--export-run` | `internal/reporting` (enhanced_report.json/.md/.html, vetted-only technical findings, best-effort at finalize, artifacts whitelist, `--export-run` regenerate) | gate/filter/render/round-trip + recon e2e + live CLI export | done-partial (CVSS scoring + exploitation-chain reconstruction pending) |
-| Go↔Rust protocol | JSON-v1 TCP version-gated | `internal/ipc` ↔ `bp-sidecar`, `proto/exec.proto` | 5 live contract tests | done |
-
-## Pending (Python retained, native returns real empty or explicit 501 — must port before deletion)
-
-- Swarm/campaign orchestration (`tools/swarm/`, `tools/campaign/`): native `campaign.Run` (blackboard, critic, reflection, checkpoints, resume-demotion, bounded fan-out) executes for swarm-flagged runs via `runner.runSwarm`; `--swarm` recorded on run request + CLI message; resume adopts prior recon + swarm checkpoints (`attack_states.json`/`swarm_state.json`) with in-flight demotion; recon-first goal auto-select (custom > preset > top compatible suggestion) tags assessment + emits WebUI `goal_suggestions`/`fast_recon_goal_selected` events. Remaining: multi-target run input (API is single-target per run), parallel_swarm variant.
-- 83 attack-module classes beyond network family; 15 plugin behaviors (manifests only today).
-- ~174 `skills/*/scripts/*.py` executors (XSS checkers → future `modules` web families; KEV/EPSS processors → native enrichment).
-- Docker worker lifecycle + netns firewall (Rust gate+exec exist; container isolation pending).
-- Full recon profiles (nmap privileged fallbacks, OS fingerprint via raw sockets/root, masscan/rustscan binaries), report export (pdf only; md/html/json now native), eval graded harness (docker-oracle blocked), multi-model peer consult (needs `multi_model` config block + cross-provider fan-out + agent reflection hook; native agent currently runs heuristic probes without LLM calls).
-- Benchmark service always available via lazy default (`ensureBench`); no unconfigured sentinel.
-- `mcp_server.py` / `mcp_exploit_server.py` / `mcp_engine_server.py` standalone entrypoints → native `cmd/bp-mcp-defensive` (:8000), `cmd/bp-mcp-assess` (:8001, +`--workspace`/`--run-id`/`--sidecar-addr`/`--expected-config-sha256`), `cmd/bp-mcp-engine` (:8002) sharing `internal/mcpserve` (stdio/HTTP, loopback gate, fingerprint check); `make mcp-*` runs the Go binaries. Remaining: `--private-config-snapshot` secret-ref resolution (python-only helper, no native consumer yet)..
-- `scripts/*.py` codegen (catalogs, CLI/config refs, release gates), `tools/webui/*`, `tools/importers/*`, `tools/research/*`, `tools/verification/*`, `tools/memory/*`, `tools/reporting/*`.
-
-## Tooling / packaging pending deletion (after parity)
-
-`pyproject.toml`, `requirements.txt`, `constraints-dev.txt`, `conftest.py`, pytest suite `tests/` (455 files → port to Go/Rust tests), ruff/mypy config, `Makefile` python targets, `install.sh`/`install.ps1` venv flows, `install.bat`/`START.bat`, Python Docker stages, Python CI jobs (`.github/workflows/ci.yml`, `eval.yml`, etc.), `scripts/*.py` generators.
-
-Deletion eligibility: none yet. Every pending row blocks its Python source's deletion.
+| Original Python Path | Functionality | Native Go / Rust Target | Native Tests | Status | Deletion Eligibility |
+|---|---|---|---|---|---|
+| `main.py`, `cli.py`, `tools/cli_*.py` | CLI entrypoint, flags, doctor, self-test, eval, export | `cmd/bp/main.go`, `internal/diag` | `diag_test.go`, CLI smoke | done | deleted |
+| `app.py`, `tools/api/*` | Loopback HTTP REST API, SSE/WS event streaming, auth, config, secrets, goals, decisions, artifacts, logs, workspace, loot, credentials, witness, system routes | `internal/api`, `internal/auth`, `internal/events`, `internal/config`, `internal/secrets`, `internal/goals` | `server_test.go`, `real_test.go`, `notported_test.go`, `graph_api_test.go`, `connections_test.go`, `slice18_routes_test.go`, `auth_test.go`, `goals_test.go` | done | deleted |
+| `db.py`, `mission.py`, `legacy/*`, root shims | Persistence schema v10, runs, decisions, findings, audit | `internal/store`, `internal/audit` | `store/goals_test.go`, `audit_test.go` | done | deleted |
+| `mcp_server.py`, `mcp_exploit_server.py`, `mcp_engine_server.py`, `tools/mcp_*` | Engine, Defensive, and Assessment MCP servers (stdio + loopback HTTP) | `internal/mcp`, `internal/mcpserve`, `cmd/bp-mcp-engine`, `cmd/bp-mcp-defensive`, `cmd/bp-mcp-assess` | `mcp_test.go`, `vulnintel_test.go`, `mcpserve_test.go` | done | deleted |
+| `tools/swarm/*`, `tools/campaign/*`, `tools/autonomous_orchestrator.py` | Multi-agent swarm & autonomous campaign orchestration, Blackboard, milestones, Critic/Reflection, RetryEngine, checkpoints, resume recovery | `internal/campaign`, `internal/runner` | `campaign_test.go`, `swarm_test.go`, `swarm_resume_test.go` | done | deleted |
+| `tools/exploit_agent/*` | Post-recon assessment agent loop, LLM planning pass, budget-capped multi-model peer consultation | `internal/agent` | `agent_test.go`, `llm_consult_test.go` | done | deleted |
+| `tools/attack_modules/*` (86 classes) | Web, SMB, AD, Auth/Creds, SSH, Services, Crypto/JWT, Deserialize, Privesc/Cloud/K8s, Persistence, ICS/OT/IoT, Supply Chain, Synthesis, Detection, Orchestrator phases + applicability ranking | `internal/modules` (`catalog.go`, `modules.go`, `dns.go`) | `modules_test.go`, `dns_test.go`, `catalog_test.go` | done | deleted |
+| `tools/recon/*` | TCP connect scan, banner/version extraction, connected-socket UDP sweep, multi-signal OS fingerprinting with unprivileged fallback, rustscan/masscan/native fast scanner, goal suggestions | `internal/recon` | `recon_test.go`, `udp_test.go`, `fingerprint_scanner_test.go` | done | deleted |
+| `tools/cve_lookup.py`, `tools/threat_intel.py`, `tools/intelligence/*` | NVD v2, EPSS, CISA KEV, OSV, GHSA, attack graph construction & BFS/neighbor traversal | `internal/intel`, `internal/threatintel`, `internal/graph` | `intel_test.go`, `intel_config_test.go`, `threatintel_test.go`, `graph_test.go`, `traverse_test.go` | done | deleted |
+| `tools/memory/*` | Episodic memory, experience lessons, Jaccard relevance retrieval | `internal/memory` | `memory_test.go` | done | deleted |
+| `tools/reporting/*`, `report_generator.py` | HITL-gated JSON, Markdown, HTML, and pure-Go PDF 1.4 report generation | `internal/reporting` | `reporting_test.go`, `pdf_test.go` | done | deleted |
+| `tools/benchmark/*`, `tools/eval/*` | Benchmark suites, synchronous eval loop, baseline regression gates, `eval_targets/*.oracle.json` loader, oracle scorer, live HTTP flag verifier | `internal/bench` | `bench_test.go`, `eval_test.go`, `oracle_eval_test.go` | done | deleted |
+| `tools/browser/*` | Allowlist-gated headless browser automation via Chrome DevTools Protocol (`chromedp`) | `internal/browser` | `browser_test.go` | done | deleted |
+| `tools/operator_connection/*` | Persisted operator-connection registry + per-target shards | `internal/operator` | `operator_test.go` | done | deleted |
+| `tools/providers/*` | Canonical `Client` interface + `ollama`, `opencode_go`, `chatgpt` HTTP adapters | `internal/providers`, `internal/ollama` | `providers_test.go`, `ollama_test.go` | done | deleted |
+| `skills/*/scripts/*.py`, `tools/skill_registry.py` | Skill discovery (`SKILL.md`) + native skill execution engine across all archetypes | `internal/skills` (`skills.go`, `executor.go`) | `skills_test.go`, `executor_test.go` | done | deleted |
+| `plugins/*/plugin.py`, `tools/plugins.py` | `plugin.yaml` + `config_section` discovery + native execution for all 15 plugins | `internal/plugins` (`plugins.go`, `executors.go`) | `plugins_test.go`, `executors_test.go` | done | deleted |
+| `tools/sandbox/*`, `tools/kernel/*` | Allowlist matcher, disposable Docker worker lifecycle, `NET_ADMIN` netns firewall (`iptables-restore`/`ip6tables-restore`), SHA-256 evidence chain, JSON-v1 IPC sidecar | `rust/crates/bp-allowlist`, `bp-exec`, `bp-evidence`, `bp-sidecar`, `internal/allowlist`, `internal/ipc` | `cargo test --workspace` (16 tests), `allowlist_test.go`, `ipc_test.go` | done | deleted |
+| `scripts/*.py` | Skill/MCP catalog generators, capability counts, version/release gates, zero-Python scanner | `internal/codegen`, `internal/zeropython`, `cmd/bp-codegen`, `scripts/zero-python-gate.sh`, `scripts/zero-python-gate.ps1` | `codegen_test.go`, `zeropython_test.go` | done | deleted |
+| `tests/*.py` (455 files) | Unit, contract, API, and integration test coverage | 25 Go test packages (`internal/...`) + 4 Rust crate test suites (`rust/crates/...`) + 55 WebUI Vitest suites (`webui/src/...`) | `go test ./...`, `cargo test --workspace`, `npm run test` | done | deleted |

@@ -9,12 +9,15 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/braydos-h/BreachPilot/internal/allowlist"
 	"github.com/braydos-h/BreachPilot/internal/modules"
+	"github.com/braydos-h/BreachPilot/internal/providers"
 )
 
 // Finding is a proposed, evidence-backed result (status proposed until a
@@ -30,21 +33,26 @@ type Finding struct {
 
 // Outcome is the attack-phase result recorded in run.json.
 type Outcome struct {
-	AttackExecuted bool      `json:"attack_executed"`
-	Probes         int       `json:"probes"`
-	Findings       []Finding `json:"findings"`
-	ModelConsulted bool      `json:"model_consulted"`
-	Note           string    `json:"note"`
+	AttackExecuted bool               `json:"attack_executed"`
+	Probes         int                `json:"probes"`
+	Findings       []Finding          `json:"findings"`
+	ModelConsulted bool               `json:"model_consulted"`
+	ModelAdvisory  string             `json:"model_advisory,omitempty"`
+	PeerConsult    *PeerConsultResult `json:"peer_consult,omitempty"`
+	Note           string             `json:"note"`
 }
 
 // RunEnv is the minimal execution context (avoids importing runner).
 type RunEnv struct {
-	RunID   string
-	Target  string
-	Entries []string
-	RunDir  string
-	Assess  AssessmentView
-	Emit    func(typ string, payload map[string]any)
+	RunID       string
+	Target      string
+	Entries     []string
+	RunDir      string
+	Assess      AssessmentView
+	Emit        func(typ string, payload map[string]any)
+	ModelClient providers.Client
+	ModelName   string
+	PeerConsult *PeerConsultConfig
 }
 
 // AssessmentView carries what recon observed.
@@ -69,6 +77,33 @@ func Run(ctx context.Context, env RunEnv) (map[string]any, error) {
 			return nil, err
 		}
 		probeService(ctx, env, svc, &out)
+	}
+	if env.ModelClient != nil {
+		var svcDesc []string
+		for _, s := range env.Assess.Services {
+			svcDesc = append(svcDesc, fmt.Sprintf("%d/%s (%s)", s.Port, s.Service, s.Banner))
+		}
+		ctxStr := "Target: " + env.Target + "; Services: " + strings.Join(svcDesc, ", ")
+		msgs := []map[string]string{
+			{"role": "system", "content": "You are BreachPilot's native assessment planner. Summarize key verification priorities based on the observed services."},
+			{"role": "user", "content": ctxStr},
+		}
+		if resp, err := env.ModelClient.Chat(ctx, env.ModelName, msgs); err == nil && strings.TrimSpace(resp.Message) != "" {
+			out.ModelConsulted = true
+			out.ModelAdvisory = strings.TrimSpace(resp.Message)
+			out.Note = "native LLM-assisted assessment + safe verification probes"
+			if env.Emit != nil {
+				env.Emit("model_consulted", map[string]any{"model": resp.Model})
+			}
+		}
+	}
+	if env.PeerConsult != nil && env.PeerConsult.Enabled {
+		if pc, err := ConsultPeers(ctx, *env.PeerConsult, "Review target surface and findings for "+env.Target, out.ModelAdvisory); err == nil {
+			out.PeerConsult = &pc
+			if env.Emit != nil && len(pc.Consulted) > 0 {
+				env.Emit("peer_consult_completed", map[string]any{"consulted": pc.Consulted, "skipped": pc.Skipped})
+			}
+		}
 	}
 	writeProposed(env.RunDir, out.Findings)
 	if env.Emit != nil {

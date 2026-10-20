@@ -279,16 +279,17 @@ func InferOS(openPorts []int, services []Service) (string, []string) {
 
 // Assessment mirrors ReconAssessment.to_dict.
 type Assessment struct {
-	TargetIP              string    `json:"target_ip"`
-	OSVerdict             string    `json:"os_verdict"`
-	OSHints               []string  `json:"os_hints"`
-	OpenPorts             []int     `json:"open_ports"`
-	UDPPorts              []int     `json:"udp_ports"`
-	Services              []Service `json:"services"`
-	CVEFindings           []any     `json:"cve_findings"`
-	OverallRiskScore      int       `json:"overall_risk_score"`
-	ChosenGoal            string    `json:"chosen_goal,omitempty"`
-	ChosenGoalDescription string    `json:"chosen_goal_description,omitempty"`
+	TargetIP              string         `json:"target_ip"`
+	OSVerdict             string         `json:"os_verdict"`
+	OSHints               []string       `json:"os_hints"`
+	OSFingerprint         *OSFingerprint `json:"os_fingerprint,omitempty"`
+	OpenPorts             []int          `json:"open_ports"`
+	UDPPorts              []int          `json:"udp_ports"`
+	Services              []Service      `json:"services"`
+	CVEFindings           []any          `json:"cve_findings"`
+	OverallRiskScore      int            `json:"overall_risk_score"`
+	ChosenGoal            string         `json:"chosen_goal,omitempty"`
+	ChosenGoalDescription string         `json:"chosen_goal_description,omitempty"`
 }
 
 // BuildAssessment converts scan results to an Assessment, extracting service
@@ -315,7 +316,10 @@ func BuildAssessment(targetIP string, results []ScanResult) Assessment {
 		})
 	}
 	sort.Ints(a.OpenPorts)
-	a.OSVerdict, a.OSHints = InferOS(a.OpenPorts, a.Services)
+	fp := FingerprintOS(context.Background(), targetIP, a.OpenPorts, a.Services, OSFingerprintOptions{})
+	a.OSVerdict = fp.Family
+	a.OSHints = fp.Signals
+	a.OSFingerprint = &fp
 	a.OverallRiskScore = riskScore(a.OpenPorts, len(a.CVEFindings))
 	return a
 }

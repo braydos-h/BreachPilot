@@ -83,20 +83,20 @@ type TimelineEvent struct {
 
 // TargetCampaignState holds per-target state persisted in attack_states.json.
 type TargetCampaignState struct {
-	Target              string              `json:"target"`
-	CurrentPhase        string              `json:"current_phase"`
-	Aggression          AggressionLevel     `json:"aggression"`
-	PrivilegeLevel      string              `json:"privilege_level"`
-	AccessAchieved      bool                `json:"access_achieved"`
-	ReconCompleted      bool                `json:"recon_completed"`
-	Assessment          *recon.Assessment   `json:"recon_result,omitempty"`
-	Tasks               []AttackTask        `json:"tasks"`
-	SuccessfulModules   []string            `json:"successful_exploits"`
-	FailedAttempts      map[string][]string `json:"failed_attempts"`
-	Timeline            []TimelineEvent     `json:"timeline"`
-	StrategyShift       string              `json:"strategy_shift"`
-	LessonsLearned      []string            `json:"lessons_learned"`
-	TaskCounter         int                 `json:"task_counter"`
+	Target            string              `json:"target"`
+	CurrentPhase      string              `json:"current_phase"`
+	Aggression        AggressionLevel     `json:"aggression"`
+	PrivilegeLevel    string              `json:"privilege_level"`
+	AccessAchieved    bool                `json:"access_achieved"`
+	ReconCompleted    bool                `json:"recon_completed"`
+	Assessment        *recon.Assessment   `json:"recon_result,omitempty"`
+	Tasks             []AttackTask        `json:"tasks"`
+	SuccessfulModules []string            `json:"successful_exploits"`
+	FailedAttempts    map[string][]string `json:"failed_attempts"`
+	Timeline          []TimelineEvent     `json:"timeline"`
+	StrategyShift     string              `json:"strategy_shift"`
+	LessonsLearned    []string            `json:"lessons_learned"`
+	TaskCounter       int                 `json:"task_counter"`
 }
 
 // Blackboard is a thread-safe shared state store with __global__ and per-target buckets.

@@ -45,11 +45,13 @@ func main() {
 	resume := fs.String("resume", "", "Resume a prior run")
 	exportRun := fs.String("export-run", "", "Export a run and exit")
 	doEval := fs.Bool("eval", false, "Run the native eval suite and exit")
+	evalList := fs.Bool("eval-list", false, "List graded-eval oracle targets and exit")
 	evalSuite := fs.String("suite", "native-smoke", "Eval suite to run")
 	evalTrials := fs.Int("trials", 1, "Eval trials (1-20)")
 	evalTimeout := fs.Int("eval-timeout", 0, "Per-trial timeout seconds (0 = suite default)")
 	saveBaseline := fs.Bool("save-baseline", false, "Save eval result as baseline (requires --eval)")
 	checkRegression := fs.Bool("check-regression", false, "Compare eval result against baseline (requires --eval)")
+	multiModel := fs.Bool("multi-model", false, "Enable multi-model peer consultation")
 	showVersion := fs.Bool("version", false, "Print version and exit")
 	quiet := fs.Bool("quiet", false, "Reduce output")
 	_ = quiet
@@ -87,6 +89,20 @@ func main() {
 	if *listPlugins {
 		fmt.Println("zap_scan spiderfoot shodan_recon github_dorks bloodhound_ce caldera sliver_c2 atomic_red_team mobile_attack browser_attack snmp wireless firmware_analysis webhook_notify example_recon_report")
 		return
+	}
+	if *evalList {
+		oracles, err := bench.LoadOracles("eval_targets")
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "eval-list:", err)
+			os.Exit(1)
+		}
+		for _, o := range oracles {
+			fmt.Printf("%s\t%d flags\n", o.TargetID, len(o.Flags))
+		}
+		return
+	}
+	if *multiModel {
+		cfg.MultiModel.Enabled = true
 	}
 	if *doEval {
 		os.Exit(runEval(cfg, *evalSuite, *evalTrials, *evalTimeout, *saveBaseline, *checkRegression))

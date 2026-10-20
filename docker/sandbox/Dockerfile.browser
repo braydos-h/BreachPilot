@@ -3,18 +3,6 @@
 # Build:  docker build -t breachpilot-sandbox:latest docker/sandbox
 #         docker build --build-arg BASE_IMAGE=breachpilot-sandbox:latest \
 #           -t breachpilot-sandbox:browser -f docker/sandbox/Dockerfile.browser docker/sandbox
-#
-# SECURITY CONTRACT (see docs/sandbox.md + docs/browser-agent-design.md):
-# - Same hardening as the base worker (cap-drop, non-root, no-new-privileges,
-#   read-only rootfs, dedicated bridge netns with a default-DROP egress
-#   firewall authorizing ONLY the effective target allowlist).
-# - Chromium runs headless with --no-sandbox: the nested Chromium sandbox is
-#   unsupported under --cap-drop ALL, so containment comes from Docker + the
-#   netns firewall, not from Chromium's own sandbox. Never run headed here.
-# - No secrets, API keys, repo credentials, or user configuration are baked in.
-# - Point sandbox.image at this tag when browser.enabled is true (the variant
-#   is a strict superset of breachpilot-sandbox:latest, so terminal/Python
-#   execution keeps working unchanged).
 
 ARG BASE_IMAGE=breachpilot-sandbox:latest
 FROM ${BASE_IMAGE}
@@ -23,18 +11,10 @@ ARG DEBIAN_FRONTEND=noninteractive
 
 USER root
 
-# Image-local virtual environment for the Playwright SDK (Debian 12 enforces
-# PEP 668: system-Python `pip install` refuses outside a venv, and the
-# bypass flag must never be used). The venv binaries stay on PATH for the worker.
-ENV VIRTUAL_ENV=/opt/bp-browser-venv
-ENV PATH="/opt/bp-browser-venv/bin:$PATH"
-ENV PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright
-
-# Playwright SDK + Chromium runtime (+ OS deps for headless Chromium).
-# Pinned major line via requirements-style floor; refresh with the base image.
 RUN set -eux; \
     apt-get update; \
     apt-get install -y --no-install-recommends \
+      chromium \
       libnss3 \
       libnspr4 \
       libatk1.0-0 \
@@ -51,17 +31,8 @@ RUN set -eux; \
       libpango-1.0-0 \
       libcairo2 \
     ; \
-    rm -rf /var/lib/apt/lists/*; \
-    python3 -m venv /opt/bp-browser-venv; \
-    /opt/bp-browser-venv/bin/pip install --no-cache-dir "playwright>=1.44"; \
-    mkdir -p /opt/ms-playwright; \
-    /opt/bp-browser-venv/bin/playwright install --with-deps chromium; \
-    chmod -R a+rX /opt/bp-browser-venv /opt/ms-playwright; \
-    rm -rf /root/.cache/pip
+    rm -rf /var/lib/apt/lists/*
 
-# Back to the unprivileged worker account (mirrors the base image contract).
 USER sandbox
-
 WORKDIR /workspace
-
 CMD ["sleep", "infinity"]

@@ -3,7 +3,8 @@
 Open-source autonomous security-testing operator for authorized environments. Plans, executes, verifies, and reports full assessment lifecycles with evidence — target-locked, sandboxed, and audited.
 
 [![CI](https://github.com/braydos-h/BreachPilot/actions/workflows/ci.yml/badge.svg)](https://github.com/braydos-h/BreachPilot/actions/workflows/ci.yml)
-![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB?style=flat-square&logo=python&logoColor=white)
+![Go](https://img.shields.io/badge/Go-1.24%2B-00ADD8?style=flat-square&logo=go&logoColor=white)
+![Rust](https://img.shields.io/badge/Rust-1.89%2B-000000?style=flat-square&logo=rust&logoColor=white)
 ![License](https://img.shields.io/badge/license-Apache--2.0-blue?style=flat-square)
 
 **[Quick start](#quick-start) · [Documentation](docs/README.md) · [Architecture](#how-it-works) · [Safety model](#safety-and-containment) · [Reliability metrics](docs/reliability-metrics.md) · [Live demo](https://breachpilot-site.vercel.app/)**
@@ -15,9 +16,9 @@ Open-source autonomous security-testing operator for authorized environments. Pl
 
 BreachPilot is an agentic penetration-testing operator. Given an authorized target, it runs the full loop — reconnaissance, exploitation, privilege escalation, lateral movement, verification, and reporting — through a WebUI mission-control interface or a scriptable CLI.
 
-It is built for lab and sanctioned-assessment use: every action executes inside defined authorization boundaries, every finding requires stored-probe evidence, and every step lands in a tamper-evident audit trail.
+It is built for lab and sanctioned-assessment use on a 100% native Go control plane + Rust execution plane with a React/TypeScript WebUI (zero Python dependencies): every action executes inside defined authorization boundaries, every finding requires stored-probe evidence, and every step lands in a tamper-evident audit trail.
 
-Linux is the primary platform (full tool arsenal). Windows is installer-supported with a Python-only fallback.
+Linux is the primary platform (full tool arsenal + Docker netns containment). Windows is natively supported via `bp.exe` and `bp-sidecar.exe`.
 
 ## Why BreachPilot?
 
@@ -31,7 +32,7 @@ Auditable, evidence-driven autonomous security testing — scope → containment
 
 ## Quick-start
 
-Requires Python 3.11+, Docker Engine, and nmap. `bp --doctor` verifies everything, including the active AI provider.
+Requires Go 1.24+, Rust (cargo), Node.js 22+ (for WebUI build), Docker Engine, and nmap. `bp --doctor` verifies everything, including the active AI provider and Rust sidecar.
 
 ### Linux (primary)
 
@@ -77,7 +78,7 @@ From an existing checkout: `./install.sh`, or `make install && make doctor && ma
 
 ### Windows (secondary)
 
-Windows runs Python-only exploits (no Kali arsenal). Docker Desktop with WSL2 is recommended so the default-on sandbox works.
+Windows builds and runs native `bp.exe` and `bp-sidecar.exe` via `.\install.ps1` / `install.bat`. Docker Desktop with WSL2 is recommended so the default-on sandbox works.
 
 ```powershell
 git clone https://github.com/braydos-h/BreachPilot.git

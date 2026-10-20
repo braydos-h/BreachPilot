@@ -513,7 +513,7 @@ func TestManualToolCalls(t *testing.T) {
 	}
 	_ = repDir
 	rec = doReq(t, s.Handler(), "GET", "/api/v1/runs/run-manual/tools", token, "")
-	if len(decode(t, rec)["tools"].([]any)) != 4 {
+	if len(decode(t, rec)["tools"].([]any)) < 91 {
 		t.Fatalf("tools: %s", rec.Body.String())
 	}
 	rec = doReq(t, s.Handler(), "POST", "/api/v1/runs/run-manual/tools/nope/calls", token, `{"arguments":{"target":"127.0.0.1"}}`)

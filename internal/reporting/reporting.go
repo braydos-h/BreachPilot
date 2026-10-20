@@ -229,6 +229,7 @@ func Write(runDir string, r Report) ([]string, error) {
 	payloads["enhanced_report.json"] = string(append(raw, '\n'))
 	payloads["enhanced_report.md"] = r.Markdown()
 	payloads["enhanced_report.html"] = r.HTML()
+	payloads["enhanced_report.pdf"] = string(r.PDF())
 	var paths []string
 	for name, body := range payloads {
 		if err := os.WriteFile(filepath.Join(runDir, name), []byte(body), 0o644); err != nil {

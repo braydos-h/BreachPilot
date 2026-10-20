@@ -27,10 +27,14 @@ type Env struct {
 
 // Tool is one native capability.
 type Tool struct {
-	Name        string
-	Description string
-	Family      string
-	Run         func(ctx context.Context, args map[string]any, env Env) (map[string]any, error)
+	Name           string
+	Description    string
+	Family         string
+	TargetServices []string
+	TargetPorts    []int
+	RequiredCVEs   []string
+	DestructiveICS bool
+	Run            func(ctx context.Context, args map[string]any, env Env) (map[string]any, error)
 }
 
 // Registry maps name -> tool.

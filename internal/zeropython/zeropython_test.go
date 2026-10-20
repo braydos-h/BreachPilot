@@ -76,3 +76,14 @@ func TestMigrationDocsExist(t *testing.T) {
 		}
 	}
 }
+
+func TestRepositoryPassesStrictZeroPythonGate(t *testing.T) {
+	rep, err := Scan(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.Strict() {
+		t.Fatalf("repository failed strict zero-Python gate: py=%v manifests=%v refs=%v native=%v",
+			rep.PyFiles, rep.Manifests, rep.References, rep.NativeCalls)
+	}
+}

@@ -1023,6 +1023,31 @@ func NewAssessmentServer(cfg AssessmentConfig) *Server {
 	})
 
 	srv.Register(ToolSchema{
+		Name:        "execute_runtime_skill",
+		Description: "Execute a runtime skill natively in Go (allowlist-gated when target is supplied).",
+		InputSchema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"name":   map[string]any{"type": "string"},
+				"target": map[string]any{"type": "string"},
+			},
+			"required": []string{"name"},
+		},
+	}, func(ctx context.Context, args map[string]any) (any, error) {
+		name, _ := args["name"].(string)
+		if cfg.SkillStore == nil {
+			return nil, fmt.Errorf("skill %q not found", name)
+		}
+		res, err := cfg.SkillStore.Execute(ctx, name, args, entries, cfg.RequireAllowlist)
+		if err != nil {
+			recordAudit("execute_runtime_skill", "", "blocked")
+			return nil, err
+		}
+		recordAudit("execute_runtime_skill", "", "completed")
+		return res, nil
+	})
+
+	srv.Register(ToolSchema{
 		Name:        "check_environment",
 		Description: "Probe the Rust sidecar and Docker sandbox isolation readiness.",
 		InputSchema: map[string]any{"type": "object", "properties": map[string]any{}},

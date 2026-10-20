@@ -82,8 +82,8 @@ func TestWriteRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(paths) != 3 {
-		t.Fatalf("Write should return 3 paths, got %v", paths)
+	if len(paths) != 4 {
+		t.Fatalf("Write should return 4 paths, got %v", paths)
 	}
 	raw, err := os.ReadFile(filepath.Join(dir, "enhanced_report.json"))
 	if err != nil {

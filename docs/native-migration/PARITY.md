@@ -1,11 +1,15 @@
-# Parity — WebUI/API contracts native backend must preserve
+# Parity — Verified Native Go + Rust Contracts
 
-Source: `webui/` (React/TS, untouched) + `docs/api/endpoint-matrix.md`, `docs/ipc-protocol.md`, `proto/exec.proto`.
+All WebUI (`webui/`, React/TypeScript untouched), CLI, REST, SSE/WebSocket, MCP JSON-RPC 2.0, SQLite, and Go↔Rust IPC contracts are verified against the native implementation:
 
-- REST: `GET /api/v1/health` (no auth, `{ready:true,version:v1}`), `GET /` SPA 200 public, `/api/*` 401 without bearer; capabilities, runs CRUD, decisions (attack exact-ALLOW / recon y|yes / goal_select names, 409 on answered), tools `POST /tools/{name}/calls` (404/403/409/500 + allowlist gate + audit row + event), config PATCH validate-before-write, secrets never return values, skills list/search/get/create/delete, plugins list, models/ollama/providers status, benchmarks, events replay/cursors, SSE `: heartbeat`, WS replay+live.
-- Events: `run_created → state → recon_completed → run_completed`, `scope_denied`, `run_cancelled/run_failed`; sequence cursors survive reconnect.
-- IPC: `ExecRequest/ExecResult/ExecError` version `v1` required; `SANDBOX_SCOPE_DENIED|TIMEOUT|SPAWN_FAILED|INVALID|UNAVAILABLE` fail-closed, never fall back to host exec.
-- DB: schema v10 (`runs/decisions/findings/audit` + `custom_goals` NOCASE unique); reports `reports/<run_id>/` artifacts (`recon_assessment.json`, `goal_suggestions.json`, `run.json`, `session_summary.md`, `activity.jsonl`, `session_state.json`).
-- Errors: JSON envelope `{error:{code,message}}`; MCP JSON-RPC 2.0 `initialize/ping/tools-list/tools-call`, unknown tool `-32601`, bad parse `-32700`.
-- Auth: loopback-only bind; non-loopback requires explicit flags + env + token (mirrored in `internal/mcp.ValidateBindHost`).
-- Pending parity risks: swarm/campaign event shapes, full recon field supersets, report export formats, eval harness outputs, ChatGPT proxy flows (honest 503 `proxy_runtime_missing` while oauth runtime untracked — actionable, not an unported sentinel).
+- **REST & WebUI**:
+  - `GET /api/v1/health` (200 unauthenticated), `GET /` SPA (200 unauthenticated), `/api/v1/*` bearer-gated (401 without token).
+  - `/api/v1/capabilities`, `/config`, `/config/schema`, `/secrets`, `/models`, `/providers`, `/goals`, `/skills`, `/plugins` (including `config_section` and `loaded`), `/attack/modules` (all 91 native tools with `target_services`, `target_ports`, `required_cves`, `destructive_ics`), `/ops/summary`, `/diagnostics/doctor`, `/diagnostics/self-test`, `/benchmarks/*`, `/connections/*`, `/graph/runs/{id}` (+ `/summary`, `/conflicts`, `/nodes/{id}`, `/nodes/{id}/neighbors`, `/paths`).
+  - `/api/v1/system/info`, `/system/telemetry`, `/system/memory` (`lessons`, `confidence`, `attack_memory`), `/system/sandbox` (+ `/fix/plan`, `/fix`, `/fix/{job_id}`), `/system/browser`, `POST /system/reset`.
+  - `/api/v1/runs` + `/runs/{id}` subroutes: `cancel`, `resume`, `title`, `tools`, `tools/{name}/calls`, `artifacts`, `artifacts/{name}`, `audit`, `sandbox`, `proposed`, `decide`, `swarm`, `campaign`, `witness`, `errors`, `events`, `events/stream`, `ws/runs/{id}`, `decisions`, `logs/{name}`, `credentials` (+ `reveal`, `confirm`), `loot`, `workspace` (+ `workspace/{path}`).
+- **Reporting**:
+  - `enhanced_report.json`, `enhanced_report.md`, `enhanced_report.html`, and `enhanced_report.pdf` (pure-Go PDF 1.4) generated with strict HITL filtering (`APPROVED`/`VERIFIED`/`STILL_OPEN` in technical findings; `PROPOSED` isolated in unvetted section).
+- **MCP**:
+  - `cmd/bp-mcp-defensive` (:8000), `cmd/bp-mcp-assess` (:8001), `cmd/bp-mcp-engine` (:8002) over stdio and loopback-gated HTTP (`--allow-public-bind` + `MCP_ALLOW_PUBLIC_BIND=1` + `MCP_HTTP_TOKEN`).
+- **Execution & Containment (Rust)**:
+  - `bp-allowlist`, `bp-exec` (`SandboxManager`, `--cap-drop ALL`, non-root user, read-only rootfs, default-DROP `NAI-OUTPUT` netns firewall with DNS drop before `-o lo`, fail-closed `SANDBOX_*`), `bp-evidence` (SHA-256 chain), `bp-sidecar` (JSON-v1 over loopback TCP).

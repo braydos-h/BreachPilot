@@ -15,7 +15,7 @@ func TestRegistryHasNetworkFamily(t *testing.T) {
 			t.Fatalf("tool %q missing metadata", name)
 		}
 	}
-	if len(modules.List()) != 5 {
+	if len(modules.List()) < 5 {
 		t.Fatalf("registry size: %d", len(modules.List()))
 	}
 }

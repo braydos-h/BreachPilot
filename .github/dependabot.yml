@@ -1,18 +1,14 @@
 version: 2
 updates:
-  - package-ecosystem: "pip"
+  - package-ecosystem: "gomod"
     directory: "/"
     schedule:
       interval: "weekly"
-    groups:
-      dev-dependencies:
-        patterns:
-          - "pytest*"
-          - "coverage"
-          - "ruff"
-          - "mypy"
-          - "build"
-          - "twine"
+
+  - package-ecosystem: "cargo"
+    directory: "/rust"
+    schedule:
+      interval: "weekly"
 
   - package-ecosystem: "github-actions"
     directory: "/"

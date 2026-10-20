@@ -74,6 +74,13 @@ type Config struct {
 		Headless    bool `yaml:"headless"`
 		MaxSessions int  `yaml:"max_sessions"`
 	} `yaml:"browser"`
+	MultiModel struct {
+		Enabled          bool     `yaml:"enabled"`
+		ConsultAliases   []string `yaml:"consult_aliases"`
+		MaxConsultations int      `yaml:"max_consultations"`
+		MaxQuestionChars int      `yaml:"max_question_chars"`
+		MaxAnswerChars   int      `yaml:"max_answer_chars"`
+	} `yaml:"multi_model"`
 	Providers map[string]map[string]any `yaml:"providers"`
 }
 
@@ -115,6 +122,11 @@ func Default() Config {
 	c.Browser.Enabled = false
 	c.Browser.Headless = true
 	c.Browser.MaxSessions = 2
+	c.MultiModel.Enabled = true
+	c.MultiModel.ConsultAliases = []string{"kimi", "deepseek", "deepseek_flash", "glm", "minimax"}
+	c.MultiModel.MaxConsultations = 10
+	c.MultiModel.MaxQuestionChars = 4000
+	c.MultiModel.MaxAnswerChars = 8000
 	return c
 }
 
@@ -152,6 +164,7 @@ func Load(path string) (Config, error) {
 		restoreBool(rawMap, []string{"cve_lookup", "epss_enabled"}, &cfg.Intel.EPSSEnabled, def.Intel.EPSSEnabled)
 		restoreBool(rawMap, []string{"cve_lookup", "kev_enabled"}, &cfg.Intel.KEVEnabled, def.Intel.KEVEnabled)
 		restoreBool(rawMap, []string{"threat_intel", "enabled"}, &cfg.ThreatIntel.Enabled, def.ThreatIntel.Enabled)
+		restoreBool(rawMap, []string{"multi_model", "enabled"}, &cfg.MultiModel.Enabled, def.MultiModel.Enabled)
 	}
 	if err := cfg.Validate(); err != nil {
 		return cfg, err
@@ -267,6 +280,18 @@ func merge(dst *Config, src Config) {
 	}
 	if src.Browser.MaxSessions != 0 {
 		dst.Browser.MaxSessions = src.Browser.MaxSessions
+	}
+	if src.MultiModel.ConsultAliases != nil {
+		dst.MultiModel.ConsultAliases = src.MultiModel.ConsultAliases
+	}
+	if src.MultiModel.MaxConsultations != 0 {
+		dst.MultiModel.MaxConsultations = src.MultiModel.MaxConsultations
+	}
+	if src.MultiModel.MaxQuestionChars != 0 {
+		dst.MultiModel.MaxQuestionChars = src.MultiModel.MaxQuestionChars
+	}
+	if src.MultiModel.MaxAnswerChars != 0 {
+		dst.MultiModel.MaxAnswerChars = src.MultiModel.MaxAnswerChars
 	}
 	// Booleans are fixed up in Load via restoreBool (absent key => default).
 	if src.Providers != nil {

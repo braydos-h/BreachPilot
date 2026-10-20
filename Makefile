@@ -1,62 +1,58 @@
-# Convenience targets for the BreachPilot engine.
-# Thin wrappers -- no real logic lives here. On Windows use the equivalent
-# `python`/`python -m` commands directly (see README / docs/getting-started.md).
+# Native Go + Rust Makefile for BreachPilot.
 
-PYTHON ?= python3
-VENV   ?= .venv
-BIN    := $(VENV)/bin
+GO    ?= go
+CARGO ?= cargo
+NPM   ?= npm
 
-.PHONY: venv install install-dev doctor self-test eval test test-focused run mcp-defensive mcp-exploit mcp-engine clean
+.PHONY: build install install-dev doctor self-test eval test test-fast test-one run mcp-defensive mcp-exploit mcp-engine codegen clean
 
-venv:
-	$(PYTHON) -m venv $(VENV)
+build:
+	$(GO) build -o bp ./cmd/bp
+	$(GO) build -o bp-mcp-defensive ./cmd/bp-mcp-defensive
+	$(GO) build -o bp-mcp-assess ./cmd/bp-mcp-assess
+	$(GO) build -o bp-mcp-engine ./cmd/bp-mcp-engine
+	$(GO) build -o bp-codegen ./cmd/bp-codegen
+	$(CARGO) build --manifest-path rust/Cargo.toml --workspace --release
 
-install: venv
-	$(BIN)/python -m pip install --upgrade pip
-	$(BIN)/python -m pip install -r requirements.txt
+install: build
+	cd webui && $(NPM) ci && $(NPM) run build
 
-install-dev: venv
-	$(BIN)/python -m pip install --upgrade pip
-	$(BIN)/python -m pip install -e ".[dev]"
+install-dev: install
 
 doctor:
-	$(BIN)/python main.py --doctor $(if $(filter --json,$(MAKECMDGOALS)),--json)
-
-# Support `make doctor --json` for CI machine-readable output
---json:
-	@:
+	$(GO) run ./cmd/bp --doctor
 
 self-test:
-	$(BIN)/python main.py --self-test
+	$(GO) run ./cmd/bp --self-test
 
 eval:
-	$(BIN)/python main.py --eval
+	$(GO) run ./cmd/bp --eval
 
 test:
-	$(BIN)/python -m pytest tests/ -q -p no:cacheprovider -n 0 -m "not integration and not live_llm"
+	$(GO) vet ./...
+	$(GO) test ./... -count=1
+	$(CARGO) test --manifest-path rust/Cargo.toml --workspace
 
-# Parallel suite (~4x faster locally; needs pip install -e ".[dev]" for pytest-xdist)
-# Capped at -n 2 per AGENTS.md TEST-RUN RULES (operator hardware constraint).
-test-fast:
-	$(BIN)/python -m pytest tests/ -q -p no:cacheprovider -n 2 -m "not integration and not live_llm"
+test-fast: test
 
-# Run a focused file, e.g. `make test-one F=tests/test_scope_gate.py`
 test-one:
-	$(BIN)/python -m pytest $(F) -q -p no:cacheprovider -n 0
+	$(GO) test $(F) -v -count=1
 
 run:
-	$(BIN)/python main.py
+	$(GO) run ./cmd/bp
 
 mcp-defensive:
-	go run ./cmd/bp-mcp-defensive
+	$(GO) run ./cmd/bp-mcp-defensive
 
 mcp-exploit:
-	go run ./cmd/bp-mcp-assess
+	$(GO) run ./cmd/bp-mcp-assess
 
 mcp-engine:
-	go run ./cmd/bp-mcp-engine
+	$(GO) run ./cmd/bp-mcp-engine
+
+codegen:
+	$(GO) run ./cmd/bp-codegen -mode counts
 
 clean:
-	rm -rf $(VENV)
-	find . -type d -name __pycache__ -prune -exec rm -rf {} +
-	find . -type d -name .pytest_cache -prune -exec rm -rf {} +
+	rm -f bp bp-mcp-defensive bp-mcp-assess bp-mcp-engine bp-codegen
+	$(CARGO) clean --manifest-path rust/Cargo.toml
