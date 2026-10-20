@@ -23,6 +23,8 @@ import (
 	"github.com/braydos-h/BreachPilot/internal/goals"
 	"github.com/braydos-h/BreachPilot/internal/ollama"
 	"github.com/braydos-h/BreachPilot/internal/plugins"
+	"github.com/braydos-h/BreachPilot/internal/recon"
+	"github.com/braydos-h/BreachPilot/internal/runner"
 	nativeSecrets "github.com/braydos-h/BreachPilot/internal/secrets"
 	"github.com/braydos-h/BreachPilot/internal/skills"
 	"github.com/braydos-h/BreachPilot/internal/store"
@@ -45,6 +47,9 @@ type Server struct {
 	SecretsPath string
 	// PluginsDir feeds plugin discovery (default "plugins", repo-root relative).
 	PluginsDir string
+	// Runner executes confirmed runs. Nil disables background execution
+	// (decisions still persist; runs stay queued).
+	Runner *runner.Runner
 }
 
 // New builds routes.
@@ -897,15 +902,15 @@ func (s *Server) runs(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, map[string]any{"runs": runs, "sort": q.Get("sort"), "total": total})
 	case http.MethodPost:
 		var body struct {
-			Target     string `json:"target"`
-			Mode       string `json:"mode"`
-			Goal       string `json:"goal"`
-			CustomGoal string `json:"custom_goal"`
-			Kind       string `json:"kind"`
-			Yes        bool   `json:"yes"`
-			Resume     string `json:"resume"`
-			Swarm      bool   `json:"swarm"`
-			Title      string `json:"-"`
+			Target      string   `json:"target"`
+			Mode        string   `json:"mode"`
+			Goal        string   `json:"goal"`
+			CustomGoal  string   `json:"custom_goal"`
+			Kind        string   `json:"kind"`
+			Yes         bool     `json:"yes"`
+			Resume      string   `json:"resume"`
+			Swarm       bool     `json:"swarm"`
+			Title       string   `json:"-"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil || strings.TrimSpace(body.Target) == "" {
 			writeErr(w, 400, "invalid_request", "Body must include target")
@@ -922,13 +927,17 @@ func (s *Server) runs(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, 400, "invalid_request", "kind must be agent")
 			return
 		}
+		if _, _, err := recon.ParseTarget(body.Target); err != nil {
+			writeErr(w, 400, "invalid_target", err.Error())
+			return
+		}
 		id := newRunID()
 		raw, _ := json.Marshal(body)
 		state := "queued"
 		if !body.Yes {
 			state = "awaiting_confirmation"
 		}
-		if err := s.DB.CreateRun(id, state, body.Target, body.Mode, body.Goal, string(raw)); err != nil {
+		if err := s.DB.CreateRun(id, state, strings.TrimSpace(body.Target), body.Mode, body.Goal, string(raw)); err != nil {
 			writeErr(w, 500, "internal_error", "Create failed")
 			return
 		}
@@ -937,7 +946,15 @@ func (s *Server) runs(w http.ResponseWriter, r *http.Request) {
 		broker.Append(id, "run_created", map[string]any{"target": body.Target, "mode": body.Mode})
 		resp := map[string]any{"run_id": id, "preview": nil, "state": state}
 		if !body.Yes {
-			resp["decision"] = map[string]any{"id": "dec-" + id, "kind": "start_confirm", "required_text": "ALLOW " + body.Target, "prompt_text": "Confirm start"}
+			dec, err := s.DB.CreateDecision("dec-"+id, id, "start_confirm",
+				"Confirm start of "+body.Mode+" run against "+body.Target, "ALLOW "+strings.TrimSpace(body.Target))
+			if err != nil {
+				writeErr(w, 500, "internal_error", "Decision failed")
+				return
+			}
+			resp["decision"] = map[string]any{"id": dec.ID, "kind": dec.Kind, "required_text": dec.RequiredText, "prompt_text": dec.PromptText}
+		} else if s.Runner != nil {
+			s.Runner.Ensure(id)
 		}
 		writeJSON(w, 201, resp)
 	default:
@@ -986,18 +1003,65 @@ func (s *Server) runsSub(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, 404, "not_found", "Run not found")
 			return
 		}
-		run["decisions"] = []any{}
+		if decs, err := s.DB.ListDecisions(runID); err == nil {
+			out := make([]map[string]any, 0, len(decs))
+			for _, d := range decs {
+				out = append(out, map[string]any{"id": d.ID, "run_id": d.RunID, "kind": d.Kind,
+					"prompt_text": d.PromptText, "required_text": d.RequiredText,
+					"status": d.Status, "answer": d.Answer})
+			}
+			run["decisions"] = out
+		} else {
+			run["decisions"] = []any{}
+		}
 		writeJSON(w, 200, run)
 	case sub == "cancel" && r.Method == http.MethodPost:
 		if run == nil {
 			writeErr(w, 404, "not_found", "Run not found")
 			return
 		}
+		st, _ := run["state"].(string)
+		switch st {
+		case "completed", "failed", "cancelled":
+			writeJSON(w, 200, map[string]any{"run_id": runID, "state": st})
+			return
+		}
+		if s.Runner != nil {
+			s.Runner.Cancel(runID)
+		}
+		_ = s.DB.CancelDecisions(runID)
 		_ = s.DB.SetRunState(runID, "cancelled")
+		_ = s.DB.LogAudit(runID, "run_cancelled", "run cancelled", "{}")
 		s.Events.GetOrCreate(runID).Append(runID, "run_cancelled", map[string]any{})
 		writeJSON(w, 200, map[string]any{"run_id": runID, "state": "cancelled"})
 	case sub == "resume" && r.Method == http.MethodPost:
-		writeJSON(w, 200, map[string]any{"run_id": runID, "resumed_from": runID})
+		if run == nil {
+			writeErr(w, 404, "not_found", "Run not found")
+			return
+		}
+		target, _ := run["target"].(string)
+		mode, _ := run["mode"].(string)
+		if mode == "" {
+			mode = "attack"
+		}
+		goal, _ := run["goal_name"].(string)
+		newID := newRunID()
+		reqRaw, _ := json.Marshal(map[string]any{"target": target, "mode": mode,
+			"goal": goal, "kind": "agent", "yes": false, "resume": runID})
+		if err := s.DB.CreateRun(newID, "awaiting_confirmation", target, mode, goal, string(reqRaw)); err != nil {
+			writeErr(w, 500, "internal_error", "Resume failed")
+			return
+		}
+		_ = s.DB.LogAudit(newID, "run_created", "run resumed from "+runID, "{}")
+		s.Events.GetOrCreate(newID).Append(newID, "run_created", map[string]any{"target": target, "mode": mode, "resumed_from": runID})
+		dec, err := s.DB.CreateDecision("dec-"+newID, newID, "start_confirm",
+			"Confirm resume of "+mode+" run against "+target, "ALLOW "+target)
+		if err != nil {
+			writeErr(w, 500, "internal_error", "Decision failed")
+			return
+		}
+		writeJSON(w, 200, map[string]any{"run_id": newID, "resumed_from": runID,
+			"decision": map[string]any{"id": dec.ID, "kind": dec.Kind, "required_text": dec.RequiredText, "prompt_text": dec.PromptText}})
 	case sub == "title" && r.Method == http.MethodPost:
 		writeJSON(w, 200, map[string]any{"run_id": runID, "title": runID, "regenerated": false})
 	case sub == "tools" && r.Method == http.MethodGet:

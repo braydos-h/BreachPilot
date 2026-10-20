@@ -100,6 +100,8 @@ func (d *DB) GetRun(id string) (map[string]any, error) {
 	m["updated_at"] = updated
 	m["target_ip"] = target
 	m["title"] = title
+	m["request"] = req
+	m["result"] = res
 	return m, nil
 }
 
