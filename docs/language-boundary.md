@@ -1,4 +1,14 @@
-# ADR-002: Language Boundary — Keep Python, No Rewrite
+# ADR-002: Language Boundary — SUPERSEDED by zero-Python migration
+
+> **Status update 2026-10-20:** the "Keep Python, No Rewrite" decision below is
+> **superseded** by the `docs/native-migration/PLAN.md` objective (Go control
+> plane + Rust execution plane + existing TypeScript WebUI, zero Python).
+> The original 2026-09-22 rationale (interpreter CPU not on the critical path
+> at `max_concurrent_runs: 3`) is preserved for history; the product direction
+> changed. New code must use Go/Rust; do not add Python with a fallback.
+> Original text follows unchanged.
+
+---
 
 **Status:** Accepted 2026-09-22 (PERF P3-03, decision record — not code).
 **Scope:** Locks the PERF report conclusion against wholesale Rust/Go rewrite proposals.

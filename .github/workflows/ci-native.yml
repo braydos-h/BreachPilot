@@ -74,6 +74,15 @@ jobs:
       - run: npm run build
       - run: npm run test
 
+  zero-python-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - run: sh scripts/zero-python-gate.sh
+      - run: go test ./internal/zeropython/ -count=1
+
   docker:
     runs-on: ubuntu-latest
     needs: [go, rust, webui]
