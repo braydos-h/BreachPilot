@@ -5,6 +5,9 @@
   // Agents must NEVER run pytest (any invocation — operator hardware
   // constraint; full-suite verification is CI's job).
   "$schema": "https://opencode.ai/config.json",
+  "plugins": [
+    "superpowers@git+https://github.com/obra/superpowers.git"
+  ],
   "permission": {
     "bash": {
       "*": "allow",
