@@ -1,0 +1,4 @@
+# Root is the Go module (go.mod). The Rust workspace lives in rust/ only.
+# This file exists to stop cargo from treating the repo root as a workspace.
+[workspace]
+exclude = ["rust"]

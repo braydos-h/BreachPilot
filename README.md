@@ -181,6 +181,21 @@ Full model, threat model, and residual risks: `docs/safety-model.md`, `docs/sand
 
 Mission control at `http://127.0.0.1:8765` (loopback-only, token-authenticated, real-time event stream). Operator workflows: configure and launch runs, monitor live execution, inspect evidence and recon, explore attack graphs, review loot and credentials, triage proposed findings, browse skills and modules, run benchmarks, and manage system configuration — no YAML editing required. Dev hot-reload: `cd webui && npm install && npm run dev`. Reference: `docs/webui.md`, `docs/api.md`.
 
+## Native backend (Go + Rust)
+
+The control plane is Go (`cmd/bp`, `internal/`) and the execution engine is
+Rust (`rust/crates/`, `proto/exec.proto` IPC). The React WebUI is unchanged
+and served against the same `/api/v1` + WebSocket contract. Build:
+
+```bash
+go mod tidy && go build -o bp ./cmd/bp   # control plane
+cargo build --release --bin bp-sidecar    # execution sidecar (in rust/)
+```
+
+Details: `docs/migration-map.md`; honest test status:
+`docs/verification-report.md`; Python removal tracker:
+`docs/python-elimination-audit.md`.
+
 ## Configuration and AI providers
 
 Everything lives in `config.yaml` (validated against a schema), editable from the WebUI System pages. Providers are pluggable (`ollama`, `opencode_go`, `chatgpt`) — `bp --doctor` probes only the active one, and embeddings are a separate optional layer. Model routing, browser agent, sandbox, API concurrency, and benchmark suites are all config-driven. Key reference: `docs/config-reference.md`; providers: `docs/providers.md`.

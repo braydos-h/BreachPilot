@@ -1,0 +1,3 @@
+[workspace]
+members = ["crates/bp-allowlist", "crates/bp-exec", "crates/bp-evidence", "crates/bp-sidecar"]
+resolver = "2"
