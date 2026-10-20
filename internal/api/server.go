@@ -28,8 +28,10 @@ import (
 	"github.com/braydos-h/BreachPilot/internal/diag"
 	"github.com/braydos-h/BreachPilot/internal/events"
 	"github.com/braydos-h/BreachPilot/internal/goals"
+	"github.com/braydos-h/BreachPilot/internal/graph"
 	"github.com/braydos-h/BreachPilot/internal/modules"
 	"github.com/braydos-h/BreachPilot/internal/ollama"
+	"github.com/braydos-h/BreachPilot/internal/operator"
 	"github.com/braydos-h/BreachPilot/internal/plugins"
 	"github.com/braydos-h/BreachPilot/internal/recon"
 	"github.com/braydos-h/BreachPilot/internal/runner"
@@ -1100,14 +1102,92 @@ func itoaPort2(n int) string {
 	return s
 }
 
+func (s *Server) operatorManager() (*operator.Manager, error) {
+	dir := s.OperatorDir
+	if dir == "" {
+		dir = s.Cfg.Exploit.WorkspaceDir
+	}
+	if dir == "" {
+		dir = "exploit_workspace"
+	}
+	return operator.Open(dir, s.Cfg.Exploit.AllowedTargets, s.Cfg.Exploit.RequireExplicitAllowlist)
+}
+
 func (s *Server) connections(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, 200, map[string]any{"connections": []any{}, "total": 0, "active": 0, "stale": 0, "removed": 0, "error": 0})
+	if r.Method != http.MethodGet {
+		writeErr(w, 405, "method_not_allowed", "Method not allowed")
+		return
+	}
+	mgr, err := s.operatorManager()
+	if err != nil {
+		writeErr(w, 500, "internal_error", "Registry unavailable")
+		return
+	}
+	q := r.URL.Query()
+	status := strings.ToLower(strings.TrimSpace(q.Get("status")))
+	if status != "" && !operator.ValidStatus(status) {
+		writeErr(w, 400, "invalid_request", "Invalid status. Must be one of: active, stale, removed, error")
+		return
+	}
+	recs := mgr.List(strings.TrimSpace(q.Get("target")), status)
+	counts := operator.Counts(recs)
+	writeJSON(w, 200, map[string]any{"connections": recs, "total": counts["total"],
+		"active": counts["active"], "stale": counts["stale"],
+		"removed": counts["removed"], "error": counts["error"]})
 }
 
 func (s *Server) connectionsSub(w http.ResponseWriter, r *http.Request) {
-	// No native operator-connection tracking yet: every id is unknown.
-	// Honest 404, never an empty fabricated record.
-	writeErr(w, 404, "not_found", "Connection not found")
+	rest := strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/v1/connections/"), "/")
+	parts := strings.Split(rest, "/")
+	id := ""
+	action := ""
+	if len(parts) > 0 {
+		id = parts[0]
+	}
+	if len(parts) > 1 {
+		action = parts[1]
+	}
+	if !operator.ValidConnectionID(id) {
+		writeErr(w, 400, "invalid_request", "Invalid connection id")
+		return
+	}
+	mgr, err := s.operatorManager()
+	if err != nil {
+		writeErr(w, 500, "internal_error", "Registry unavailable")
+		return
+	}
+	rec := mgr.Get(id)
+	if rec == nil {
+		writeErr(w, 404, "not_found", "Connection not found")
+		return
+	}
+	switch {
+	case action == "" && r.Method == http.MethodGet:
+		writeJSON(w, 200, rec)
+	case action == "check" && r.Method == http.MethodPost:
+		// No native listener backend exists, so liveness cannot be probed:
+		// record the check attempt and mark stale rather than fabricating
+		// healthy output.
+		mgr.MarkCheck(id, "listener check unavailable: no native listener backend", false)
+		if updated := mgr.Get(id); updated != nil {
+			writeJSON(w, 200, updated)
+			return
+		}
+		writeErr(w, 404, "not_found", "Connection not found")
+	case action == "remove" && r.Method == http.MethodPost:
+		// Graceful transition preserves the record for audit, mirroring the
+		// Python route (no native listener to stop).
+		if !mgr.MarkRemoved(id) {
+			writeErr(w, 404, "not_found", "Connection not found")
+			return
+		}
+		updated := mgr.Get(id)
+		writeJSON(w, 200, map[string]any{"connection": updated, "removed": true, "listener_stopped": false})
+	case action == "listener" && r.Method == http.MethodGet:
+		writeErr(w, 404, "not_found", "No listener output: no native listener backend")
+	default:
+		writeErr(w, 404, "not_found", "Not found")
+	}
 }
 
 func (s *Server) graph(w http.ResponseWriter, r *http.Request) {
@@ -1116,7 +1196,189 @@ func (s *Server) graph(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 404, "graph_disabled", "Graph route disabled")
 		return
 	}
-	writeJSON(w, 200, map[string]any{"nodes": []any{}, "edges": []any{}})
+	if r.Method != http.MethodGet {
+		writeErr(w, 405, "method_not_allowed", "Method not allowed")
+		return
+	}
+	rest := strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/v1/graph/"), "/")
+	parts := strings.Split(rest, "/")
+	if len(parts) < 2 || parts[0] != "runs" || parts[1] == "" {
+		writeErr(w, 404, "not_found", "Not found")
+		return
+	}
+	runID := parts[1]
+	if run, _ := s.DB.GetRun(runID); run == nil {
+		writeErr(w, 404, "not_found", "Run not found")
+		return
+	}
+	switch {
+	case len(parts) == 2:
+		s.graphRun(w, r, runID)
+	case len(parts) == 3 && parts[2] == "summary":
+		g, err := graph.Build(s.runDir(runID), runID)
+		if err != nil {
+			writeErr(w, 404, "not_found", "Run has no graph yet")
+			return
+		}
+		sum := graph.Summarize(g)
+		writeJSON(w, 200, map[string]any{"run_id": runID, "summary": sum.Summary, "stats": sum.Stats})
+	case len(parts) == 3 && parts[2] == "conflicts":
+		// No native conflict detection yet: honest empty, not an error.
+		writeJSON(w, 200, map[string]any{"run_id": runID, "conflicts": []any{}})
+	case len(parts) == 4 && parts[2] == "nodes" && parts[3] != "":
+		s.graphNode(w, runID, parts[3])
+	case len(parts) == 5 && parts[2] == "nodes" && parts[3] != "" && parts[4] == "neighbors":
+		s.graphNeighbors(w, r, runID, parts[3])
+	case len(parts) == 3 && parts[2] == "paths":
+		s.graphPaths(w, r, runID)
+	default:
+		writeErr(w, 404, "not_found", "Not found")
+	}
+}
+
+func graphClamp(v, def, lo, hi int) int {
+	if v <= 0 {
+		return def
+	}
+	if v < lo {
+		return lo
+	}
+	if v > hi {
+		return hi
+	}
+	return v
+}
+
+func (s *Server) loadGraph(w http.ResponseWriter, runID string) (graph.Graph, bool) {
+	g, err := graph.Build(s.runDir(runID), runID)
+	if err != nil {
+		writeErr(w, 404, "not_found", "Run has no graph yet")
+		return graph.Graph{}, false
+	}
+	return g, true
+}
+
+func (s *Server) graphNode(w http.ResponseWriter, runID, nodeID string) {
+	g, ok := s.loadGraph(w, runID)
+	if !ok {
+		return
+	}
+	n, edges, neighbors, found := graph.Detail(g, nodeID)
+	if !found {
+		writeErr(w, 404, "not_found", "Node not found")
+		return
+	}
+	writeJSON(w, 200, map[string]any{"run_id": runID, "node": n, "edges": edges, "neighbors": neighbors})
+}
+
+func (s *Server) graphNeighbors(w http.ResponseWriter, r *http.Request, runID, nodeID string) {
+	g, ok := s.loadGraph(w, runID)
+	if !ok {
+		return
+	}
+	q := r.URL.Query()
+	hops := graphClamp(atoiOr(q.Get("max_hops"), 1), 1, 1, 4)
+	maxNodes := graphClamp(atoiOr(q.Get("max_nodes"), 50), 50, 1, 200)
+	nodes, edges, start := graph.Neighbors(g, nodeID, hops, maxNodes)
+	if start == nil {
+		writeErr(w, 404, "not_found", "Node not found")
+		return
+	}
+	writeJSON(w, 200, map[string]any{"run_id": runID, "start_node": start, "nodes": nodes, "edges": edges})
+}
+
+func (s *Server) graphPaths(w http.ResponseWriter, r *http.Request, runID string) {
+	g, ok := s.loadGraph(w, runID)
+	if !ok {
+		return
+	}
+	q := r.URL.Query()
+	start, end := q.Get("start"), q.Get("end")
+	if start == "" || end == "" {
+		writeErr(w, 400, "invalid_request", "Paths require start and end node ids")
+		return
+	}
+	maxLen := graphClamp(atoiOr(q.Get("max_length"), 4), 4, 1, 8)
+	maxPaths := graphClamp(atoiOr(q.Get("max_paths"), 5), 5, 1, 8)
+	writeJSON(w, 200, map[string]any{"run_id": runID, "paths": graph.Paths(g, start, end, maxLen, maxPaths)})
+}
+
+func atoiOr(s string, def int) int {
+	if s == "" {
+		return def
+	}
+	n, err := strconv.Atoi(s)
+	if err != nil {
+		return def
+	}
+	return n
+}
+
+func (s *Server) graphRun(w http.ResponseWriter, r *http.Request, runID string) {
+	g, err := graph.Build(s.runDir(runID), runID)
+	if err != nil {
+		writeErr(w, 404, "not_found", "Run has no graph yet")
+		return
+	}
+	q := r.URL.Query()
+	wantTypes := map[string]bool{}
+	for _, t := range q["node_type"] {
+		wantTypes[t] = true
+	}
+	wantStatus := map[string]bool{}
+	for _, st := range q["status"] {
+		wantStatus[st] = true
+	}
+	sub := strings.ToLower(strings.TrimSpace(q.Get("q")))
+	keep := map[string]bool{}
+	var nodes []graph.Node
+	for _, n := range g.Nodes {
+		if len(wantTypes) > 0 && !wantTypes[n.NodeType] {
+			continue
+		}
+		if len(wantStatus) > 0 && !wantStatus[n.Status] {
+			continue
+		}
+		if sub != "" && !strings.Contains(strings.ToLower(n.Value+" "+n.NodeType+" "+n.NodeID), sub) {
+			continue
+		}
+		keep[n.NodeID] = true
+		nodes = append(nodes, n)
+	}
+	var edges []graph.Edge
+	for _, e := range g.Edges {
+		if keep[e.SourceNodeID] && keep[e.TargetNodeID] {
+			edges = append(edges, e)
+		}
+	}
+	truncated := false
+	if limStr := q.Get("limit"); limStr != "" {
+		if lim := graphClamp(atoiOr(limStr, 300), 300, 1, 500); len(nodes) > lim {
+			nodes = nodes[:lim]
+			keep = map[string]bool{}
+			for _, n := range nodes {
+				keep[n.NodeID] = true
+			}
+			kept := edges[:0]
+			for _, e := range edges {
+				if keep[e.SourceNodeID] && keep[e.TargetNodeID] {
+					kept = append(kept, e)
+				}
+			}
+			edges = kept
+			truncated = true
+		}
+	}
+	if nodes == nil {
+		nodes = []graph.Node{}
+	}
+	if edges == nil {
+		edges = []graph.Edge{}
+	}
+	writeJSON(w, 200, map[string]any{
+		"run_id": runID, "scope": g.Scope, "nodes": nodes, "edges": edges,
+		"total_nodes": len(nodes), "truncated": truncated,
+	})
 }
 
 // ---- runs ----
@@ -1479,7 +1741,8 @@ func (s *Server) hitlDecide(w http.ResponseWriter, r *http.Request, runID string
 func listArtifacts(runDir string) []map[string]any {
 	whitelist := []string{"session_summary.md", "run.json", "recon_assessment.json", "fast_recon.json",
 		"goal_suggestions.json", "activity.jsonl", "exploit_audit.jsonl", "events.jsonl",
-		"errors.jsonl", "session_error.log", "recon_first_error.log", "proposed.json"}
+		"errors.jsonl", "session_error.log", "recon_first_error.log", "proposed.json",
+		"enhanced_report.json", "enhanced_report.md", "enhanced_report.html"}
 	out := []map[string]any{}
 	for _, name := range whitelist {
 		fi, err := os.Stat(filepath.Join(runDir, name))

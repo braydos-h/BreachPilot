@@ -11,12 +11,16 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/braydos-h/BreachPilot/internal/allowlist"
+	"github.com/braydos-h/BreachPilot/internal/campaign"
 	"github.com/braydos-h/BreachPilot/internal/events"
+	"github.com/braydos-h/BreachPilot/internal/intel"
 	"github.com/braydos-h/BreachPilot/internal/recon"
+	"github.com/braydos-h/BreachPilot/internal/reporting"
 	"github.com/braydos-h/BreachPilot/internal/store"
 )
 
@@ -28,6 +32,7 @@ type Request struct {
 	CustomGoal string `json:"custom_goal"`
 	Resume     string `json:"resume"`
 	Yes        bool   `json:"yes"`
+	Swarm      bool   `json:"swarm"`
 }
 
 // AttackFunc executes the post-recon agent phase for attack/fast modes.
@@ -60,6 +65,9 @@ type Runner struct {
 	RequireAllowlist bool
 	MaxConcurrent    int
 	Attack           AttackFunc
+	// Intel enables CVE/EPSS/KEV enrichment of recon assessments. Nil
+	// disables enrichment (recon still completes honestly without findings).
+	Intel *intel.NVDClient
 
 	mu      sync.Mutex
 	cancels map[string]context.CancelFunc
@@ -203,17 +211,57 @@ func (r *Runner) runRecon(ctx context.Context, runID string) (map[string]any, er
 	if ctx.Err() != nil {
 		return nil, ctx.Err()
 	}
-	assessment := recon.BuildAssessment(ipOr(host, ip), results)
-	if req.Goal != "" {
-		assessment.ChosenGoal = req.Goal
+	// Additive UDP sweep (connected-socket probes, no subprocess): closed
+	// ports refuse fast, filtered ones cap at 800ms each in parallel.
+	udp := recon.ScanUDP(ctx, ipOr(host, ip), recon.DefaultUDPProbes)
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
 	}
-	writeJSON(runDir, "recon_assessment.json", assessment)
+	assessment := recon.BuildAssessment(ipOr(host, ip), results)
+	assessment.MergeUDP(udp)
 	suggestions := recon.SuggestGoals(assessment.OpenPorts, req.Mode)
+	goalName, goalDesc, picked := selectGoal(req, suggestions)
+	assessment.ChosenGoal, assessment.ChosenGoalDescription = goalName, goalDesc
+	// CVE/EPSS/KEV enrichment is best-effort and fail-open: findings append
+	// only on successful lookup; a nil/disabled client leaves the honest
+	// assessment untouched.
+	recon.EnrichAssessmentCVEs(ctx, &assessment, r.Intel)
+	writeJSON(runDir, "recon_assessment.json", assessment)
 	writeJSON(runDir, "goal_suggestions.json", suggestions)
-	r.emit(runID, "recon_completed", map[string]any{"open_ports": assessment.OpenPorts, "services": len(assessment.Services)})
+	r.emit(runID, "goal_suggestions", map[string]any{"suggestions": suggestions})
+	if assessment.ChosenGoal != "" {
+		r.emit(runID, "fast_recon_goal_selected", map[string]any{
+			"goal": assessment.ChosenGoal, "description": assessment.ChosenGoalDescription,
+			"rating": picked.SuccessRating, "likelihood": picked.ExploitLikelihood,
+		})
+	}
+	r.emit(runID, "recon_completed", map[string]any{"open_ports": assessment.OpenPorts, "services": len(assessment.Services), "udp_ports": assessment.UDPPorts})
 	appendActivity(runDir, map[string]any{"phase": "recon_complete", "open_ports": assessment.OpenPorts})
 
 	return r.finishAttack(ctx, runID, req, host, ip, domain, entries, runDir)
+}
+
+// selectGoal mirrors the recon-first goal rule: an operator custom goal wins,
+// then an explicit preset, else the top compatible suggestion (first entry
+// as fallback). It returns the pick for event reporting.
+func selectGoal(req Request, suggestions []recon.GoalSuggestion) (string, string, recon.GoalSuggestion) {
+	if strings.TrimSpace(req.CustomGoal) != "" {
+		return "custom", strings.TrimSpace(req.CustomGoal), recon.GoalSuggestion{Name: "custom"}
+	}
+	if req.Goal != "" {
+		return req.Goal, "", recon.GoalSuggestion{Name: req.Goal}
+	}
+	if len(suggestions) == 0 {
+		return "", "", recon.GoalSuggestion{}
+	}
+	pick := suggestions[0]
+	for _, s := range suggestions {
+		if s.Compatible {
+			pick = s
+			break
+		}
+	}
+	return pick.Name, pick.Description, pick
 }
 
 func ipOr(host, ip string) string {
@@ -231,6 +279,9 @@ func (r *Runner) finishAttack(ctx context.Context, runID string, req Request, ho
 	if req.Mode == "recon" {
 		finalizeRun(runDir, runID, req, outcome)
 		return outcome, nil
+	}
+	if req.Swarm {
+		return r.runSwarm(ctx, runID, req, host, ip, entries, runDir, outcome)
 	}
 	if r.Attack == nil {
 		outcome["attack_executed"] = false
@@ -254,6 +305,39 @@ func (r *Runner) finishAttack(ctx context.Context, runID string, req Request, ho
 	for k, v := range res {
 		outcome[k] = v
 	}
+	finalizeRun(runDir, runID, req, outcome)
+	return outcome, nil
+}
+
+// runSwarm executes the native multi-agent campaign (Recon → Vuln →
+// Validation → Reflection with critic gates and checkpoints) for
+// swarm-flagged attack/fast runs. It never falls back to fabricated
+// results: campaign errors are recorded on the outcome like attack errors.
+func (r *Runner) runSwarm(ctx context.Context, runID string, req Request, host, ip string, entries []string, runDir string, outcome map[string]any) (map[string]any, error) {
+	target := ipOr(host, ip)
+	res, err := campaign.Run(ctx, campaign.Config{
+		RunID: runID, Targets: []string{target}, Mode: req.Mode, Goal: req.Goal,
+		RunDir: runDir, AllowedTargets: entries,
+		RequireAllowlist: r.RequireAllowlist, MaxParallel: r.MaxConcurrent,
+		EnableCritic: true, EnableReflection: true, NVD: r.Intel,
+		Resume: req.Resume != "",
+		Emit:   func(typ string, payload map[string]any) { r.emit(runID, typ, payload) },
+	})
+	if err != nil {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		outcome["attack_error"] = err.Error()
+		finalizeRun(runDir, runID, req, outcome)
+		return outcome, nil
+	}
+	outcome["attack_executed"] = true
+	outcome["swarm"] = true
+	outcome["swarm_targets"] = res.Targets
+	outcome["swarm_total_tasks"] = res.TotalTasks
+	outcome["swarm_completed_tasks"] = res.CompletedTasks
+	outcome["swarm_blocked_tasks"] = res.BlockedTasks
+	outcome["swarm_findings"] = res.FindingsCount
 	finalizeRun(runDir, runID, req, outcome)
 	return outcome, nil
 }
@@ -299,6 +383,18 @@ func tryAdoptAssessment(reportsDir, resumeFrom, host, runDir string) bool {
 	if sg, err := os.ReadFile(filepath.Join(reportsDir, resumeFrom, "goal_suggestions.json")); err == nil {
 		_ = os.WriteFile(filepath.Join(runDir, "goal_suggestions.json"), sg, 0o644)
 	}
+	// Adopt swarm checkpoints too, so a resumed campaign recovers via the
+	// Resume path (in-flight tasks demoted to pending) instead of
+	// restarting. Missing files are fine — fresh campaigns have none.
+	for _, name := range []string{"attack_states.json", "swarm_state.json"} {
+		if cp, err := os.ReadFile(filepath.Join(reportsDir, resumeFrom, name)); err == nil {
+			_ = os.WriteFile(filepath.Join(runDir, name), cp, 0o644)
+		}
+		if cp, err := os.ReadFile(filepath.Join(reportsDir, resumeFrom, "swarm_workspace", name)); err == nil {
+			_ = os.MkdirAll(filepath.Join(runDir, "swarm_workspace"), 0o755)
+			_ = os.WriteFile(filepath.Join(runDir, "swarm_workspace", name), cp, 0o644)
+		}
+	}
 	return true
 }
 
@@ -327,6 +423,9 @@ func finalizeRun(runDir, runID string, req Request, outcome map[string]any) {
 	summary := "# BreachPilot run " + runID + "\n\n- target: " + req.Target + "\n- mode: " + req.Mode + "\n- goal: " + req.Goal + "\n- completed: " + nowISO() + "\n"
 	_ = os.WriteFile(filepath.Join(runDir, "session_summary.md"), []byte(summary), 0o644)
 	appendActivity(runDir, map[string]any{"phase": "completed", "outcome": outcome})
+	// Enhanced report is best-effort: a reporting failure must never fail
+	// the run itself. The files join the artifact whitelist for the WebUI.
+	_, _ = reporting.Regenerate(runDir)
 }
 
 func failDir(reportsDir, runID, kind, msg string) {

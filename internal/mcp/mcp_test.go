@@ -113,7 +113,7 @@ func TestEngineServerStdioAndTools(t *testing.T) {
 }
 
 func TestDefensiveServerScopeAndLimitedTerminal(t *testing.T) {
-	srv := mcp.NewDefensiveServer([]string{"127.0.0.1", "10.0.0.0/16"}, nil, nil)
+	srv := mcp.NewDefensiveServer([]string{"127.0.0.1", "10.0.0.0/16"}, nil, nil, nil)
 	ctx := context.Background()
 
 	// Out-of-scope scan is rejected

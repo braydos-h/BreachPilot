@@ -19,6 +19,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/braydos-h/BreachPilot/internal/config"
 )
 
 const (
@@ -93,6 +95,50 @@ func DefaultSettings() Settings {
 		EPSSBaseURL:             DefaultEPSSBaseURL,
 		KEVURL:                  DefaultKEVURL,
 	}
+}
+
+// SettingsFor translates Config.Intel (the cve_lookup block) into client
+// settings, resolving the API key from its configured env var. Mirrors the
+// Python cve_lookup defaults so EPSS/KEV enrichment runs when configured.
+func SettingsFor(cfg config.Config) Settings {
+	s := DefaultSettings()
+	i := cfg.Intel
+	s.Enabled = i.Enabled
+	if i.MaxResults > 0 {
+		s.MaxResults = i.MaxResults
+	}
+	if i.RateLimitSeconds > 0 {
+		s.RateLimit = time.Duration(i.RateLimitSeconds * float64(time.Second))
+	}
+	if i.TimeoutSeconds > 0 {
+		s.Timeout = time.Duration(i.TimeoutSeconds * float64(time.Second))
+	}
+	if i.CacheTTLSeconds > 0 {
+		s.CacheTTL = time.Duration(i.CacheTTLSeconds * float64(time.Second))
+	}
+	if i.CacheMaxEntries > 0 {
+		s.CacheMaxEntries = i.CacheMaxEntries
+	}
+	if i.CircuitFailureThreshold > 0 {
+		s.CircuitFailureThreshold = i.CircuitFailureThreshold
+	}
+	if i.CircuitRecoveryTimeoutSec > 0 {
+		s.CircuitRecoveryTimeout = time.Duration(i.CircuitRecoveryTimeoutSec * float64(time.Second))
+	}
+	s.EPSSEnabled = i.EPSSEnabled
+	s.KEVEnabled = i.KEVEnabled
+	if i.KEVCacheTTLSeconds > 0 {
+		s.KEVCacheTTL = time.Duration(i.KEVCacheTTLSeconds * float64(time.Second))
+	}
+	if i.KEVCachePath != "" {
+		s.KEVCachePath = i.KEVCachePath
+	}
+	envName := i.APIKeyEnv
+	if envName == "" {
+		envName = "NVD_API_KEY"
+	}
+	s.APIKey = os.Getenv(envName)
+	return s
 }
 
 // CVEEntry represents one enriched CVE record.

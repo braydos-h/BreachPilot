@@ -43,6 +43,32 @@ type Config struct {
 		Backend string `yaml:"backend"`
 		Image   string `yaml:"image"`
 	} `yaml:"sandbox"`
+	// Intel mirrors the cve_lookup block: NVD lookup plus EPSS/KEV enrichment.
+	Intel struct {
+		Enabled                   bool    `yaml:"enabled"`
+		MaxResults                int     `yaml:"max_results"`
+		RateLimitSeconds          float64 `yaml:"rate_limit_seconds"`
+		TimeoutSeconds            float64 `yaml:"timeout_seconds"`
+		CacheTTLSeconds           float64 `yaml:"cache_ttl_seconds"`
+		CacheMaxEntries           int     `yaml:"cache_max_entries"`
+		APIKeyEnv                 string  `yaml:"api_key_env"`
+		CircuitFailureThreshold   int     `yaml:"circuit_failure_threshold"`
+		CircuitRecoveryTimeoutSec float64 `yaml:"circuit_recovery_timeout"`
+		EPSSEnabled               bool    `yaml:"epss_enabled"`
+		KEVEnabled                bool    `yaml:"kev_enabled"`
+		KEVCacheTTLSeconds        float64 `yaml:"kev_cache_ttl_seconds"`
+		KEVCachePath              string  `yaml:"kev_cache_path"`
+	} `yaml:"cve_lookup"`
+	// ThreatIntel mirrors the threat_intel block: OSV/GHSA/KEV feed client.
+	ThreatIntel struct {
+		Enabled         bool            `yaml:"enabled"`
+		CacheDir        string          `yaml:"cache_dir"`
+		CacheTTLSeconds float64         `yaml:"cache_ttl_seconds"`
+		Sources         map[string]bool `yaml:"sources"`
+		MaxResults      int             `yaml:"max_results"`
+		GitHubTokenEnv  string          `yaml:"github_token_env"`
+		TimeoutSeconds  float64         `yaml:"timeout_seconds"`
+	} `yaml:"threat_intel"`
 	Browser struct {
 		Enabled     bool `yaml:"enabled"`
 		Headless    bool `yaml:"headless"`
@@ -67,6 +93,25 @@ func Default() Config {
 	c.Sandbox.Enabled = true
 	c.Sandbox.Backend = "docker"
 	c.Sandbox.Image = "breachpilot-sandbox:latest"
+	c.Intel.Enabled = true
+	c.Intel.MaxResults = 5
+	c.Intel.RateLimitSeconds = 6.0
+	c.Intel.TimeoutSeconds = 30
+	c.Intel.CacheTTLSeconds = 3600
+	c.Intel.CacheMaxEntries = 100
+	c.Intel.APIKeyEnv = "NVD_API_KEY"
+	c.Intel.CircuitFailureThreshold = 5
+	c.Intel.CircuitRecoveryTimeoutSec = 60.0
+	c.Intel.EPSSEnabled = true
+	c.Intel.KEVEnabled = true
+	c.Intel.KEVCacheTTLSeconds = 86400
+	c.ThreatIntel.Enabled = false
+	c.ThreatIntel.CacheDir = "exploit_workspace/.threat_intel"
+	c.ThreatIntel.CacheTTLSeconds = 86400
+	c.ThreatIntel.Sources = map[string]bool{"osv": true, "ghsa": true, "kev": true, "exploitdb_rss": false}
+	c.ThreatIntel.MaxResults = 20
+	c.ThreatIntel.GitHubTokenEnv = "GITHUB_TOKEN"
+	c.ThreatIntel.TimeoutSeconds = 30
 	c.Browser.Enabled = false
 	c.Browser.Headless = true
 	c.Browser.MaxSessions = 2
@@ -103,6 +148,10 @@ func Load(path string) (Config, error) {
 		restoreBool(rawMap, []string{"api", "multi_operator"}, &cfg.API.MultiOperator, def.API.MultiOperator)
 		restoreBool(rawMap, []string{"api", "graph_route"}, &cfg.API.GraphRoute, def.API.GraphRoute)
 		restoreBool(rawMap, []string{"exploit", "require_explicit_allowlist"}, &cfg.Exploit.RequireExplicitAllowlist, def.Exploit.RequireExplicitAllowlist)
+		restoreBool(rawMap, []string{"cve_lookup", "enabled"}, &cfg.Intel.Enabled, def.Intel.Enabled)
+		restoreBool(rawMap, []string{"cve_lookup", "epss_enabled"}, &cfg.Intel.EPSSEnabled, def.Intel.EPSSEnabled)
+		restoreBool(rawMap, []string{"cve_lookup", "kev_enabled"}, &cfg.Intel.KEVEnabled, def.Intel.KEVEnabled)
+		restoreBool(rawMap, []string{"threat_intel", "enabled"}, &cfg.ThreatIntel.Enabled, def.ThreatIntel.Enabled)
 	}
 	if err := cfg.Validate(); err != nil {
 		return cfg, err
@@ -167,6 +216,54 @@ func merge(dst *Config, src Config) {
 	}
 	if src.Sandbox.Image != "" {
 		dst.Sandbox.Image = src.Sandbox.Image
+	}
+	if src.Intel.MaxResults != 0 {
+		dst.Intel.MaxResults = src.Intel.MaxResults
+	}
+	if src.Intel.RateLimitSeconds != 0 {
+		dst.Intel.RateLimitSeconds = src.Intel.RateLimitSeconds
+	}
+	if src.Intel.TimeoutSeconds != 0 {
+		dst.Intel.TimeoutSeconds = src.Intel.TimeoutSeconds
+	}
+	if src.Intel.CacheTTLSeconds != 0 {
+		dst.Intel.CacheTTLSeconds = src.Intel.CacheTTLSeconds
+	}
+	if src.Intel.CacheMaxEntries != 0 {
+		dst.Intel.CacheMaxEntries = src.Intel.CacheMaxEntries
+	}
+	if src.Intel.APIKeyEnv != "" {
+		dst.Intel.APIKeyEnv = src.Intel.APIKeyEnv
+	}
+	if src.Intel.CircuitFailureThreshold != 0 {
+		dst.Intel.CircuitFailureThreshold = src.Intel.CircuitFailureThreshold
+	}
+	if src.Intel.CircuitRecoveryTimeoutSec != 0 {
+		dst.Intel.CircuitRecoveryTimeoutSec = src.Intel.CircuitRecoveryTimeoutSec
+	}
+	if src.Intel.KEVCacheTTLSeconds != 0 {
+		dst.Intel.KEVCacheTTLSeconds = src.Intel.KEVCacheTTLSeconds
+	}
+	if src.Intel.KEVCachePath != "" {
+		dst.Intel.KEVCachePath = src.Intel.KEVCachePath
+	}
+	if src.ThreatIntel.CacheDir != "" {
+		dst.ThreatIntel.CacheDir = src.ThreatIntel.CacheDir
+	}
+	if src.ThreatIntel.CacheTTLSeconds != 0 {
+		dst.ThreatIntel.CacheTTLSeconds = src.ThreatIntel.CacheTTLSeconds
+	}
+	if src.ThreatIntel.Sources != nil {
+		dst.ThreatIntel.Sources = src.ThreatIntel.Sources
+	}
+	if src.ThreatIntel.MaxResults != 0 {
+		dst.ThreatIntel.MaxResults = src.ThreatIntel.MaxResults
+	}
+	if src.ThreatIntel.GitHubTokenEnv != "" {
+		dst.ThreatIntel.GitHubTokenEnv = src.ThreatIntel.GitHubTokenEnv
+	}
+	if src.ThreatIntel.TimeoutSeconds != 0 {
+		dst.ThreatIntel.TimeoutSeconds = src.ThreatIntel.TimeoutSeconds
 	}
 	if src.Browser.MaxSessions != 0 {
 		dst.Browser.MaxSessions = src.Browser.MaxSessions

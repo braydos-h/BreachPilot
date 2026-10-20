@@ -279,21 +279,23 @@ func InferOS(openPorts []int, services []Service) (string, []string) {
 
 // Assessment mirrors ReconAssessment.to_dict.
 type Assessment struct {
-	TargetIP         string    `json:"target_ip"`
-	OSVerdict        string    `json:"os_verdict"`
-	OSHints          []string  `json:"os_hints"`
-	OpenPorts        []int     `json:"open_ports"`
-	Services         []Service `json:"services"`
-	CVEFindings      []any     `json:"cve_findings"`
-	OverallRiskScore int       `json:"overall_risk_score"`
-	ChosenGoal       string    `json:"chosen_goal,omitempty"`
+	TargetIP              string    `json:"target_ip"`
+	OSVerdict             string    `json:"os_verdict"`
+	OSHints               []string  `json:"os_hints"`
+	OpenPorts             []int     `json:"open_ports"`
+	UDPPorts              []int     `json:"udp_ports"`
+	Services              []Service `json:"services"`
+	CVEFindings           []any     `json:"cve_findings"`
+	OverallRiskScore      int       `json:"overall_risk_score"`
+	ChosenGoal            string    `json:"chosen_goal,omitempty"`
+	ChosenGoalDescription string    `json:"chosen_goal_description,omitempty"`
 }
 
 // BuildAssessment converts scan results to an Assessment, extracting service
 // versions and OS hints from banners.
 func BuildAssessment(targetIP string, results []ScanResult) Assessment {
 	a := Assessment{TargetIP: targetIP, OSVerdict: "UNKNOWN", OSHints: []string{},
-		CVEFindings: []any{}, Services: []Service{}, OpenPorts: []int{}}
+		CVEFindings: []any{}, Services: []Service{}, OpenPorts: []int{}, UDPPorts: []int{}}
 	for _, r := range results {
 		if !r.Open {
 			continue

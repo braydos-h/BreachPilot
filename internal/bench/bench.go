@@ -141,6 +141,30 @@ func (s *Service) Start(suite string, trials int, timeoutSeconds int) (*Run, err
 	return run, nil
 }
 
+// RunSync starts a suite run and blocks until it reaches a terminal state,
+// cancelling and failing on deadline. It is the synchronous entrypoint
+// behind bp --eval: same Start/execute path as the API, waited on.
+func RunSync(svc *Service, suite string, trials, timeoutSeconds int, maxWait time.Duration) (*Run, error) {
+	run, err := svc.Start(suite, trials, timeoutSeconds)
+	if err != nil {
+		return nil, err
+	}
+	if maxWait <= 0 {
+		maxWait = time.Duration(trials)*(time.Duration(timeoutSeconds)*time.Second) + 30*time.Second
+	}
+	deadline := time.Now().Add(maxWait)
+	for {
+		if got := svc.Get(run.RunID); got != nil && got.State != "running" && got.State != "cancelling" {
+			return got, nil
+		}
+		if time.Now().After(deadline) {
+			svc.Cancel(run.RunID)
+			return nil, fmt.Errorf("eval timed out waiting for run %s", run.RunID)
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+}
+
 func (s *Service) execute(run *Run, sc Scenario, trials, timeoutSeconds int) {
 	defer func() {
 		s.mu.Lock()

@@ -48,13 +48,13 @@ run:
 	$(BIN)/python main.py
 
 mcp-defensive:
-	$(BIN)/python mcp_server.py
+	go run ./cmd/bp-mcp-defensive
 
 mcp-exploit:
-	$(BIN)/python mcp_exploit_server.py
+	go run ./cmd/bp-mcp-assess
 
 mcp-engine:
-	$(BIN)/python mcp_engine_server.py
+	go run ./cmd/bp-mcp-engine
 
 clean:
 	rm -rf $(VENV)

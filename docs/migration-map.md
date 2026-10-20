@@ -33,6 +33,7 @@ explicit `501 not_ported` — never fabricated data.
 | `tools/browser` (playwright) | `internal/browser` (chromedp CDP: create/navigate/text/screenshot/close, allowlist gate, chrome probe) | gate/scheme/probe tests |
 | `tools/doctor.py` + self-test | `internal/diag` shared by CLI + API (loopback/store/allowlist/tags/sidecar checks) | exit-code tests |
 | Go↔Rust protocol | `proto/exec.proto` IDL + JSON-v1 TCP (`internal/ipc` ↔ `bp-sidecar`); see `docs/ipc-protocol.md` | 5 live contract tests |
+| `mcp_server.py` / `mcp_exploit_server.py` / `mcp_engine_server.py` entrypoints | `cmd/bp-mcp-defensive` (:8000) / `cmd/bp-mcp-assess` (:8001) / `cmd/bp-mcp-engine` (:8002) via shared `internal/mcpserve` (stdio/HTTP, loopback gate, fingerprint check) | mcpserve tests + live stdio/HTTP smoke |
 
 ## Execution plane (Rust) — done
 

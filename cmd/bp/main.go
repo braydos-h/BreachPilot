@@ -16,6 +16,8 @@ import (
 	"github.com/braydos-h/BreachPilot/internal/config"
 	"github.com/braydos-h/BreachPilot/internal/diag"
 	"github.com/braydos-h/BreachPilot/internal/events"
+	"github.com/braydos-h/BreachPilot/internal/intel"
+	"github.com/braydos-h/BreachPilot/internal/reporting"
 	"github.com/braydos-h/BreachPilot/internal/runner"
 	"github.com/braydos-h/BreachPilot/internal/store"
 )
@@ -42,6 +44,12 @@ func main() {
 	swarm := fs.Bool("swarm", false, "Multi-agent swarm mode")
 	resume := fs.String("resume", "", "Resume a prior run")
 	exportRun := fs.String("export-run", "", "Export a run and exit")
+	doEval := fs.Bool("eval", false, "Run the native eval suite and exit")
+	evalSuite := fs.String("suite", "native-smoke", "Eval suite to run")
+	evalTrials := fs.Int("trials", 1, "Eval trials (1-20)")
+	evalTimeout := fs.Int("eval-timeout", 0, "Per-trial timeout seconds (0 = suite default)")
+	saveBaseline := fs.Bool("save-baseline", false, "Save eval result as baseline (requires --eval)")
+	checkRegression := fs.Bool("check-regression", false, "Compare eval result against baseline (requires --eval)")
 	showVersion := fs.Bool("version", false, "Print version and exit")
 	quiet := fs.Bool("quiet", false, "Reduce output")
 	_ = quiet
@@ -52,7 +60,6 @@ func main() {
 	_ = daemon
 	_ = menu
 	_ = rebuild
-	_ = swarm
 	_ = resume
 	_ = exportRun
 	if err := fs.Parse(os.Args[1:]); err != nil {
@@ -81,6 +88,20 @@ func main() {
 		fmt.Println("zap_scan spiderfoot shodan_recon github_dorks bloodhound_ce caldera sliver_c2 atomic_red_team mobile_attack browser_attack snmp wireless firmware_analysis webhook_notify example_recon_report")
 		return
 	}
+	if *doEval {
+		os.Exit(runEval(cfg, *evalSuite, *evalTrials, *evalTimeout, *saveBaseline, *checkRegression))
+	}
+	if *exportRun != "" {
+		paths, err := reporting.Regenerate(filepath.Join("reports", *exportRun))
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "export:", err)
+			os.Exit(1)
+		}
+		for _, p := range paths {
+			fmt.Println(filepath.Join("reports", *exportRun, p))
+		}
+		return
+	}
 	if *doctor {
 		runDoctor(cfg)
 		return
@@ -90,7 +111,11 @@ func main() {
 		return
 	}
 	if *target != "" {
-		fmt.Printf("run queued: target=%s mode=%s (use WebUI to confirm)\n", *target, *mode)
+		if *swarm {
+			fmt.Printf("run queued: target=%s mode=%s swarm=true (multi-agent campaign; use WebUI to confirm)\n", *target, *mode)
+		} else {
+			fmt.Printf("run queued: target=%s mode=%s (use WebUI to confirm)\n", *target, *mode)
+		}
 	}
 	serve(cfg, *configPath)
 }
@@ -109,6 +134,49 @@ func runSelfTest(cfg config.Config) {
 	if code != 0 {
 		os.Exit(1)
 	}
+}
+
+// runEval executes the native eval suite synchronously (same Start/execute
+// path as the API benchmarks), prints the graded summary, and optionally
+// saves or checks the regression baseline. Exit 0 on pass.
+func runEval(cfg config.Config, suite string, trials, timeout int, saveBaseline, checkRegression bool) int {
+	svc := bench.New(filepath.Join("reports", "benchmarks"), cfg.Exploit.AllowedTargets, cfg.Exploit.RequireExplicitAllowlist, events.NewRegistry())
+	run, err := bench.RunSync(svc, suite, trials, timeout, 0)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "eval:", err)
+		return 1
+	}
+	s := run.Summary
+	fmt.Printf("eval suite=%s run=%s trials=%d/%d solved=%d verified_rate=%.2f scope_violations=%d status=%s\n",
+		s.Suite, s.RunID, s.TrialsCompleted, s.TrialsTotal, s.Solved, s.VerifiedSuccessRate, s.ScopeViolationCount, s.Status)
+	if saveBaseline {
+		if _, err := svc.SaveBaseline(run.RunID); err != nil {
+			fmt.Fprintln(os.Stderr, "eval baseline:", err)
+			return 1
+		}
+		fmt.Println("baseline saved")
+	}
+	if checkRegression {
+		results, err := svc.Compare(run.RunID)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "eval regression:", err)
+			return 1
+		}
+		failed := false
+		for _, r := range results {
+			fmt.Printf("regression %s %s baseline=%v current=%v\n", r.Severity, r.Metric, r.Baseline, r.Current)
+			if r.Severity == "hard" {
+				failed = true
+			}
+		}
+		if failed {
+			return 1
+		}
+	}
+	if s.ScopeViolationCount > 0 {
+		return 1
+	}
+	return 0
 }
 
 func serve(cfg config.Config, configPath string) {
@@ -130,6 +198,7 @@ func serve(cfg config.Config, configPath string) {
 	srv.Bench = bench.New(filepath.Join("reports", "benchmarks"), cfg.Exploit.AllowedTargets, cfg.Exploit.RequireExplicitAllowlist, reg)
 	srv.Runner = runner.New(db, reg, "reports", cfg.Exploit.AllowedTargets, cfg.Exploit.RequireExplicitAllowlist, 4)
 	srv.Runner.Attack = runner.NativeAttack
+	srv.Runner.Intel = intel.NewNVDClient(intel.SettingsFor(cfg))
 	root := http.NewServeMux()
 	root.Handle("/api/", srv.Handler())
 	root.Handle("/openapi.json", srv.Handler())

@@ -3,6 +3,7 @@ package runner_test
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -47,10 +48,15 @@ func TestReconRunCompletes(t *testing.T) {
 	}
 	r.Ensure("run-t1")
 	waitState(t, db, "run-t1", "completed")
-	for _, f := range []string{"recon_assessment.json", "goal_suggestions.json", "run.json", "session_summary.md", "activity.jsonl", "session_state.json"} {
+	for _, f := range []string{"recon_assessment.json", "goal_suggestions.json", "run.json", "session_summary.md", "activity.jsonl", "session_state.json", "enhanced_report.json", "enhanced_report.md", "enhanced_report.html"} {
 		if _, err := os.Stat(filepath.Join(dir, "reports", "run-t1", f)); err != nil {
 			t.Fatalf("missing artifact %s: %v", f, err)
 		}
+	}
+	if raw, err := os.ReadFile(filepath.Join(dir, "reports", "run-t1", "recon_assessment.json")); err != nil {
+		t.Fatal(err)
+	} else if !strings.Contains(string(raw), `"udp_ports"`) {
+		t.Fatalf("assessment must carry udp_ports: %s", raw)
 	}
 	evts := reg.GetOrCreate("run-t1").Replay(0)
 	seen := map[string]bool{}

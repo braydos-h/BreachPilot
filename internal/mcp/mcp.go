@@ -36,6 +36,7 @@ import (
 	"github.com/braydos-h/BreachPilot/internal/recon"
 	"github.com/braydos-h/BreachPilot/internal/skills"
 	"github.com/braydos-h/BreachPilot/internal/store"
+	"github.com/braydos-h/BreachPilot/internal/threatintel"
 )
 
 const ProtocolVersion = "2024-11-05"
@@ -485,8 +486,9 @@ func TrueVal() bool { return true }
 
 var nmapBadChars = regexp.MustCompile(`[;&|` + "`" + `$<>\n\r]`)
 
-// NewDefensiveServer builds the scope-enforced defensive MCP server.
-func NewDefensiveServer(allowedAssets []string, nvd *intel.NVDClient, skillStore *skills.Store) *Server {
+// NewDefensiveServer builds the scope-enforced defensive MCP server. ti is
+// the optional OSV/GHSA/KEV threat-intel client; nil omits the feed.
+func NewDefensiveServer(allowedAssets []string, nvd *intel.NVDClient, skillStore *skills.Store, ti *threatintel.Client) *Server {
 	srv := NewServer(
 		"ai-nmap-defensive",
 		"Defensive scope-enforced reconnaissance and vulnerability intelligence MCP server.",
@@ -702,12 +704,22 @@ func NewDefensiveServer(allowedAssets []string, nvd *intel.NVDClient, skillStore
 				skMatches = skMatches[:5]
 			}
 		}
-		return map[string]any{
+		out := map[string]any{
 			"ok":     true,
 			"query":  clean,
 			"cves":   cves,
 			"skills": skMatches,
-		}, nil
+		}
+		if ti != nil {
+			// Feeds are only defined for package/CVE-shaped queries;
+			// anything else omits the key rather than erroring.
+			if _, verr := threatintel.ValidateQuery(clean); verr == nil {
+				if fed, _ := ti.Search(ctx, clean, "osv,ghsa,kev"); fed != nil {
+					out["threat_intel"] = fed
+				}
+			}
+		}
+		return out, nil
 	})
 
 	return srv

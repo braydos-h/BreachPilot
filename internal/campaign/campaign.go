@@ -645,6 +645,10 @@ func executeTargetCampaign(
 			return ctx.Err()
 		}
 		assess := recon.BuildAssessment(ip, scanRes)
+		assess.MergeUDP(recon.ScanUDP(ctx, ip, recon.DefaultUDPProbes))
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
 		st.Assessment = &assess
 		st.ReconCompleted = true
 		reconTask.Status = StatusCompleted
