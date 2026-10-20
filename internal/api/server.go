@@ -433,13 +433,6 @@ func (s *Server) runsSub(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if run == nil && sub != "" && !strings.HasSuffix(r.URL.Path, "/events") && !strings.HasSuffix(r.URL.Path, "/events/stream") && !strings.HasPrefix(sub, "ws/") {
-		// Events routes self-check existence; others 404 here.
-		if sub == "" {
-			writeErr(w, 404, "not_found", "Run not found")
-			return
-		}
-	}
 	switch {
 	case sub == "" && r.Method == http.MethodGet:
 		if run == nil {

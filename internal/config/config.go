@@ -83,11 +83,39 @@ func Load(path string) (Config, error) {
 	if err := yaml.Unmarshal(raw, &file); err != nil {
 		return cfg, fmt.Errorf("parse config %s: %w", path, err)
 	}
+	def := cfg
 	merge(&cfg, file)
+	// Booleans: absent keys keep the safe default (e.g. sandbox stays
+	// enabled). Only overlay when the file actually contains the key.
+	var rawMap map[string]any
+	if err := yaml.Unmarshal(raw, &rawMap); err == nil {
+		restoreBool(rawMap, []string{"sandbox", "enabled"}, &cfg.Sandbox.Enabled, def.Sandbox.Enabled)
+		restoreBool(rawMap, []string{"api", "multi_operator"}, &cfg.API.MultiOperator, def.API.MultiOperator)
+		restoreBool(rawMap, []string{"api", "graph_route"}, &cfg.API.GraphRoute, def.API.GraphRoute)
+		restoreBool(rawMap, []string{"exploit", "require_explicit_allowlist"}, &cfg.Exploit.RequireExplicitAllowlist, def.Exploit.RequireExplicitAllowlist)
+	}
 	if err := cfg.Validate(); err != nil {
 		return cfg, err
 	}
 	return cfg, nil
+}
+
+func restoreBool(m map[string]any, path []string, dst *bool, def bool) {
+	cur := m
+	for _, p := range path[:len(path)-1] {
+		next, ok := cur[p].(map[string]any)
+		if !ok {
+			*dst = def
+			return
+		}
+		cur = next
+	}
+	v, ok := cur[path[len(path)-1]].(bool)
+	if !ok {
+		*dst = def
+		return
+	}
+	*dst = v
 }
 
 func merge(dst *Config, src Config) {
@@ -130,16 +158,7 @@ func merge(dst *Config, src Config) {
 	if src.Sandbox.Image != "" {
 		dst.Sandbox.Image = src.Sandbox.Image
 	}
-	// Booleans: file explicitly sets them; zero value false is meaningful only
-	// when the file actually contains the key. Keep it simple: file wins when
-	// it differs from the zero struct. Explicit-disable works because Default
-	// starts enabled and a file saying false unmarshals to false — but we
-	// cannot distinguish absent from false here, so absent keeps default via
-	// re-read of the raw map.
-	dst.Sandbox.Enabled = src.Sandbox.Enabled
-	dst.API.MultiOperator = src.API.MultiOperator
-	dst.API.GraphRoute = src.API.GraphRoute
-	dst.Exploit.RequireExplicitAllowlist = src.Exploit.RequireExplicitAllowlist
+	// Booleans are fixed up in Load via restoreBool (absent key => default).
 	if src.Providers != nil {
 		dst.Providers = src.Providers
 	}
