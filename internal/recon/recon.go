@@ -1,8 +1,8 @@
 // Package recon implements native reconnaissance: target validation,
 // bounded DNS resolution, parallel TCP connect scanning with banner grabs,
-// assessment building (recon_assessment.json shape), and heuristic goal
-// suggestions. Mirrors tools/recon/service.py fast/assessment paths and
-// tools/run_service/prepare.py target handling.
+// service version extraction, OS fingerprinting, unprivileged scanner flag
+// downgrading, NVD/EPSS/KEV vulnerability enrichment, assessment building
+// (recon_assessment.json shape), and heuristic goal suggestions.
 package recon
 
 import (
@@ -15,6 +15,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/braydos-h/BreachPilot/internal/intel"
 )
 
 // DefaultFastPorts mirrors DEFAULT_FAST_PORTS (24 ports).
@@ -140,10 +142,20 @@ func probePort(ctx context.Context, ip string, port int, timeout time.Duration) 
 	}
 	defer conn.Close()
 	res.Open = true
-	_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	_ = conn.SetReadDeadline(time.Now().Add(400 * time.Millisecond))
 	buf := make([]byte, 1024)
 	if n, err := conn.Read(buf); err == nil && n > 0 {
 		res.Banner = strings.TrimSpace(sanitizeBanner(string(buf[:n])))
+		return res
+	}
+	// Active HTTP HEAD probe for common HTTP ports that wait for client request.
+	if port == 80 || port == 8080 || port == 8000 || port == 8888 || port == 9000 {
+		_ = conn.SetWriteDeadline(time.Now().Add(400 * time.Millisecond))
+		_, _ = fmt.Fprintf(conn, "HEAD / HTTP/1.0\r\nHost: %s\r\n\r\n", ip)
+		_ = conn.SetReadDeadline(time.Now().Add(600 * time.Millisecond))
+		if n, err := conn.Read(buf); err == nil && n > 0 {
+			res.Banner = strings.TrimSpace(sanitizeBanner(string(buf[:n])))
+		}
 	}
 	return res
 }
@@ -169,8 +181,103 @@ var portServiceNames = map[int]string{
 	8080: "http-alt", 8443: "https-alt", 9000: "http-alt", 27017: "mongodb", 6379: "redis",
 }
 
-// Assessment mirrors ReconAssessment.to_dict (subset the native backend
-// produces: no CVE intel yet — cve_findings is honestly empty).
+var versionPatterns = []*regexp.Regexp{
+	regexp.MustCompile(`(?i)\b(OpenSSH)[_/\s-]([0-9]+\.[0-9]+[a-z0-9p.-]*)`),
+	regexp.MustCompile(`(?i)\b(Apache)[/\s]([0-9]+\.[0-9]+\.[0-9]+)`),
+	regexp.MustCompile(`(?i)\b(nginx)[/\s]([0-9]+\.[0-9]+\.[0-9]+)`),
+	regexp.MustCompile(`(?i)\b(Microsoft-IIS)[/\s]([0-9]+\.[0-9]+)`),
+	regexp.MustCompile(`(?i)\b(vsFTPd)[/\s]([0-9]+\.[0-9]+\.[0-9]+)`),
+	regexp.MustCompile(`(?i)\b(ProFTPD)[/\s]([0-9]+\.[0-9]+\.[0-9a-z]+)`),
+	regexp.MustCompile(`(?i)\b(Redis)[_/\s:v]+([0-9]+\.[0-9]+\.[0-9]+)`),
+	regexp.MustCompile(`(?i)\b(MySQL|MariaDB)[_/\s-]+([0-9]+\.[0-9]+\.[0-9]+)`),
+	regexp.MustCompile(`(?i)\b(OpenSSL)[_/\s]+([0-9]+\.[0-9]+\.[0-9]+[a-z]*)`),
+}
+
+// ExtractServiceVersion extracts a normalized product + version string from a banner.
+func ExtractServiceVersion(banner string) string {
+	for _, re := range versionPatterns {
+		if m := re.FindStringSubmatch(banner); len(m) == 3 {
+			return m[1] + " " + m[2]
+		}
+	}
+	return ""
+}
+
+// InferOS derives an OS verdict and supporting hints from open ports and banners.
+func InferOS(openPorts []int, services []Service) (string, []string) {
+	var hints []string
+	linuxScore := 0
+	windowsScore := 0
+	freebsdScore := 0
+
+	addHint := func(h string) {
+		for _, existing := range hints {
+			if existing == h {
+				return
+			}
+		}
+		hints = append(hints, h)
+	}
+
+	for _, s := range services {
+		low := strings.ToLower(s.Banner)
+		switch {
+		case strings.Contains(low, "ubuntu"):
+			linuxScore += 3
+			addHint("banner: Ubuntu")
+		case strings.Contains(low, "debian"):
+			linuxScore += 3
+			addHint("banner: Debian")
+		case strings.Contains(low, "centos") || strings.Contains(low, "red hat") || strings.Contains(low, "fedora") || strings.Contains(low, "alpine"):
+			linuxScore += 3
+			addHint("banner: Linux distribution")
+		case strings.Contains(low, "(unix)"):
+			linuxScore += 2
+			addHint("banner: Unix")
+		}
+		if strings.Contains(low, "freebsd") {
+			freebsdScore += 3
+			addHint("banner: FreeBSD")
+		}
+		if strings.Contains(low, "microsoft") || strings.Contains(low, "windows") || strings.Contains(low, "win32") || strings.Contains(low, "iis") {
+			windowsScore += 3
+			addHint("banner: Microsoft/Windows")
+		}
+	}
+
+	hasPort := map[int]bool{}
+	for _, p := range openPorts {
+		hasPort[p] = true
+	}
+	if hasPort[135] || hasPort[3389] {
+		windowsScore += 2
+		addHint("ports: MSRPC/RDP")
+	}
+	if hasPort[445] && hasPort[139] && !hasPort[22] {
+		windowsScore++
+		addHint("ports: SMB/NetBIOS without SSH")
+	}
+	if hasPort[22] && hasPort[111] {
+		linuxScore++
+		addHint("ports: SSH + rpcbind")
+	}
+
+	if hints == nil {
+		hints = []string{}
+	}
+	switch {
+	case windowsScore > linuxScore && windowsScore > freebsdScore && windowsScore >= 2:
+		return "Windows", hints
+	case linuxScore > windowsScore && linuxScore >= freebsdScore && linuxScore >= 2:
+		return "Linux", hints
+	case freebsdScore > linuxScore && freebsdScore > windowsScore && freebsdScore >= 2:
+		return "FreeBSD", hints
+	default:
+		return "UNKNOWN", hints
+	}
+}
+
+// Assessment mirrors ReconAssessment.to_dict.
 type Assessment struct {
 	TargetIP         string    `json:"target_ip"`
 	OSVerdict        string    `json:"os_verdict"`
@@ -182,7 +289,8 @@ type Assessment struct {
 	ChosenGoal       string    `json:"chosen_goal,omitempty"`
 }
 
-// BuildAssessment converts scan results to an Assessment.
+// BuildAssessment converts scan results to an Assessment, extracting service
+// versions and OS hints from banners.
 func BuildAssessment(targetIP string, results []ScanResult) Assessment {
 	a := Assessment{TargetIP: targetIP, OSVerdict: "UNKNOWN", OSHints: []string{},
 		CVEFindings: []any{}, Services: []Service{}, OpenPorts: []int{}}
@@ -195,14 +303,60 @@ func BuildAssessment(targetIP string, results []ScanResult) Assessment {
 		if name == "" {
 			name = "unknown"
 		}
-		a.Services = append(a.Services, Service{Port: r.Port, Protocol: "tcp", Service: name, Banner: r.Banner})
+		ver := ExtractServiceVersion(r.Banner)
+		a.Services = append(a.Services, Service{
+			Port:     r.Port,
+			Protocol: "tcp",
+			Service:  name,
+			Version:  ver,
+			Banner:   r.Banner,
+		})
 	}
 	sort.Ints(a.OpenPorts)
-	a.OverallRiskScore = riskScore(a.OpenPorts)
+	a.OSVerdict, a.OSHints = InferOS(a.OpenPorts, a.Services)
+	a.OverallRiskScore = riskScore(a.OpenPorts, len(a.CVEFindings))
 	return a
 }
 
-func riskScore(open []int) int {
+// EnrichAssessmentCVEs queries NVD/EPSS/KEV for services that yielded a version
+// string and appends structured CVE findings to the Assessment.
+func EnrichAssessmentCVEs(ctx context.Context, a *Assessment, nvd *intel.NVDClient) {
+	if a == nil || nvd == nil || !nvd.Settings.Enabled {
+		return
+	}
+	seen := map[string]bool{}
+	for _, svc := range a.Services {
+		q := strings.TrimSpace(svc.Version)
+		if q == "" || seen[strings.ToLower(q)] {
+			continue
+		}
+		seen[strings.ToLower(q)] = true
+		entries, err := nvd.Search(ctx, q)
+		if err != nil {
+			continue
+		}
+		for _, e := range entries {
+			a.CVEFindings = append(a.CVEFindings, map[string]any{
+				"port":            svc.Port,
+				"service":         svc.Service,
+				"version":         svc.Version,
+				"cve_id":          e.CVEID,
+				"severity":        e.Severity,
+				"cvss_score":      e.CVSSScore,
+				"cwe":             e.CWE,
+				"published":       e.Published,
+				"description":     e.Description,
+				"references":      e.References,
+				"epss":            e.EPSS,
+				"epss_percentile": e.EPSSPercentile,
+				"kev":             e.KEV,
+			})
+		}
+	}
+	a.OverallRiskScore = riskScore(a.OpenPorts, len(a.CVEFindings))
+}
+
+func riskScore(open []int, cveCount int) int {
 	score := 0
 	high := map[int]bool{21: true, 23: true, 135: true, 139: true, 445: true, 3389: true, 5900: true}
 	for _, p := range open {
@@ -212,10 +366,55 @@ func riskScore(open []int) int {
 			score += 5
 		}
 	}
+	score += cveCount * 15
 	if score > 100 {
 		score = 100
 	}
 	return score
+}
+
+// ApplyNmapPrivilege ports tools/nmap_priv.py: when unprivileged, either prepends
+// `sudo -n` (when useSudo is true) or downgrades root-only flags (`-sS` -> `-sT`,
+// strips `-O`, `--osscan-limit`, `--osscan-guess`, `--traceroute`) when privFallback is true.
+func ApplyNmapPrivilege(argv []string, isRoot, useSudo, privFallback bool) ([]string, string) {
+	if isRoot || len(argv) == 0 {
+		return append([]string{}, argv...), ""
+	}
+	if useSudo {
+		out := make([]string, 0, len(argv)+2)
+		out = append(out, "sudo", "-n")
+		out = append(out, argv...)
+		return out, ""
+	}
+	if !privFallback {
+		return append([]string{}, argv...), ""
+	}
+	out := make([]string, 0, len(argv))
+	var notes []string
+	hasConnect := false
+	for _, a := range argv {
+		if a == "-sT" {
+			hasConnect = true
+		}
+	}
+	for _, a := range argv {
+		switch a {
+		case "-sS", "-sA", "-sW", "-sM", "-sN", "-sF", "-sX":
+			if !hasConnect {
+				out = append(out, "-sT")
+				hasConnect = true
+			}
+			notes = append(notes, a+"->-sT")
+		case "-O", "--osscan-limit", "--osscan-guess", "--traceroute":
+			notes = append(notes, "stripped "+a)
+		default:
+			out = append(out, a)
+		}
+	}
+	if len(notes) == 0 {
+		return out, ""
+	}
+	return out, "nmap unprivileged downgrade: " + strings.Join(notes, ", ")
 }
 
 // GoalSuggestion mirrors one goal_suggestions.json entry.
@@ -230,8 +429,7 @@ type GoalSuggestion struct {
 	RiskRequirement   string `json:"risk_requirement"`
 }
 
-// SuggestGoals builds heuristic suggestions from open ports. Ratings are
-// heuristics (labelled as such in rationale), never fabricated CVE claims.
+// SuggestGoals builds heuristic suggestions from open ports.
 func SuggestGoals(openPorts []int, mode string) []GoalSuggestion {
 	has := map[int]bool{}
 	for _, p := range openPorts {
