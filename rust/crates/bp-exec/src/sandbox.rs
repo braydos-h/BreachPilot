@@ -176,11 +176,16 @@ pub fn validate_container_id(container_id: &str) -> Result<String, ExecError> {
     let cid = container_id.trim();
     if cid.is_empty()
         || cid.starts_with('-')
-        || cid
-            .chars()
-            .any(|c| matches!(c, ' ' | ';' | '|' | '`' | '$' | '\n' | '\r' | '\\' | '"' | '\''))
+        || cid.chars().any(|c| {
+            matches!(
+                c,
+                ' ' | ';' | '|' | '`' | '$' | '\n' | '\r' | '\\' | '"' | '\''
+            )
+        })
     {
-        return Err(ExecError::Unavailable("invalid sandbox container id".into()));
+        return Err(ExecError::Unavailable(
+            "invalid sandbox container id".into(),
+        ));
     }
     Ok(cid.to_string())
 }
@@ -188,11 +193,11 @@ pub fn validate_container_id(container_id: &str) -> Result<String, ExecError> {
 /// Validate an environment variable name before passing `--env KEY=VALUE`.
 pub fn validate_env_key(key: &str) -> Result<(), ExecError> {
     let k = key.trim();
-    if k.is_empty()
-        || k.starts_with('-')
-        || k.chars().any(|c| matches!(c, '=' | ' ' | '\n' | '\r'))
+    if k.is_empty() || k.starts_with('-') || k.chars().any(|c| matches!(c, '=' | ' ' | '\n' | '\r'))
     {
-        return Err(ExecError::Unavailable(format!("invalid sandbox env key {key:?}")));
+        return Err(ExecError::Unavailable(format!(
+            "invalid sandbox env key {key:?}"
+        )));
     }
     Ok(())
 }
@@ -214,7 +219,9 @@ pub fn build_create_args(spec: &SandboxSpec, cap_raw: bool) -> Result<Vec<String
             .chars()
             .any(|c| matches!(c, ';' | '|' | '`' | '$' | '\n' | '\r'))
     {
-        return Err(ExecError::Unavailable(format!("invalid sandbox image {image:?}")));
+        return Err(ExecError::Unavailable(format!(
+            "invalid sandbox image {image:?}"
+        )));
     }
     let cid = validate_container_id(&spec.sandbox_id)?;
     let user = if spec.user.trim().is_empty() {
@@ -318,10 +325,7 @@ pub fn validate_workspace(workspace: &Path) -> Result<PathBuf, ExecError> {
 pub fn container_path(workspace: &Path, host_path: &Path) -> Result<String, ExecError> {
     let ws_canon = validate_workspace(workspace)?;
     let hp_canon = host_path.canonicalize().map_err(|e| {
-        ExecError::WorkspaceFailed(format!(
-            "cannot resolve path {}: {e}",
-            host_path.display()
-        ))
+        ExecError::WorkspaceFailed(format!("cannot resolve path {}: {e}", host_path.display()))
     })?;
     let rel = hp_canon.strip_prefix(&ws_canon).map_err(|_| {
         ExecError::WorkspaceFailed(format!(
@@ -555,7 +559,10 @@ where
 
     Ok(NetworkPolicy {
         authorized_destinations: authorized,
-        explicitly_blocked: COMMON_BLOCKED_NETS.iter().map(|s| (*s).to_string()).collect(),
+        explicitly_blocked: COMMON_BLOCKED_NETS
+            .iter()
+            .map(|s| (*s).to_string())
+            .collect(),
         allow_dns,
         allow_gateway: cfg.allow_gateway,
         resolved_domains,
@@ -669,7 +676,9 @@ pub fn is_pure_local_computation(argv: &[String]) -> bool {
         "true" | "false" | "id" | "whoami" | "pwd" | "ls" | "cat" | "echo" | "head" | "tail" | "wc"
     ) {
         let joined = argv.join(" ").to_lowercase();
-        return !joined.contains("/dev/tcp") && !joined.contains("http://") && !joined.contains("https://");
+        return !joined.contains("/dev/tcp")
+            && !joined.contains("http://")
+            && !joined.contains("https://");
     }
     false
 }
@@ -698,9 +707,7 @@ impl DockerRunner for CliDockerRunner {
     ) -> Result<(i32, String, String), ExecError> {
         let start = Instant::now();
         let mut cmd = Command::new("docker");
-        cmd.args(args)
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
+        cmd.args(args).stdout(Stdio::piped()).stderr(Stdio::piped());
         if input.is_some() {
             cmd.stdin(Stdio::piped());
         } else {
@@ -727,9 +734,9 @@ impl DockerRunner for CliDockerRunner {
                 .map_err(|e| ExecError::Unavailable(format!("docker wait failed: {e}")))?
             {
                 Some(status) => {
-                    let out = child
-                        .wait_with_output()
-                        .map_err(|e| ExecError::Unavailable(format!("docker output failed: {e}")))?;
+                    let out = child.wait_with_output().map_err(|e| {
+                        ExecError::Unavailable(format!("docker output failed: {e}"))
+                    })?;
                     let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
                     let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
                     return Ok((status.code().unwrap_or(-1), stdout, stderr));
@@ -781,13 +788,24 @@ pub struct SandboxManager<R: DockerRunner = CliDockerRunner> {
 }
 
 impl<R: DockerRunner> SandboxManager<R> {
-    pub fn new(cfg: SandboxConfig, workspace: PathBuf, run_id: impl Into<String>, runner: R) -> Self {
+    pub fn new(
+        cfg: SandboxConfig,
+        workspace: PathBuf,
+        run_id: impl Into<String>,
+        runner: R,
+    ) -> Self {
         let rid = run_id.into();
         let clean_rid = if rid.trim().is_empty() {
             "run-default".to_string()
         } else {
             rid.chars()
-                .map(|c| if c.is_ascii_alphanumeric() || c == '-' { c } else { '-' })
+                .map(|c| {
+                    if c.is_ascii_alphanumeric() || c == '-' {
+                        c
+                    } else {
+                        '-'
+                    }
+                })
                 .collect()
         };
         Self {
@@ -924,7 +942,10 @@ impl<R: DockerRunner> SandboxManager<R> {
             "--format".to_string(),
             "{{.Names}}".to_string(),
         ];
-        if let Ok((0, out, _)) = self.runner.run_docker(&ps_args, None, Duration::from_secs(20)) {
+        if let Ok((0, out, _)) = self
+            .runner
+            .run_docker(&ps_args, None, Duration::from_secs(20))
+        {
             for name in out.lines().map(str::trim).filter(|s| !s.is_empty()) {
                 if name == self.container_id {
                     continue;
@@ -943,7 +964,10 @@ impl<R: DockerRunner> SandboxManager<R> {
             "--format".to_string(),
             "{{.Name}}".to_string(),
         ];
-        if let Ok((0, out, _)) = self.runner.run_docker(&net_args, None, Duration::from_secs(20)) {
+        if let Ok((0, out, _)) = self
+            .runner
+            .run_docker(&net_args, None, Duration::from_secs(20))
+        {
             for net in out.lines().map(str::trim).filter(|s| !s.is_empty()) {
                 if net == self.network_name {
                     continue;
@@ -956,7 +980,8 @@ impl<R: DockerRunner> SandboxManager<R> {
                     "{{json .}}".to_string(),
                 ];
                 if let Ok((0, jout, _)) =
-                    self.runner.run_docker(&insp_args, None, Duration::from_secs(20))
+                    self.runner
+                        .run_docker(&insp_args, None, Duration::from_secs(20))
                 {
                     if let Ok(val) = serde_json::from_str::<serde_json::Value>(&jout) {
                         let empty = val
@@ -976,8 +1001,16 @@ impl<R: DockerRunner> SandboxManager<R> {
 
     /// Install the IPv4 + IPv6 default-DROP ruleset inside the worker's network
     /// namespace via an ephemeral `--rm` sidecar holding `NET_ADMIN`.
-    pub fn apply_network_policy(&mut self, allowed_entries: &[String]) -> Result<NetworkPolicy, ExecError> {
-        let pol = build_network_policy(&self.cfg, allowed_entries, &self.gateway, default_resolve_host)?;
+    pub fn apply_network_policy(
+        &mut self,
+        allowed_entries: &[String],
+    ) -> Result<NetworkPolicy, ExecError> {
+        let pol = build_network_policy(
+            &self.cfg,
+            allowed_entries,
+            &self.gateway,
+            default_resolve_host,
+        )?;
         if let Some(prev) = &self.policy {
             if prev.fingerprint() == pol.fingerprint() {
                 return Ok(pol);
@@ -999,11 +1032,9 @@ impl<R: DockerRunner> SandboxManager<R> {
                     bin.to_string(),
                     self.cfg.image.clone(),
                 ];
-                let res = self.runner.run_docker(
-                    &args,
-                    Some(rules.as_bytes()),
-                    Duration::from_secs(60),
-                );
+                let res =
+                    self.runner
+                        .run_docker(&args, Some(rules.as_bytes()), Duration::from_secs(60));
                 match res {
                     Ok((0, _, _)) => {}
                     Ok((rc, out, err)) => {
@@ -1069,7 +1100,8 @@ impl<R: DockerRunner> SandboxManager<R> {
                 net_name.clone(),
             ];
             let (nrc, _nout, nerr) =
-                self.runner.run_docker(&net_args, None, Duration::from_secs(30))?;
+                self.runner
+                    .run_docker(&net_args, None, Duration::from_secs(30))?;
             if nrc != 0 {
                 return Err(ExecError::Unavailable(format!(
                     "docker network create failed: {}",
@@ -1094,7 +1126,8 @@ impl<R: DockerRunner> SandboxManager<R> {
             };
             let create_args = build_create_args(&spec, self.cfg.cap_raw)?;
             let (crc, cout, cerr) =
-                self.runner.run_docker(&create_args, None, Duration::from_secs(60))?;
+                self.runner
+                    .run_docker(&create_args, None, Duration::from_secs(60))?;
             if crc != 0 {
                 return Err(ExecError::Unavailable(format!(
                     "docker create failed: {}",
@@ -1110,7 +1143,8 @@ impl<R: DockerRunner> SandboxManager<R> {
 
             let start_args = vec!["start".to_string(), cid.clone()];
             let (src, _sout, serr) =
-                self.runner.run_docker(&start_args, None, Duration::from_secs(30))?;
+                self.runner
+                    .run_docker(&start_args, None, Duration::from_secs(30))?;
             if src != 0 {
                 return Err(ExecError::Unavailable(format!(
                     "docker start failed: {}",
@@ -1183,7 +1217,9 @@ impl<R: DockerRunner> SandboxManager<R> {
         validate_workspace(&self.workspace)?;
         if let Some(w) = cwd {
             let wt = w.trim();
-            if !wt.is_empty() && (!wt.starts_with(CONTAINER_WORKSPACE) || wt.split('/').any(|p| p == "..")) {
+            if !wt.is_empty()
+                && (!wt.starts_with(CONTAINER_WORKSPACE) || wt.split('/').any(|p| p == ".."))
+            {
                 return Err(ExecError::WorkspaceFailed(format!(
                     "invalid container workdir {wt:?}; must stay under {CONTAINER_WORKSPACE}"
                 )));
@@ -1244,7 +1280,13 @@ impl<R: DockerRunner> SandboxManager<R> {
             Ok((rc, out, err)) => {
                 // `timeout` utility returns 124 (or 137 on SIGKILL) when inner command times out
                 if rc == 124 || rc == 137 {
-                    self.record_audit(tool_name, "timed_out", &argv.join(" "), Some(rc), duration_ms);
+                    self.record_audit(
+                        tool_name,
+                        "timed_out",
+                        &argv.join(" "),
+                        Some(rc),
+                        duration_ms,
+                    );
                     return Err(ExecError::Timeout);
                 }
                 let cap = self.cfg.output_max_bytes.clamp(1024, 4_000_000);
@@ -1361,7 +1403,9 @@ impl<R: DockerRunner> SandboxManager<R> {
                 "5".to_string(),
                 self.container_id.clone(),
             ];
-            let _ = self.runner.run_docker(&stop_args, None, Duration::from_secs(20));
+            let _ = self
+                .runner
+                .run_docker(&stop_args, None, Duration::from_secs(20));
             res.container_removed = self.docker_rm(&self.container_id);
             if !self.network_name.is_empty() {
                 let _ = self.docker_network_disconnect(&self.network_name, &self.container_id);
@@ -1419,7 +1463,11 @@ impl<R: DockerRunner> SandboxManager<R> {
         let rec = append_evidence(&mut self.audit_chain, &self.run_id, "sandbox_audit", &body);
         if self.workspace.is_dir() {
             let audit_file = self.workspace.join("exploit_audit.jsonl");
-            if let Ok(mut f) = OpenOptions::new().create(true).append(true).open(audit_file) {
+            if let Ok(mut f) = OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(audit_file)
+            {
                 if let Ok(line) = serde_json::to_string(&rec) {
                     let _ = writeln!(f, "{line}");
                 }

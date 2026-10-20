@@ -15,6 +15,11 @@ message ExecRequest {
   bool require_allowlist = 6;     // fail closed when true and union empty
   uint64 timeout_seconds = 7;     // 1..3600
   uint64 max_output_bytes = 8;    // capped 1KB..4MB
+  bool use_docker_sandbox = 9;    // true => disposable Docker worker + netns default-DROP
+  string run_id = 10;
+  string workspace_dir = 11;
+  string sandbox_image = 12;
+  string tool_name = 13;
 }
 
 message ExecResult {

@@ -86,3 +86,58 @@ func (c *Client) Health() error {
 	}
 	return nil
 }
+
+// SandboxStatus queries the sidecar's Docker sandbox readiness (daemon + image).
+func (c *Client) SandboxStatus() (map[string]any, error) {
+	resp, err := c.Call("sandbox_status", map[string]any{})
+	if err != nil {
+		return nil, err
+	}
+	if !resp.OK {
+		if resp.Error != nil {
+			return nil, fmt.Errorf("%s: %s", resp.Error.Code, resp.Error.Message)
+		}
+		return nil, fmt.Errorf("sandbox_status failed")
+	}
+	return resp.Result, nil
+}
+
+// SandboxRules renders the netns default-DROP ruleset for the given allowlist.
+func (c *Client) SandboxRules(allowedTargets []string, gateway string) (map[string]any, error) {
+	resp, err := c.Call("sandbox_rules", map[string]any{
+		"allowed_targets": allowedTargets,
+		"gateway":         gateway,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if !resp.OK {
+		if resp.Error != nil {
+			return nil, fmt.Errorf("%s: %s", resp.Error.Code, resp.Error.Message)
+		}
+		return nil, fmt.Errorf("sandbox_rules failed")
+	}
+	return resp.Result, nil
+}
+
+// ExecSandboxed executes argv inside the disposable Docker sandbox via the
+// Rust sidecar, failing closed with a SANDBOX_* error code when isolation or
+// scope checks fail. Never falls back to host execution.
+func (c *Client) ExecSandboxed(runID, workspaceDir, image, toolName string, argv, targets, allowed []string, requireAllowlist bool, timeoutSec int) (Response, error) {
+	if timeoutSec <= 0 {
+		timeoutSec = 60
+	}
+	return c.Call("exec", map[string]any{
+		"argv":               argv,
+		"targets":            targets,
+		"allowed_targets":    allowed,
+		"require_allowlist":  requireAllowlist,
+		"timeout_seconds":    timeoutSec,
+		"max_output_bytes":   262144,
+		"use_docker_sandbox": true,
+		"run_id":             runID,
+		"workspace_dir":      workspaceDir,
+		"sandbox_image":      image,
+		"tool_name":          toolName,
+	})
+}
