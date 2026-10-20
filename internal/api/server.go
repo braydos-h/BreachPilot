@@ -1184,19 +1184,114 @@ func (s *Server) eventsSub(w http.ResponseWriter, r *http.Request, runID, sub st
 func (s *Server) decisionsSub(w http.ResponseWriter, r *http.Request, runID, sub string) {
 	rest := strings.TrimPrefix(sub, "decisions")
 	rest = strings.TrimPrefix(rest, "/")
+	decOut := func(d store.Decision) map[string]any {
+		return map[string]any{"id": d.ID, "run_id": d.RunID, "kind": d.Kind,
+			"prompt_text": d.PromptText, "required_text": d.RequiredText,
+			"status": d.Status, "answer": d.Answer,
+			"created_at": d.CreatedAt, "answered_at": d.AnsweredAt}
+	}
 	if rest == "" && r.Method == http.MethodGet {
-		writeJSON(w, 200, map[string]any{"decisions": []any{}})
+		decs, err := s.DB.ListDecisions(runID)
+		if err != nil {
+			writeErr(w, 500, "internal_error", "Lookup failed")
+			return
+		}
+		out := make([]map[string]any, 0, len(decs))
+		for _, d := range decs {
+			out = append(out, decOut(d))
+		}
+		writeJSON(w, 200, map[string]any{"decisions": out})
 		return
 	}
 	if rest != "" && r.Method == http.MethodGet {
-		writeJSON(w, 200, map[string]any{"id": rest, "run_id": runID, "kind": "start_confirm", "status": "pending"})
+		d, err := s.DB.GetDecision(runID, rest)
+		if err != nil || d == nil {
+			writeErr(w, 404, "not_found", "Decision not found")
+			return
+		}
+		writeJSON(w, 200, decOut(*d))
 		return
 	}
 	if rest != "" && r.Method == http.MethodPost {
-		writeJSON(w, 200, map[string]any{"decision_id": rest, "status": "answered"})
+		d, err := s.DB.GetDecision(runID, rest)
+		if err != nil || d == nil {
+			writeErr(w, 404, "not_found", "Decision not found")
+			return
+		}
+		if d.Status != "pending" {
+			writeErr(w, 409, "invalid_confirmation", "Decision already settled")
+			return
+		}
+		var body struct {
+			Answer string `json:"answer"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			writeErr(w, 400, "invalid_confirmation", "Body must include answer")
+			return
+		}
+		if !validDecisionAnswer(s, runID, d, body.Answer) {
+			writeErr(w, 400, "invalid_confirmation", "Answer does not confirm this decision")
+			return
+		}
+		if err := s.DB.AnswerDecision(d.ID, strings.TrimSpace(body.Answer)); err != nil {
+			writeErr(w, 500, "internal_error", "Answer failed")
+			return
+		}
+		_ = s.DB.LogAudit(runID, "decision_answered", d.Kind+" answered", "{}")
+		s.Events.GetOrCreate(runID).Append(runID, "decision_answered", map[string]any{"decision_id": d.ID, "kind": d.Kind})
+		if d.Kind == "start_confirm" {
+			_ = s.DB.SetRunState(runID, "queued")
+			s.Events.GetOrCreate(runID).Append(runID, "state", map[string]any{"state": "queued"})
+			if s.Runner != nil {
+				s.Runner.Ensure(runID)
+			}
+		}
+		writeJSON(w, 200, map[string]any{"decision_id": d.ID, "status": "answered"})
 		return
 	}
 	writeErr(w, 404, "not_found", "Not found")
+}
+
+// validDecisionAnswer mirrors the answer rules: attack start_confirm requires
+// the exact required text (destructive form); recon/fast accept y|yes or the
+// exact text; tool_approval requires ALLOW <target>; goal_select accepts any
+// known goal name.
+func validDecisionAnswer(s *Server, runID string, d *store.Decision, answer string) bool {
+	a := strings.TrimSpace(answer)
+	if a == "" {
+		return false
+	}
+	switch d.Kind {
+	case "start_confirm":
+		if d.RequiredText != "" && a == d.RequiredText {
+			return true
+		}
+		run, _ := s.DB.GetRun(runID)
+		mode, _ := run["mode"].(string)
+		if mode == "attack" {
+			return false
+		}
+		l := strings.ToLower(a)
+		return l == "y" || l == "yes"
+	case "tool_approval":
+		return d.RequiredText != "" && a == d.RequiredText
+	case "goal_select":
+		if goals.IsPreset(a) {
+			return true
+		}
+		customs, err := s.DB.ListCustomGoals()
+		if err != nil {
+			return false
+		}
+		for _, g := range customs {
+			if strings.EqualFold(g.Name, a) {
+				return true
+			}
+		}
+		return false
+	default:
+		return a == d.RequiredText
+	}
 }
 
 // ---- minimal RFC6455 server (stdlib-only) ----
