@@ -23,6 +23,7 @@ import (
 	"github.com/braydos-h/BreachPilot/internal/audit"
 	"github.com/braydos-h/BreachPilot/internal/auth"
 	"github.com/braydos-h/BreachPilot/internal/bench"
+	"github.com/braydos-h/BreachPilot/internal/browser"
 	"github.com/braydos-h/BreachPilot/internal/config"
 	"github.com/braydos-h/BreachPilot/internal/diag"
 	"github.com/braydos-h/BreachPilot/internal/events"
@@ -134,7 +135,7 @@ func (s *Server) health(w http.ResponseWriter, r *http.Request) {
 func (s *Server) capabilities(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{
 		"api_version": version,
-		"browser":     map[string]any{"enabled": false, "backend": "none", "available": false, "capabilities": []string{}},
+		"browser":     map[string]any{"enabled": s.Cfg.Browser.Enabled, "backend": "chromedp"},
 		"features":    []string{"runs", "events", "decisions", "graph", "benchmarks"},
 		"constraints": map[string]any{"max_concurrent_runs": 4, "loopback_only": true, "manual_tool_calls": true},
 		"run_options": map[string]any{"modes": []string{"recon", "attack", "fast"}, "kinds": []string{"agent"},
@@ -569,7 +570,25 @@ func sidecarReachable() bool {
 }
 
 func (s *Server) browser(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, 200, map[string]any{"enabled": false, "backend": "none", "available": false, "health": "disabled", "capabilities": []string{}, "config": map[string]any{}})
+	if r.Method != http.MethodGet {
+		writeErr(w, 405, "method_not_allowed", "Method not allowed")
+		return
+	}
+	// Real probe: can this host launch Chrome right now?
+	avail, version := browser.Available()
+	health := "disabled"
+	if s.Cfg.Browser.Enabled && avail {
+		health = "ok"
+	} else if s.Cfg.Browser.Enabled {
+		health = "no_chrome"
+	}
+	writeJSON(w, 200, map[string]any{
+		"enabled": s.Cfg.Browser.Enabled, "backend": "chromedp", "available": avail,
+		"health": health, "version": version,
+		"capabilities": []string{"navigate", "text", "screenshot"},
+		"config": map[string]any{"headless": s.Cfg.Browser.Headless, "max_sessions": s.Cfg.Browser.MaxSessions,
+			"allow_mutating_actions": false},
+	})
 }
 
 func (s *Server) goals(w http.ResponseWriter, r *http.Request) {
@@ -852,7 +871,7 @@ func (s *Server) opsSummary(w http.ResponseWriter, r *http.Request) {
 		"killchain": map[string]any{"enabled": true, "goal_state": "standard_authorized"},
 		"snapshots": map[string]any{"enabled": false},
 		"eval":      map[string]any{"enabled": true},
-		"browser":   map[string]any{"enabled": false},
+		"browser":   map[string]any{"enabled": s.Cfg.Browser.Enabled},
 		"provider":  map[string]any{"active": s.Cfg.Models.Provider},
 		"sandbox":   map[string]any{"enabled": s.Cfg.Sandbox.Enabled, "sidecar_reachable": sidecarReachable()},
 	})
@@ -928,11 +947,11 @@ func (s *Server) benchmarksSub(w http.ResponseWriter, r *http.Request) {
 		return
 	case rest == "run" && r.Method == http.MethodPost:
 		var body struct {
-			Suite          string `json:"suite"`
+			Suite          string   `json:"suite"`
 			Scenarios      []string `json:"scenarios"`
 			Tags           []string `json:"tags"`
-			Trials         int    `json:"trials"`
-			TimeoutSeconds int    `json:"timeout_seconds"`
+			Trials         int      `json:"trials"`
+			TimeoutSeconds int      `json:"timeout_seconds"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Suite == "" {
 			writeErr(w, 400, "missing_suite", "Body must include suite")
@@ -1011,8 +1030,8 @@ func (s *Server) benchmarksSub(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeJSON(w, 200, map[string]any{
-			"run_a": map[string]any{"run_id": a.RunID, "suite": a.Suite, "summary": a.Summary},
-			"run_b": map[string]any{"run_id": b.RunID, "suite": b.Suite, "summary": b.Summary},
+			"run_a":      map[string]any{"run_id": a.RunID, "suite": a.Suite, "summary": a.Summary},
+			"run_b":      map[string]any{"run_id": b.RunID, "suite": b.Suite, "summary": b.Summary},
 			"comparison": findings})
 		return
 	}

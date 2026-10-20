@@ -9,6 +9,7 @@ package bench
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -37,13 +38,13 @@ type Scenario struct {
 
 // TrialResult is one trial outcome.
 type TrialResult struct {
-	TrialID    string  `json:"trial_id"`
-	ScenarioID string  `json:"scenario_id"`
-	Status     string  `json:"status"` // verified | failed | scope_violation
-	Solved     bool    `json:"solved"`
-	DurationMs int64   `json:"duration_ms"`
-	Error      string  `json:"error,omitempty"`
-	OpenPorts  []int   `json:"open_ports,omitempty"`
+	TrialID    string `json:"trial_id"`
+	ScenarioID string `json:"scenario_id"`
+	Status     string `json:"status"` // verified | failed | scope_violation
+	Solved     bool   `json:"solved"`
+	DurationMs int64  `json:"duration_ms"`
+	Error      string `json:"error,omitempty"`
+	OpenPorts  []int  `json:"open_ports,omitempty"`
 }
 
 // Summary mirrors RunSummary at the native subset.
@@ -54,20 +55,20 @@ type Summary struct {
 	Timestamp           string  `json:"timestamp"`
 	TrialsTotal         int     `json:"trials_total"`
 	TrialsCompleted     int     `json:"trials_completed"`
-	VerifiedSuccessRate  float64 `json:"verified_success_rate"`
+	VerifiedSuccessRate float64 `json:"verified_success_rate"`
 	Solved              int     `json:"solved"`
 	ScopeViolationCount int     `json:"scope_violation_count"`
 }
 
 // Run is a stored benchmark run.
 type Run struct {
-	RunID     string        `json:"run_id"`
-	Suite     string        `json:"suite"`
-	State     string        `json:"state"`
+	RunID     string         `json:"run_id"`
+	Suite     string         `json:"suite"`
+	State     string         `json:"state"`
 	Config    map[string]any `json:"config"`
-	Trials    []TrialResult `json:"trials"`
-	Summary   Summary       `json:"summary"`
-	CreatedAt string        `json:"created_at"`
+	Trials    []TrialResult  `json:"trials"`
+	Summary   Summary        `json:"summary"`
+	CreatedAt string         `json:"created_at"`
 }
 
 // Service owns suites, runs, and the single-active guard.
@@ -128,7 +129,7 @@ func (s *Service) Start(suite string, trials int, timeoutSeconds int) (*Run, err
 	if s.active != "" {
 		active := s.active
 		s.mu.Unlock()
-		return nil, fmt.Errorf("conflict:" + active)
+		return nil, errors.New("conflict:" + active)
 	}
 	id := fmt.Sprintf("bench-%d", time.Now().UnixNano())
 	run := &Run{RunID: id, Suite: suite, State: "running",
@@ -216,7 +217,7 @@ func summarize(run *Run) Summary {
 		rate = float64(solved) / float64(len(run.Trials))
 	}
 	return Summary{RunID: run.RunID, Suite: run.Suite, Status: run.State,
-		Timestamp: time.Now().UTC().Format(time.RFC3339Nano),
+		Timestamp:   time.Now().UTC().Format(time.RFC3339Nano),
 		TrialsTotal: len(run.Trials), TrialsCompleted: completed,
 		VerifiedSuccessRate: rate, Solved: solved, ScopeViolationCount: scope}
 }
@@ -269,7 +270,7 @@ type Baseline struct {
 	RunID               string  `json:"run_id"`
 	Suite               string  `json:"suite"`
 	Timestamp           string  `json:"timestamp"`
-	VerifiedSuccessRate  float64 `json:"verified_success_rate"`
+	VerifiedSuccessRate float64 `json:"verified_success_rate"`
 	ScopeViolationCount int     `json:"scope_violation_count"`
 }
 

@@ -43,6 +43,11 @@ type Config struct {
 		Backend string `yaml:"backend"`
 		Image   string `yaml:"image"`
 	} `yaml:"sandbox"`
+	Browser struct {
+		Enabled     bool `yaml:"enabled"`
+		Headless    bool `yaml:"headless"`
+		MaxSessions int  `yaml:"max_sessions"`
+	} `yaml:"browser"`
 	Providers map[string]map[string]any `yaml:"providers"`
 }
 
@@ -62,6 +67,9 @@ func Default() Config {
 	c.Sandbox.Enabled = true
 	c.Sandbox.Backend = "docker"
 	c.Sandbox.Image = "breachpilot-sandbox:latest"
+	c.Browser.Enabled = false
+	c.Browser.Headless = true
+	c.Browser.MaxSessions = 2
 	return c
 }
 
@@ -90,6 +98,8 @@ func Load(path string) (Config, error) {
 	var rawMap map[string]any
 	if err := yaml.Unmarshal(raw, &rawMap); err == nil {
 		restoreBool(rawMap, []string{"sandbox", "enabled"}, &cfg.Sandbox.Enabled, def.Sandbox.Enabled)
+		restoreBool(rawMap, []string{"browser", "enabled"}, &cfg.Browser.Enabled, def.Browser.Enabled)
+		restoreBool(rawMap, []string{"browser", "headless"}, &cfg.Browser.Headless, def.Browser.Headless)
 		restoreBool(rawMap, []string{"api", "multi_operator"}, &cfg.API.MultiOperator, def.API.MultiOperator)
 		restoreBool(rawMap, []string{"api", "graph_route"}, &cfg.API.GraphRoute, def.API.GraphRoute)
 		restoreBool(rawMap, []string{"exploit", "require_explicit_allowlist"}, &cfg.Exploit.RequireExplicitAllowlist, def.Exploit.RequireExplicitAllowlist)
@@ -157,6 +167,9 @@ func merge(dst *Config, src Config) {
 	}
 	if src.Sandbox.Image != "" {
 		dst.Sandbox.Image = src.Sandbox.Image
+	}
+	if src.Browser.MaxSessions != 0 {
+		dst.Browser.MaxSessions = src.Browser.MaxSessions
 	}
 	// Booleans are fixed up in Load via restoreBool (absent key => default).
 	if src.Providers != nil {

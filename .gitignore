@@ -77,4 +77,4 @@ webui/*.tsbuildinfo
 x/
 /web
 /todo
-/rust/target/debug
+/rust/target/

@@ -9,6 +9,7 @@ import (
 
 func TestDoctorClean(t *testing.T) {
 	cfg := config.Default()
+	cfg.Exploit.AllowedTargets = []string{"127.0.0.1"}
 	code, out := diag.Doctor(cfg)
 	if code != 0 {
 		t.Fatalf("doctor exit %d: %s", code, out)
