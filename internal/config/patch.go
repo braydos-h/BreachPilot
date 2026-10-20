@@ -9,9 +9,10 @@ import (
 )
 
 // PatchFile atomically merges patch into the YAML file at path (recursive
-// map merge, scalars/lists replaced), fixes permissions to 0600, reloads
-// and validates. Unknown keys are preserved. Used by PATCH /config,
-// POST /models, POST /models/provider so those endpoints persist for real.
+// map merge, scalars/lists replaced). The merged result is validated BEFORE
+// any write, so a rejected patch leaves the file untouched. Used by
+// PATCH /config, POST /models, POST /models/provider so those endpoints
+// persist for real.
 func PatchFile(path string, patch map[string]any) (Config, error) {
 	clean := filepath.Clean(path)
 	raw, err := os.ReadFile(clean)
@@ -26,36 +27,58 @@ func PatchFile(path string, patch map[string]any) (Config, error) {
 		doc = map[string]any{}
 	}
 	mergeMaps(doc, patch)
-	out, err := yaml.Marshal(doc)
+	if _, err := decodeValidate(doc); err != nil {
+		return Config{}, err
+	}
+	if err := atomicWrite(clean, doc); err != nil {
+		return Config{}, err
+	}
+	return Load(clean)
+}
+
+// decodeValidate decodes a merged doc into Config and validates (loopback
+// bind, ports, provider). Called before any disk write.
+func decodeValidate(doc map[string]any) (Config, error) {
+	raw, err := yaml.Marshal(doc)
 	if err != nil {
 		return Config{}, fmt.Errorf("encode config: %w", err)
 	}
-	dir := filepath.Dir(clean)
-	tmp, err := os.CreateTemp(dir, ".config-*")
-	if err != nil {
+	var cfg = Default()
+	if err := yaml.Unmarshal(raw, &cfg); err != nil {
+		return Config{}, fmt.Errorf("invalid config shape: %w", err)
+	}
+	if err := cfg.Validate(); err != nil {
 		return Config{}, err
+	}
+	return cfg, nil
+}
+
+func atomicWrite(clean string, doc map[string]any) error {
+	out, err := yaml.Marshal(doc)
+	if err != nil {
+		return fmt.Errorf("encode config: %w", err)
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(clean), ".config-*")
+	if err != nil {
+		return err
 	}
 	tmpName := tmp.Name()
 	_ = tmp.Chmod(0o600)
 	if _, err := tmp.Write(out); err != nil {
 		_ = tmp.Close()
 		_ = os.Remove(tmpName)
-		return Config{}, err
+		return err
 	}
 	if err := tmp.Close(); err != nil {
 		_ = os.Remove(tmpName)
-		return Config{}, err
+		return err
 	}
 	if err := os.Rename(tmpName, clean); err != nil {
 		_ = os.Remove(tmpName)
-		return Config{}, err
+		return err
 	}
 	_ = os.Chmod(clean, 0o600)
-	cfg, err := Load(clean)
-	if err != nil {
-		return Config{}, err
-	}
-	return cfg, nil
+	return nil
 }
 
 func mergeMaps(dst, src map[string]any) {
@@ -91,27 +114,7 @@ func DeleteMapKey(path string, keyPath ...string) (Config, error) {
 		cur = next
 	}
 	delete(cur, keyPath[len(keyPath)-1])
-	out, err := yaml.Marshal(doc)
-	if err != nil {
-		return Config{}, err
-	}
-	tmp, err := os.CreateTemp(filepath.Dir(clean), ".config-*")
-	if err != nil {
-		return Config{}, err
-	}
-	tmpName := tmp.Name()
-	_ = tmp.Chmod(0o600)
-	if _, err := tmp.Write(out); err != nil {
-		_ = tmp.Close()
-		_ = os.Remove(tmpName)
-		return Config{}, err
-	}
-	if err := tmp.Close(); err != nil {
-		_ = os.Remove(tmpName)
-		return Config{}, err
-	}
-	if err := os.Rename(tmpName, clean); err != nil {
-		_ = os.Remove(tmpName)
+	if err := atomicWrite(clean, doc); err != nil {
 		return Config{}, err
 	}
 	return Load(clean)

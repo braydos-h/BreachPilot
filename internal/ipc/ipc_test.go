@@ -64,12 +64,12 @@ func TestLiveScopeDenied(t *testing.T) {
 	c := liveClient(t)
 	// Deterministic: gate denies before any process spawns, on any platform.
 	resp, err := c.Call("exec", map[string]any{
-		"argv":               []string{"echo", "hi"},
-		"targets":            []string{"192.168.99.9"},
-		"allowed_targets":    []string{"10.0.0.0/24"},
-		"require_allowlist":  true,
-		"timeout_seconds":    10,
-		"max_output_bytes":   65536,
+		"argv":              []string{"echo", "hi"},
+		"targets":           []string{"192.168.99.9"},
+		"allowed_targets":   []string{"10.0.0.0/24"},
+		"require_allowlist": true,
+		"timeout_seconds":   10,
+		"max_output_bytes":  65536,
 	})
 	if err != nil {
 		t.Fatalf("call: %v", err)
@@ -86,12 +86,12 @@ func TestLiveSpawnFailed(t *testing.T) {
 	c := liveClient(t)
 	// In-scope target, nonexistent binary: deterministic SPAWN_FAILED.
 	resp, err := c.Call("exec", map[string]any{
-		"argv":               []string{"definitely-not-a-binary-xyz"},
-		"targets":            []string{},
-		"allowed_targets":    []string{},
-		"require_allowlist":  false,
-		"timeout_seconds":    10,
-		"max_output_bytes":   65536,
+		"argv":              []string{"definitely-not-a-binary-xyz"},
+		"targets":           []string{},
+		"allowed_targets":   []string{},
+		"require_allowlist": false,
+		"timeout_seconds":   10,
+		"max_output_bytes":  65536,
 	})
 	if err != nil {
 		t.Fatalf("call: %v", err)

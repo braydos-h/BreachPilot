@@ -73,7 +73,9 @@ func TestDecisionLifecycle(t *testing.T) {
 	if wrong, _ := db.GetDecision("other", "d1"); wrong != nil {
 		t.Fatal("cross-run decision access must return nil")
 	}
-	_ = db.CreateDecision("d2", "r1", "goal_select", "Pick", "")
+	if _, err := db.CreateDecision("d2", "r1", "goal_select", "Pick", ""); err != nil {
+		t.Fatal(err)
+	}
 	if err := db.CancelDecisions("r1"); err != nil {
 		t.Fatal(err)
 	}

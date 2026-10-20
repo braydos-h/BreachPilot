@@ -267,8 +267,16 @@ func TestProvidersHonest(t *testing.T) {
 	s, token := testServerWithFiles(t)
 	rec := doReq(t, s.Handler(), "GET", "/api/v1/providers", token, "")
 	chatgpt, _ := decode(t, rec)["chatgpt"].(map[string]any)
-	if chatgpt["authenticated"] != false {
-		t.Fatalf("no auth file must read false: %v", chatgpt)
+	// Authenticated iff a candidate auth file exists (mirrors the backend:
+	// file existence only, never contents). This box may or may not have one.
+	wantAuth := false
+	if home, herr := os.UserHomeDir(); herr == nil {
+		if _, serr := os.Stat(home + "/.codex/auth.json"); serr == nil {
+			wantAuth = true
+		}
+	}
+	if chatgpt["authenticated"] != wantAuth {
+		t.Fatalf("authenticated=%v, want %v (file-existence semantics): %v", chatgpt["authenticated"], wantAuth, chatgpt)
 	}
 	rec = doReq(t, s.Handler(), "POST", "/api/v1/providers/chatgpt/proxy/stop", token, "")
 	v := decode(t, rec)

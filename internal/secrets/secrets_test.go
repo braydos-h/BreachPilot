@@ -3,6 +3,7 @@ package secrets_test
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/braydos-h/BreachPilot/internal/secrets"
@@ -26,7 +27,9 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 	}
 	_ = os.Unsetenv("NVD_API_KEY")
 	fi, _ := os.Stat(p)
-	if fi.Mode().Perm()&0o077 != 0 {
+	// Windows Go only honours the read-only bit: 0600 is best-effort there
+	// (same caveat as the Python implementation). Enforce on POSIX.
+	if runtime.GOOS != "windows" && fi.Mode().Perm()&0o077 != 0 {
 		t.Fatalf("store must be 0600, got %o", fi.Mode().Perm())
 	}
 }

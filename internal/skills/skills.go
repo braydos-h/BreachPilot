@@ -16,18 +16,18 @@ import (
 // Skill is the API-facing metadata. Body holds the full markdown for the
 // detail route; List responses omit it (caller controls serialization).
 type Skill struct {
-	Name       string   `json:"name"`
-	Description string  `json:"description"`
-	Body       string   `json:"body,omitempty"`
-	Sections   []string `json:"sections,omitempty"`
-	Tags       []string `json:"tags"`
-	References []string `json:"references,omitempty"`
-	NistCsf    []string `json:"nist_csf,omitempty"`
+	Name        string   `json:"name"`
+	Description string   `json:"description"`
+	Body        string   `json:"body,omitempty"`
+	Sections    []string `json:"sections,omitempty"`
+	Tags        []string `json:"tags"`
+	References  []string `json:"references,omitempty"`
+	NistCsf     []string `json:"nist_csf,omitempty"`
 	MitreAttack []string `json:"mitre_attack,omitempty"`
-	Domain     string   `json:"domain,omitempty"`
-	Subdomain  string   `json:"subdomain,omitempty"`
-	Version    string   `json:"version,omitempty"`
-	Dir        string   `json:"-"`
+	Domain      string   `json:"domain,omitempty"`
+	Subdomain   string   `json:"subdomain,omitempty"`
+	Version     string   `json:"version,omitempty"`
+	Dir         string   `json:"-"`
 }
 
 var nameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{1,63}$`)

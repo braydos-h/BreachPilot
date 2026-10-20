@@ -4,11 +4,11 @@ package goals
 
 // Preset is one static goal.
 type Preset struct {
-	Name            string `json:"name"`
-	Description     string `json:"description"`
-	Risk            string `json:"risk"`
-	Compatible      bool   `json:"compatible"`
-	Source          string `json:"source"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Risk        string `json:"risk"`
+	Compatible  bool   `json:"compatible"`
+	Source      string `json:"source"`
 }
 
 // Presets in engine order.

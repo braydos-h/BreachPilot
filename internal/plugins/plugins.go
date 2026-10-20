@@ -15,17 +15,17 @@ import (
 
 // Plugin is the API-facing manifest.
 type Plugin struct {
-	Name            string   `json:"name"`
-	Version         string   `json:"version"`
-	Description     string   `json:"description"`
-	Author          string   `json:"author"`
-	Capabilities    []string `json:"capabilities"`
-	Enabled         bool     `json:"enabled"`
-	NeedsHostFS     bool     `json:"needs_host_fs"`
-	NeedsNet        bool     `json:"needs_net"`
-	TargetTouching  bool     `json:"target_touching"`
+	Name             string   `json:"name"`
+	Version          string   `json:"version"`
+	Description      string   `json:"description"`
+	Author           string   `json:"author"`
+	Capabilities     []string `json:"capabilities"`
+	Enabled          bool     `json:"enabled"`
+	NeedsHostFS      bool     `json:"needs_host_fs"`
+	NeedsNet         bool     `json:"needs_net"`
+	TargetTouching   bool     `json:"target_touching"`
 	ProvidesMCPTools []string `json:"provides_mcp_tools"`
-	Dir             string   `json:"-"`
+	Dir              string   `json:"-"`
 }
 
 // Discover scans dir (default "plugins") for */plugin.yaml manifests.

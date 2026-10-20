@@ -6,6 +6,7 @@ package allowlist
 
 import (
 	"net"
+	"os"
 	"strings"
 )
 
@@ -42,6 +43,33 @@ func CheckAll(targets []string, entries []string, required bool) bool {
 		}
 	}
 	return true
+}
+
+// EffectiveEntries returns the union of config entries and the documented
+// environment widenings: EXPLOIT_TARGET, EXPLOIT_TARGET_IP,
+// EXPLOIT_TARGET_DOMAIN, EXPLOIT_DISCOVERED_TARGETS, EXPLOIT_ALLOWED_TARGETS.
+// Values may be comma/space separated. Mirrors the _env_union_entries rule:
+// env widens the lock, never silently — callers log the union.
+func EffectiveEntries(configured []string) []string {
+	seen := map[string]bool{}
+	var out []string
+	add := func(v string) {
+		for _, part := range strings.FieldsFunc(v, func(r rune) bool { return r == ',' || r == ' ' || r == '\n' || r == '\t' }) {
+			p := strings.TrimSpace(part)
+			if p == "" || seen[p] {
+				continue
+			}
+			seen[p] = true
+			out = append(out, p)
+		}
+	}
+	for _, e := range configured {
+		add(e)
+	}
+	for _, key := range []string{"EXPLOIT_TARGET", "EXPLOIT_TARGET_IP", "EXPLOIT_TARGET_DOMAIN", "EXPLOIT_DISCOVERED_TARGETS", "EXPLOIT_ALLOWED_TARGETS", "ALLOWED_TARGETS"} {
+		add(os.Getenv(key))
+	}
+	return out
 }
 
 func matchOne(target string, ip net.IP, entry string) bool {

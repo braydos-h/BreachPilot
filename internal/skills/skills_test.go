@@ -68,14 +68,15 @@ func TestDiscoverListSearchGet(t *testing.T) {
 func TestCreateDeleteRoundTrip(t *testing.T) {
 	root := t.TempDir()
 	st := skills.NewStore([]string{root})
-	sk, err := st.Create("my-skill", sampleSkill)
+	createdMD := "---\nname: my-skill\ndescription: Mine.\ntags: [x]\n---\n# Mine\n"
+	sk, err := st.Create("my-skill", createdMD)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if sk.Name != "port-scan-basics" {
+	if sk.Name != "my-skill" {
 		t.Fatalf("created: %+v", sk)
 	}
-	if _, err := st.Create("my-skill", sampleSkill); err == nil {
+	if _, err := st.Create("my-skill", createdMD); err == nil {
 		t.Fatal("duplicate create must fail")
 	}
 	if err := st.Delete("my-skill"); err != nil {
