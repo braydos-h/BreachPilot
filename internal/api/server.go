@@ -11,6 +11,8 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"os"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -18,6 +20,11 @@ import (
 	"github.com/braydos-h/BreachPilot/internal/auth"
 	"github.com/braydos-h/BreachPilot/internal/config"
 	"github.com/braydos-h/BreachPilot/internal/events"
+	"github.com/braydos-h/BreachPilot/internal/goals"
+	"github.com/braydos-h/BreachPilot/internal/ollama"
+	"github.com/braydos-h/BreachPilot/internal/plugins"
+	nativeSecrets "github.com/braydos-h/BreachPilot/internal/secrets"
+	"github.com/braydos-h/BreachPilot/internal/skills"
 	"github.com/braydos-h/BreachPilot/internal/store"
 )
 
@@ -30,11 +37,18 @@ type Server struct {
 	DB     *store.DB
 	Events *events.Registry
 	mux    *http.ServeMux
+	// ConfigPath is the file PATCH /config and model mutations persist to.
+	ConfigPath string
+	// SkillsRoots feeds skill discovery (default ["skills"]).
+	SkillsRoots []string
+	// SecretsPath overrides the secr.json location (default secrets.Path()).
+	SecretsPath string
 }
 
 // New builds routes.
 func New(cfg config.Config, token string, db *store.DB, reg *events.Registry) *Server {
-	s := &Server{Cfg: cfg, Token: token, DB: db, Events: reg, mux: http.NewServeMux()}
+	s := &Server{Cfg: cfg, Token: token, DB: db, Events: reg, mux: http.NewServeMux(),
+		ConfigPath: "config.yaml", SkillsRoots: []string{"skills"}}
 	s.routes()
 	return s
 }
@@ -62,6 +76,7 @@ func (s *Server) routes() {
 	m.HandleFunc("/api/v1/models", s.models)
 	m.HandleFunc("/api/v1/models/", s.modelsSub)
 	m.HandleFunc("/api/v1/providers", s.providers)
+	m.HandleFunc("/api/v1/providers/", s.providersSub)
 	m.HandleFunc("/api/v1/system/info", s.sysInfo)
 	m.HandleFunc("/api/v1/system/telemetry", s.telemetry)
 	m.HandleFunc("/api/v1/system/memory", s.memory)
@@ -112,27 +127,74 @@ func (s *Server) configHandler(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
 		// Redacted: never return provider keys or tokens.
-		writeJSON(w, 200, map[string]any{
-			"api":     map[string]any{"host": s.Cfg.API.Host, "port": s.Cfg.API.Port, "multi_operator": s.Cfg.API.MultiOperator},
-			"models":  map[string]any{"provider": s.Cfg.Models.Provider, "default_alias": s.Cfg.Models.DefaultAlias, "registry": s.Cfg.Models.Registry},
-			"sandbox": map[string]any{"enabled": s.Cfg.Sandbox.Enabled, "backend": s.Cfg.Sandbox.Backend, "image": s.Cfg.Sandbox.Image},
-			"exploit": map[string]any{"allowed_targets": s.Cfg.Exploit.AllowedTargets, "workspace_dir": s.Cfg.Exploit.WorkspaceDir},
-		})
+		writeJSON(w, 200, redactedConfig(s.Cfg))
 	case http.MethodPatch:
-		writeJSON(w, 200, map[string]any{"status": "ok", "config": map[string]any{}})
+		var patch map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&patch); err != nil || patch == nil {
+			writeErr(w, 400, "invalid_config", "Body must be a JSON object")
+			return
+		}
+		cfg, err := config.PatchFile(s.ConfigPath, patch)
+		if err != nil {
+			writeErr(w, 400, "config_invalid", err.Error())
+			return
+		}
+		s.Cfg = cfg
+		writeJSON(w, 200, map[string]any{"status": "ok", "config": redactedConfig(cfg)})
 	default:
 		writeErr(w, 405, "method_not_allowed", "Method not allowed")
 	}
 }
 
+func redactedConfig(cfg config.Config) map[string]any {
+	return map[string]any{
+		"api":     map[string]any{"host": cfg.API.Host, "port": cfg.API.Port, "multi_operator": cfg.API.MultiOperator},
+		"models":  map[string]any{"provider": cfg.Models.Provider, "default_alias": cfg.Models.DefaultAlias, "registry": cfg.Models.Registry},
+		"sandbox": map[string]any{"enabled": cfg.Sandbox.Enabled, "backend": cfg.Sandbox.Backend, "image": cfg.Sandbox.Image},
+		"exploit": map[string]any{"allowed_targets": cfg.Exploit.AllowedTargets, "workspace_dir": cfg.Exploit.WorkspaceDir},
+	}
+}
+
 func (s *Server) configSchema(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, 200, map[string]any{"schema": map[string]any{"type": "object"}})
+	writeJSON(w, 200, map[string]any{"schema": map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"api":     map[string]any{"type": "object", "properties": map[string]any{"host": map[string]any{"type": "string"}, "port": map[string]any{"type": "integer"}}},
+			"models":  map[string]any{"type": "object", "properties": map[string]any{"provider": map[string]any{"type": "string", "enum": []string{"ollama", "opencode_go", "chatgpt", "none"}}, "default_alias": map[string]any{"type": "string"}}},
+			"exploit": map[string]any{"type": "object", "properties": map[string]any{"allowed_targets": map[string]any{"type": "array", "items": map[string]any{"type": "string"}}, "require_explicit_allowlist": map[string]any{"type": "boolean"}}},
+			"sandbox": map[string]any{"type": "object", "properties": map[string]any{"enabled": map[string]any{"type": "boolean"}, "image": map[string]any{"type": "string"}}},
+		},
+	}})
+}
+
+func (s *Server) secretsPath() string {
+	if s.SecretsPath != "" {
+		return s.SecretsPath
+	}
+	return nativeSecrets.Path()
 }
 
 func (s *Server) secrets(w http.ResponseWriter, r *http.Request) {
+	// Key universe mirrors the Python route: config-driven names plus the
+	// compiled-in defaults (ollama/opencode/research/serpapi/nvd/github).
+	names := append([]string{}, nativeSecrets.KnownKeyEnvs...)
+	names = append(names, ollamaKeyEnv(s.Cfg), openCodeKeyEnv(s.Cfg))
 	switch r.Method {
 	case http.MethodGet:
-		writeJSON(w, 200, map[string]any{"keys": map[string]any{}})
+		stored, err := nativeSecrets.Load(s.secretsPath())
+		if err != nil {
+			writeErr(w, 500, "internal_error", "Key store unreadable")
+			return
+		}
+		keys := map[string]any{}
+		for _, n := range names {
+			if _, ok := stored[n]; ok {
+				keys[n] = "configured"
+			} else {
+				keys[n] = "missing"
+			}
+		}
+		writeJSON(w, 200, map[string]any{"keys": keys})
 	case http.MethodPut:
 		var body struct {
 			Secrets map[string]string `json:"secrets"`
@@ -141,14 +203,46 @@ func (s *Server) secrets(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, 400, "invalid_secrets", "Body must be {secrets: {NAME: value}}")
 			return
 		}
-		keys := []string{}
-		for k := range body.Secrets {
-			keys = append(keys, k)
+		allowed := map[string]bool{}
+		for _, n := range names {
+			allowed[n] = true
 		}
-		writeJSON(w, 200, map[string]any{"status": "ok", "written": keys})
+		for k := range body.Secrets {
+			if !allowed[k] {
+				writeErr(w, 400, "invalid_secrets", "Unknown key name: "+k)
+				return
+			}
+		}
+		written, err := nativeSecrets.Save(s.secretsPath(), body.Secrets)
+		if err != nil {
+			writeErr(w, 400, "invalid_secrets", err.Error())
+			return
+		}
+		writeJSON(w, 200, map[string]any{"status": "ok", "written": written})
 	default:
 		writeErr(w, 405, "method_not_allowed", "Method not allowed")
 	}
+}
+
+func ollamaKeyEnv(cfg config.Config) string {
+	if cfg.Ollama.Host != "" {
+		_ = cfg
+	}
+	if v, ok := cfg.Providers["ollama"]; ok {
+		if e, ok := v["api_key_env"].(string); ok && e != "" {
+			return e
+		}
+	}
+	return "OLLAMA_API_KEY"
+}
+
+func openCodeKeyEnv(cfg config.Config) string {
+	if v, ok := cfg.Providers["opencode_go"]; ok {
+		if e, ok := v["api_key_env"].(string); ok && e != "" {
+			return e
+		}
+	}
+	return "OPENCODE_GO_API_KEY"
 }
 
 func (s *Server) models(w http.ResponseWriter, r *http.Request) {
@@ -164,7 +258,18 @@ func (s *Server) models(w http.ResponseWriter, r *http.Request) {
 			Alias string `json:"alias"`
 			Model string `json:"model"`
 		}
-		_ = json.NewDecoder(r.Body).Decode(&body)
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Alias == "" || body.Model == "" {
+			writeErr(w, 400, "invalid_model", "Body must include alias and model")
+			return
+		}
+		cfg, err := config.PatchFile(s.ConfigPath, map[string]any{
+			"models": map[string]any{"registry": map[string]any{body.Alias: body.Model}},
+		})
+		if err != nil {
+			writeErr(w, 400, "config_invalid", err.Error())
+			return
+		}
+		s.Cfg = cfg
 		writeJSON(w, 200, map[string]any{"status": "ok", "alias": body.Alias, "model": body.Model, "registry": s.Cfg.Models.Registry})
 	default:
 		writeErr(w, 405, "method_not_allowed", "Method not allowed")
@@ -181,18 +286,87 @@ func (s *Server) modelsSub(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewDecoder(r.Body).Decode(&body)
 		switch body.Provider {
 		case "ollama", "opencode_go", "chatgpt", "none":
+			cfg, err := config.PatchFile(s.ConfigPath, map[string]any{"models": map[string]any{"provider": body.Provider}})
+			if err != nil {
+				writeErr(w, 400, "config_invalid", err.Error())
+				return
+			}
+			s.Cfg = cfg
 			writeJSON(w, 200, map[string]any{"status": "ok", "provider": body.Provider, "registered_providers": []string{"ollama", "opencode_go", "chatgpt"}})
 		default:
 			writeErr(w, 400, "invalid_provider", "Unknown provider")
 		}
 	case p == "refresh" && r.Method == http.MethodPost:
-		writeJSON(w, 200, map[string]any{"ok": true, "registry": s.Cfg.Models.Registry, "persisted": false})
+		if s.Cfg.Models.Provider != "ollama" {
+			writeErr(w, 400, "invalid_provider", "Refresh is only supported for the ollama provider")
+			return
+		}
+		available, err := ollama.ListModels(s.Cfg.Ollama.Host, ollamaKeyEnv(s.Cfg), 5*time.Second)
+		if err != nil {
+			writeJSON(w, 200, map[string]any{"ok": false, "host": s.Cfg.Ollama.Host, "registry": s.Cfg.Models.Registry, "persisted": false, "error": err.Error()})
+			return
+		}
+		names := make([]string, 0, len(available))
+		for _, m := range available {
+			names = append(names, m.Name)
+		}
+		updates := ollama.ComputeUpdates(s.Cfg.Models.Registry, names)
+		applied := map[string]any{}
+		for alias, u := range updates {
+			applied[alias] = map[string]any{"old": u.Old, "new": u.New}
+		}
+		persisted := false
+		if len(applied) > 0 {
+			regPatch := map[string]any{}
+			for alias, u := range updates {
+				regPatch[alias] = u.New
+			}
+			if cfg, err := config.PatchFile(s.ConfigPath, map[string]any{"models": map[string]any{"registry": regPatch}}); err == nil {
+				s.Cfg = cfg
+				persisted = true
+			}
+		}
+		writeJSON(w, 200, map[string]any{"ok": true, "host": s.Cfg.Ollama.Host, "available_count": len(names), "updates": applied, "registry": s.Cfg.Models.Registry, "persisted": persisted})
 	case p == "live" && r.Method == http.MethodGet:
-		writeJSON(w, 200, map[string]any{"models": []string{}, "source": "registry"})
-	case strings.HasPrefix(p, "chatgpt/") || strings.HasPrefix(p, "opencode_go"):
-		writeJSON(w, 200, map[string]any{"ok": true})
+		if s.Cfg.Models.Provider != "ollama" {
+			models := []string{}
+			for _, m := range s.Cfg.Models.Registry {
+				models = append(models, m)
+			}
+			writeJSON(w, 200, map[string]any{"models": models, "source": "registry"})
+			return
+		}
+		available, err := ollama.ListModels(s.Cfg.Ollama.Host, ollamaKeyEnv(s.Cfg), 5*time.Second)
+		if err != nil {
+			models := []string{}
+			for _, m := range s.Cfg.Models.Registry {
+				models = append(models, m)
+			}
+			writeJSON(w, 503, map[string]any{"models": models, "source": "registry", "error": err.Error()})
+			return
+		}
+		names := make([]string, 0, len(available))
+		for _, m := range available {
+			names = append(names, m.Name)
+		}
+		writeJSON(w, 200, map[string]any{"models": names, "source": "live"})
 	case r.Method == http.MethodDelete:
-		writeJSON(w, 200, map[string]any{"status": "ok", "deleted": true})
+		alias := p
+		if alias == "" {
+			writeErr(w, 400, "invalid_model", "Missing alias")
+			return
+		}
+		if alias == s.Cfg.Models.DefaultAlias {
+			writeErr(w, 400, "invalid_model", "Cannot delete the default alias")
+			return
+		}
+		cfg, err := config.DeleteMapKey(s.ConfigPath, "models", "registry", alias)
+		if err != nil {
+			writeErr(w, 400, "config_invalid", err.Error())
+			return
+		}
+		s.Cfg = cfg
+		writeJSON(w, 200, map[string]any{"status": "ok", "alias": alias, "deleted": true})
 	default:
 		writeErr(w, 404, "not_found", "Not found")
 	}
