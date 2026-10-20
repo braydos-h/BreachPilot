@@ -125,6 +125,7 @@ func serve(cfg config.Config, configPath string) {
 	srv := api.New(cfg, token, db, reg)
 	srv.ConfigPath = configPath
 	srv.Runner = runner.New(db, reg, "reports", cfg.Exploit.AllowedTargets, cfg.Exploit.RequireExplicitAllowlist, 4)
+	srv.Runner.Attack = runner.NativeAttack
 	addr := fmt.Sprintf("%s:%d", cfg.API.Host, cfg.API.Port)
 	fmt.Printf("BreachPilot native daemon on http://%s\n", addr)
 	_ = http.ListenAndServe(addr, srv.Handler())

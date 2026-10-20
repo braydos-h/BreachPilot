@@ -5,6 +5,7 @@
 package api
 
 import (
+	"context"
 	"crypto/sha1"
 	"encoding/base64"
 	"encoding/json"
@@ -12,15 +13,19 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/braydos-h/BreachPilot/internal/allowlist"
+	"github.com/braydos-h/BreachPilot/internal/audit"
 	"github.com/braydos-h/BreachPilot/internal/auth"
 	"github.com/braydos-h/BreachPilot/internal/config"
 	"github.com/braydos-h/BreachPilot/internal/events"
 	"github.com/braydos-h/BreachPilot/internal/goals"
+	"github.com/braydos-h/BreachPilot/internal/modules"
 	"github.com/braydos-h/BreachPilot/internal/ollama"
 	"github.com/braydos-h/BreachPilot/internal/plugins"
 	"github.com/braydos-h/BreachPilot/internal/recon"
@@ -47,6 +52,8 @@ type Server struct {
 	SecretsPath string
 	// PluginsDir feeds plugin discovery (default "plugins", repo-root relative).
 	PluginsDir string
+	// ReportsDir locates per-run artifacts (default "reports").
+	ReportsDir string
 	// Runner executes confirmed runs. Nil disables background execution
 	// (decisions still persist; runs stay queued).
 	Runner *runner.Runner
@@ -55,7 +62,8 @@ type Server struct {
 // New builds routes.
 func New(cfg config.Config, token string, db *store.DB, reg *events.Registry) *Server {
 	s := &Server{Cfg: cfg, Token: token, DB: db, Events: reg, mux: http.NewServeMux(),
-		ConfigPath: "config.yaml", SkillsRoots: []string{"skills"}, PluginsDir: "plugins"}
+		ConfigPath: "config.yaml", SkillsRoots: []string{"skills"}, PluginsDir: "plugins",
+		ReportsDir: "reports"}
 	s.routes()
 	return s
 }
@@ -1065,15 +1073,31 @@ func (s *Server) runsSub(w http.ResponseWriter, r *http.Request) {
 	case sub == "title" && r.Method == http.MethodPost:
 		writeJSON(w, 200, map[string]any{"run_id": runID, "title": runID, "regenerated": false})
 	case sub == "tools" && r.Method == http.MethodGet:
-		writeJSON(w, 200, map[string]any{"tools": []any{}})
+		list := []map[string]any{}
+		for _, t := range modules.List() {
+			list = append(list, map[string]any{"name": t.Name, "description": t.Description, "family": t.Family})
+		}
+		writeJSON(w, 200, map[string]any{"tools": list})
+	case strings.HasPrefix(sub, "tools/") && strings.HasSuffix(sub, "/calls") && r.Method == http.MethodPost:
+		s.toolCall(w, r, runID, run, strings.TrimSuffix(strings.TrimPrefix(sub, "tools/"), "/calls"))
 	case sub == "artifacts" && r.Method == http.MethodGet:
-		writeJSON(w, 200, map[string]any{"artifacts": []any{}})
+		writeJSON(w, 200, map[string]any{"artifacts": listArtifacts(s.runDir(runID))})
 	case sub == "audit" && r.Method == http.MethodGet:
-		writeJSON(w, 200, map[string]any{"records": []any{}, "chain_valid": true, "chain_reason": "go-native"})
+		records, _ := audit.List(s.runDir(runID))
+		out := make([]map[string]any, 0, len(records))
+		for _, rec := range records {
+			out = append(out, map[string]any{"sequence": rec.Sequence, "timestamp": rec.Timestamp,
+				"run_id": rec.RunID, "tool_name": rec.Tool, "target": rec.Target,
+				"status": rec.Status, "attempt_id": rec.AttemptID, "hash": rec.Hash})
+		}
+		valid, reason, _ := audit.Verify(s.runDir(runID))
+		writeJSON(w, 200, map[string]any{"records": out, "chain_valid": valid, "chain_reason": reason})
 	case sub == "sandbox" && r.Method == http.MethodGet:
 		writeJSON(w, 200, map[string]any{"run_id": runID, "found": false, "config": map[string]any{"enabled": s.Cfg.Sandbox.Enabled}})
 	case sub == "proposed" && r.Method == http.MethodGet:
-		writeJSON(w, 200, map[string]any{"run_id": runID, "proposed": []any{}})
+		writeJSON(w, 200, map[string]any{"run_id": runID, "proposed": readProposed(s.runDir(runID))})
+	case sub == "decide" && r.Method == http.MethodPost:
+		s.hitlDecide(w, r, runID)
 	case sub == "swarm" && r.Method == http.MethodGet:
 		writeJSON(w, 200, map[string]any{"state": map[string]any{}})
 	case sub == "campaign" && r.Method == http.MethodGet:
@@ -1109,6 +1133,134 @@ func (s *Server) runsSub(w http.ResponseWriter, r *http.Request) {
 	default:
 		writeErr(w, 404, "not_found", "Not found")
 	}
+}
+
+func (s *Server) runDir(runID string) string {
+	base := s.ReportsDir
+	if base == "" {
+		base = "reports"
+	}
+	return filepath.Join(base, runID)
+}
+
+// toolCall executes one manual operator tool call with allowlist gating and
+// audit. Mirrors the call_tool policy gate: unknown tool -> 404,
+// out-of-scope target -> 403, non-running run -> 409, exec failure -> 500.
+func (s *Server) toolCall(w http.ResponseWriter, r *http.Request, runID string, run map[string]any, name string) {
+	tool, ok := modules.Registry[name]
+	if !ok {
+		writeErr(w, 404, "tool_not_found", "Unknown tool "+name)
+		return
+	}
+	st, _ := run["state"].(string)
+	if st != "running" {
+		writeErr(w, 409, "no_session", "Run is not executing (state "+st+")")
+		return
+	}
+	var body struct {
+		Arguments map[string]any `json:"arguments"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Arguments == nil {
+		writeErr(w, 400, "invalid_request", "Body must include arguments object")
+		return
+	}
+	target, _ := body.Arguments["target"].(string)
+	entries := allowlist.ApprovalEntries(s.Cfg.Exploit.AllowedTargets, nil)
+	if target == "" || !allowlist.Check(target, entries, s.Cfg.Exploit.RequireExplicitAllowlist) {
+		_, _ = audit.Append(s.runDir(runID), runID, name, target, "blocked", name, "manual")
+		s.Events.GetOrCreate(runID).Append(runID, "tool_denied", map[string]any{"tool": name, "target": target})
+		writeErr(w, 403, "tool_denied", "Target not in allowlist")
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
+	defer cancel()
+	res, err := tool.Run(ctx, body.Arguments, modules.Env{Entries: entries, Timeout: 60 * time.Second})
+	if err != nil {
+		_, _ = audit.Append(s.runDir(runID), runID, name, target, "failed", name, "manual")
+		writeErr(w, 500, "tool_error", err.Error())
+		return
+	}
+	_, _ = audit.Append(s.runDir(runID), runID, name, target, "completed", name, "manual")
+	_ = s.DB.LogAudit(runID, "tool_call", name+" completed", "{}")
+	s.Events.GetOrCreate(runID).Append(runID, "tool_result", map[string]any{"tool": name, "result": res})
+	writeJSON(w, 200, map[string]any{"tool": name, "result": res})
+}
+
+func readProposed(runDir string) []any {
+	raw, err := os.ReadFile(filepath.Join(runDir, "proposed.json"))
+	if err != nil {
+		return []any{}
+	}
+	var out []any
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return []any{}
+	}
+	return out
+}
+
+// hitlDecide records a human finding decision and emits hitl_decision.
+func (s *Server) hitlDecide(w http.ResponseWriter, r *http.Request, runID string) {
+	var body struct {
+		FindingID string `json:"finding_id"`
+		Decision  string `json:"decision"`
+		Note      string `json:"note"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.FindingID == "" || body.Decision == "" {
+		writeErr(w, 400, "invalid_request", "Body must include finding_id and decision")
+		return
+	}
+	path := filepath.Join(s.runDir(runID), "proposed.json")
+	raw, err := os.ReadFile(filepath.Clean(path))
+	if err != nil {
+		writeErr(w, 404, "not_found", "No proposed findings")
+		return
+	}
+	var findings []map[string]any
+	if err := json.Unmarshal(raw, &findings); err != nil {
+		writeErr(w, 500, "internal_error", "Findings unreadable")
+		return
+	}
+	found := false
+	for _, f := range findings {
+		if f["id"] == body.FindingID {
+			found = true
+			switch strings.ToLower(body.Decision) {
+			case "confirm", "confirmed", "accept":
+				f["status"] = "confirmed"
+			default:
+				f["status"] = "rejected"
+			}
+			f["decision"] = body.Decision
+			f["note"] = body.Note
+			f["actor"] = "human"
+		}
+	}
+	if !found {
+		writeErr(w, 404, "not_found", "Finding not found")
+		return
+	}
+	out, _ := json.MarshalIndent(findings, "", "  ")
+	_ = os.WriteFile(path, append(out, '\n'), 0o644)
+	_ = s.DB.LogAudit(runID, "hitl_decision", body.FindingID+" "+body.Decision, "{}")
+	s.Events.GetOrCreate(runID).Append(runID, "hitl_decision",
+		map[string]any{"finding_id": body.FindingID, "decision": body.Decision, "actor": "human"})
+	writeJSON(w, 200, map[string]any{"run_id": runID, "finding_id": body.FindingID, "finding": findings})
+}
+
+// listArtifacts mirrors the Python artifact whitelist over real files.
+func listArtifacts(runDir string) []map[string]any {
+	whitelist := []string{"session_summary.md", "run.json", "recon_assessment.json", "fast_recon.json",
+		"goal_suggestions.json", "activity.jsonl", "exploit_audit.jsonl", "events.jsonl",
+		"errors.jsonl", "session_error.log", "recon_first_error.log", "proposed.json"}
+	out := []map[string]any{}
+	for _, name := range whitelist {
+		fi, err := os.Stat(filepath.Join(runDir, name))
+		if err != nil || fi.IsDir() {
+			continue
+		}
+		out = append(out, map[string]any{"name": name, "bytes": fi.Size(), "exists": true})
+	}
+	return out
 }
 
 func (s *Server) eventsSub(w http.ResponseWriter, r *http.Request, runID, sub string) {
