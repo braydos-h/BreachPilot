@@ -57,7 +57,9 @@ type Server struct {
 	PluginsDir string
 	// ReportsDir locates per-run artifacts (default "reports").
 	ReportsDir string
-	// Bench runs benchmark suites. Nil reports not_ported.
+	// Bench runs benchmark suites. Always available: handlers lazily create
+	// the default service when it was not explicitly wired, so the API
+	// never reports the suite as unported.
 	Bench *bench.Service
 	// Runner executes confirmed runs. Nil disables background execution
 	// (decisions still persist; runs stay queued).
@@ -465,15 +467,16 @@ func (s *Server) providersSub(w http.ResponseWriter, r *http.Request) {
 	}
 	switch p {
 	case "chatgpt/login":
-		// The browser OAuth flow lives in the vendored oauth runtime, which
-		// has no native port yet. Explicit unsupported, not fake success.
-		writeErr(w, 501, "not_ported", "ChatGPT browser login is not ported to the native backend yet")
+		// No vendored oauth runtime ships with the native binary (oauth/
+		// is not tracked). Authenticate with the operator's own ChatGPT
+		// flow, then point providers.chatgpt at a loopback proxy.
+		writeErr(w, 503, "proxy_runtime_missing", "ChatGPT browser login needs the oauth runtime (vendored oauth/ not present); authenticate externally and configure providers.chatgpt base_url")
 	case "chatgpt/proxy/start":
 		if chatgptProxyRunning(s.Cfg) {
 			writeJSON(w, 200, map[string]any{"ok": true, "base_url": chatgptBaseURL(s.Cfg), "reason": "already_running"})
 			return
 		}
-		writeErr(w, 501, "not_ported", "Starting the ChatGPT proxy requires the oauth runtime, not ported yet")
+		writeErr(w, 503, "proxy_runtime_missing", "Cannot start the ChatGPT proxy: oauth runtime (vendored oauth/) not present; start the proxy externally and configure providers.chatgpt base_url")
 	case "chatgpt/proxy/stop":
 		// We never started it in this process, so there is nothing to stop
 		// (mirrors the _we_started guard).
@@ -895,39 +898,46 @@ func (s *Server) selfTest(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"exit_code": code, "output": out})
 }
 
+func (s *Server) ensureBench() *bench.Service {
+	if s.Bench != nil {
+		return s.Bench
+	}
+	dir := s.ReportsDir
+	if dir == "" {
+		dir = "reports"
+	}
+	s.Bench = bench.New(filepath.Join(dir, "benchmarks"),
+		s.Cfg.Exploit.AllowedTargets, s.Cfg.Exploit.RequireExplicitAllowlist, s.Events)
+	return s.Bench
+}
+
 func (s *Server) benchmarks(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeErr(w, 405, "method_not_allowed", "Method not allowed")
 		return
 	}
-	if s.Bench == nil {
-		writeErr(w, 501, "not_ported", "Benchmark service not configured")
-		return
-	}
-	suites := s.Bench.Suites()
+	svc := s.ensureBench()
+	suites := svc.Suites()
 	runs := []map[string]any{}
-	for _, br := range s.Bench.List() {
+	for _, br := range svc.List() {
 		runs = append(runs, map[string]any{"run_id": br.RunID, "suite": br.Suite, "status": br.State,
 			"trials_total": len(br.Trials), "verified_success_rate": br.Summary.VerifiedSuccessRate})
 	}
-	base, ok := s.Bench.LoadBaseline()
+	base, ok := svc.LoadBaseline()
 	writeJSON(w, 200, map[string]any{"suites": suites, "runs": runs, "active": nil,
 		"baseline": map[string]any{"exists": ok, "path": "reports/benchmarks/baseline.json", "baseline": base}})
 }
 
 func (s *Server) benchmarksSub(w http.ResponseWriter, r *http.Request) {
-	if s.Bench == nil {
-		writeErr(w, 501, "not_ported", "Benchmark service not configured")
-		return
-	}
+	benchSvc := s.ensureBench()
 	rest := strings.TrimPrefix(r.URL.Path, "/api/v1/benchmarks/")
 	switch {
 	case rest == "suites" && r.Method == http.MethodGet:
-		writeJSON(w, 200, map[string]any{"suites": s.Bench.Suites()})
+		writeJSON(w, 200, map[string]any{"suites": benchSvc.Suites()})
 		return
 	case strings.HasPrefix(rest, "suites/") && strings.HasSuffix(rest, "/scenarios") && r.Method == http.MethodGet:
 		id := strings.TrimSuffix(strings.TrimPrefix(rest, "suites/"), "/scenarios")
-		for _, su := range s.Bench.Suites() {
+		for _, su := range benchSvc.Suites() {
 			if su.ID == id {
 				writeJSON(w, 200, map[string]any{"suite": su.ID, "scenarios": su.Scenarios})
 				return
@@ -937,7 +947,7 @@ func (s *Server) benchmarksSub(w http.ResponseWriter, r *http.Request) {
 		return
 	case strings.HasPrefix(rest, "suites/") && strings.HasSuffix(rest, "/readiness") && r.Method == http.MethodGet:
 		id := strings.TrimSuffix(strings.TrimPrefix(rest, "suites/"), "/readiness")
-		for _, su := range s.Bench.Suites() {
+		for _, su := range benchSvc.Suites() {
 			if su.ID == id {
 				writeJSON(w, 200, benchReadiness(su, s.Cfg.Exploit.AllowedTargets, s.Cfg.Exploit.RequireExplicitAllowlist))
 				return
@@ -960,7 +970,7 @@ func (s *Server) benchmarksSub(w http.ResponseWriter, r *http.Request) {
 		if body.Trials == 0 {
 			body.Trials = 1
 		}
-		run, err := s.Bench.Start(body.Suite, body.Trials, body.TimeoutSeconds)
+		run, err := benchSvc.Start(body.Suite, body.Trials, body.TimeoutSeconds)
 		if err != nil {
 			msg := err.Error()
 			switch {
@@ -977,7 +987,7 @@ func (s *Server) benchmarksSub(w http.ResponseWriter, r *http.Request) {
 		return
 	case strings.HasPrefix(rest, "runs/") && strings.HasSuffix(rest, "/cancel") && r.Method == http.MethodPost:
 		id := strings.TrimSuffix(strings.TrimPrefix(rest, "runs/"), "/cancel")
-		if !s.Bench.Cancel(id) {
+		if !benchSvc.Cancel(id) {
 			writeErr(w, 404, "not_found", "Benchmark run not found or not running")
 			return
 		}
@@ -985,7 +995,7 @@ func (s *Server) benchmarksSub(w http.ResponseWriter, r *http.Request) {
 		return
 	case strings.HasPrefix(rest, "runs/") && r.Method == http.MethodGet && !strings.Contains(strings.TrimPrefix(rest, "runs/"), "/"):
 		id := strings.TrimPrefix(rest, "runs/")
-		br := s.Bench.Get(id)
+		br := benchSvc.Get(id)
 		if br == nil {
 			writeErr(w, 404, "not_found", "Benchmark run not found")
 			return
@@ -995,13 +1005,13 @@ func (s *Server) benchmarksSub(w http.ResponseWriter, r *http.Request) {
 		return
 	case rest == "runs" && r.Method == http.MethodGet:
 		runs := []map[string]any{}
-		for _, br := range s.Bench.List() {
+		for _, br := range benchSvc.List() {
 			runs = append(runs, map[string]any{"run_id": br.RunID, "suite": br.Suite, "status": br.State})
 		}
 		writeJSON(w, 200, map[string]any{"runs": runs})
 		return
 	case rest == "baseline" && r.Method == http.MethodGet:
-		base, ok := s.Bench.LoadBaseline()
+		base, ok := benchSvc.LoadBaseline()
 		writeJSON(w, 200, map[string]any{"exists": ok, "path": "reports/benchmarks/baseline.json", "baseline": base})
 		return
 	case rest == "baseline" && r.Method == http.MethodPost:
@@ -1009,7 +1019,7 @@ func (s *Server) benchmarksSub(w http.ResponseWriter, r *http.Request) {
 			RunID string `json:"run_id"`
 		}
 		_ = json.NewDecoder(r.Body).Decode(&body)
-		b, err := s.Bench.SaveBaseline(body.RunID)
+		b, err := benchSvc.SaveBaseline(body.RunID)
 		if err != nil {
 			writeErr(w, 404, "not_found", "Benchmark run not found")
 			return

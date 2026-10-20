@@ -17,6 +17,7 @@ try {
   if ($hits) { $hits | ForEach-Object { Write-Output $_.Line }; Write-Output "pending: Python references above"; $fail = $true }
   else { Write-Output "no Python references in runtime/install/CI paths" }
   $native = Get-ChildItem internal,rust/crates,cmd -Recurse -Include *.go,*.rs -ErrorAction SilentlyContinue |
+    Where-Object { $_.FullName -notmatch 'internal[\\/]zeropython[\\/]' } |
     Select-String -Pattern '"python3?"' | Select-Object -First 20
   if ($native) { $native | ForEach-Object { Write-Output $_.Line }; Write-Output "pending: native code invokes Python"; $fail = $true }
   else { Write-Output "native code does not invoke Python" }

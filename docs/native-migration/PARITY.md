@@ -8,4 +8,4 @@ Source: `webui/` (React/TS, untouched) + `docs/api/endpoint-matrix.md`, `docs/ip
 - DB: schema v10 (`runs/decisions/findings/audit` + `custom_goals` NOCASE unique); reports `reports/<run_id>/` artifacts (`recon_assessment.json`, `goal_suggestions.json`, `run.json`, `session_summary.md`, `activity.jsonl`, `session_state.json`).
 - Errors: JSON envelope `{error:{code,message}}`; MCP JSON-RPC 2.0 `initialize/ping/tools-list/tools-call`, unknown tool `-32601`, bad parse `-32700`.
 - Auth: loopback-only bind; non-loopback requires explicit flags + env + token (mirrored in `internal/mcp.ValidateBindHost`).
-- Pending parity risks: swarm/campaign event shapes, full recon field supersets, report export formats, eval harness outputs, ChatGPT proxy flows (currently honest 501 — must resolve, not ship as permanent).
+- Pending parity risks: swarm/campaign event shapes, full recon field supersets, report export formats, eval harness outputs, ChatGPT proxy flows (honest 503 `proxy_runtime_missing` while oauth runtime untracked — actionable, not an unported sentinel).

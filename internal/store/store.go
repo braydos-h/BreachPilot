@@ -22,8 +22,15 @@ CREATE TABLE IF NOT EXISTS runs (id TEXT PRIMARY KEY, state TEXT NOT NULL DEFAUL
 CREATE TABLE IF NOT EXISTS decisions (id TEXT PRIMARY KEY, run_id TEXT NOT NULL, kind TEXT NOT NULL DEFAULT '', prompt_text TEXT NOT NULL DEFAULT '', required_text TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'pending', answer TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, answered_at TEXT NOT NULL DEFAULT '');
 CREATE TABLE IF NOT EXISTS findings (id TEXT PRIMARY KEY, run_id TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'proposed', data_json TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS audit_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, run_id TEXT NOT NULL DEFAULT '', event_type TEXT NOT NULL DEFAULT '', message TEXT NOT NULL DEFAULT '', metadata TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS memories (id TEXT PRIMARY KEY, mission_id TEXT NOT NULL DEFAULT '', memory_type TEXT NOT NULL DEFAULT 'target', target TEXT NOT NULL DEFAULT '', fact TEXT NOT NULL DEFAULT '', tags_json TEXT NOT NULL DEFAULT '[]', confidence REAL NOT NULL DEFAULT 1.0, metadata_json TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS lessons (id TEXT PRIMARY KEY, mission_id TEXT NOT NULL DEFAULT '', target TEXT NOT NULL DEFAULT '', phase TEXT NOT NULL DEFAULT '', summary TEXT NOT NULL DEFAULT '', tags_json TEXT NOT NULL DEFAULT '[]', created_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS graph_nodes (id TEXT PRIMARY KEY, mission_id TEXT NOT NULL DEFAULT '', type TEXT NOT NULL DEFAULT '', value TEXT NOT NULL DEFAULT '', metadata_json TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS graph_edges (id TEXT PRIMARY KEY, mission_id TEXT NOT NULL DEFAULT '', from_node_id TEXT NOT NULL DEFAULT '', to_node_id TEXT NOT NULL DEFAULT '', relation TEXT NOT NULL DEFAULT '', metadata_json TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS idx_runs_state ON runs(state);
 CREATE INDEX IF NOT EXISTS idx_decisions_run ON decisions(run_id);
+CREATE INDEX IF NOT EXISTS idx_memories_mission ON memories(mission_id, target);
+CREATE INDEX IF NOT EXISTS idx_graph_nodes_mission ON graph_nodes(mission_id, type);
+CREATE INDEX IF NOT EXISTS idx_graph_edges_mission ON graph_edges(mission_id, relation);
 `
 
 // DB wraps the SQLite handle plus the reports dir for JSONL artifacts.

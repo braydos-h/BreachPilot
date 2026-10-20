@@ -292,8 +292,11 @@ func TestProvidersHonest(t *testing.T) {
 		t.Fatalf("stop: %s", rec.Body.String())
 	}
 	rec = doReq(t, s.Handler(), "POST", "/api/v1/providers/chatgpt/login", token, "")
-	if rec.Code != 501 {
-		t.Fatalf("login = %d, want explicit 501", rec.Code)
+	if rec.Code != 503 {
+		t.Fatalf("login = %d, want honest 503", rec.Code)
+	}
+	if v := decode(t, rec); v["error"] == nil || !strings.Contains(rec.Body.String(), "proxy_runtime_missing") {
+		t.Fatalf("login should carry proxy_runtime_missing, got %s", rec.Body.String())
 	}
 }
 

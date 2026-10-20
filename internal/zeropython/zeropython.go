@@ -91,7 +91,8 @@ func Scan(root string) (Report, error) {
 			}
 		}
 	}
-	// Native subprocess invocation of Python.
+	// Native subprocess invocation of Python (the gate's own scanner strings
+	// are excluded so the gate does not flag itself).
 	for _, dir := range []string{"internal", "cmd", filepath.Join("rust", "crates")} {
 		_ = filepath.WalkDir(filepath.Join(root, dir), func(p string, d os.DirEntry, err error) error {
 			if err != nil || d.IsDir() {
@@ -103,6 +104,10 @@ func Scan(root string) (Report, error) {
 			}
 			raw, err := os.ReadFile(p)
 			if err != nil {
+				return nil
+			}
+			rel, _ := filepath.Rel(root, p)
+			if filepath.ToSlash(rel) == "internal/zeropython/zeropython.go" {
 				return nil
 			}
 			s := string(raw)

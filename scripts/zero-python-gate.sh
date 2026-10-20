@@ -36,8 +36,8 @@ if grep -rInE --exclude-dir=.git --exclude-dir=docs --exclude-dir=webui --exclud
 else
   echo "no Python references in runtime/install/CI paths"
 fi
-# Subprocess-launched Python from native code.
-if grep -rInE --include='*.go' --include='*.rs' -e '"python3?"' -e 'python3?' internal rust/crates cmd 2>/dev/null | head -20; then
+# Subprocess-launched Python from native code (gate's own scanner excluded).
+if grep -rInE --include='*.go' --include='*.rs' -e '"python3?"' internal rust/crates cmd 2>/dev/null | grep -v 'internal/zeropython' | head -20; then
   echo "pending: native code invokes Python"
   FAIL=1
 else

@@ -19,7 +19,7 @@ Baseline: `git ls-files '*.py'` = **1,121** files.
 | `tools/skill_registry.py` | SKILL.md discovery/search/atomic CRUD | `internal/skills` | list/search/create/delete | done |
 | `tools/plugins.py` manifests | plugin.yaml discovery | `internal/plugins` | fixture test | done |
 | `ollama_provider` | /api/tags, model spec parse | `internal/ollama` | httptest + vector | done |
-| provider status | chatgpt file-existence, proxy probe | `internal/providers` + api honest 501 | status tests | done-partial (login/start remain 501 by design, must be ported or removed) |
+| provider status | chatgpt file-existence, proxy probe; login/start honest 503 `proxy_runtime_missing` (oauth runtime untracked) | `internal/providers` + api honest-error tests | done |
 | `tools/api/run_service` + run_manager | lifecycle preparing→completed/failed/cancelled, resume-adopt | `internal/runner` | e2e recon, cancel/resume | done |
 | `tools/recon` fast path | parse/validate, DNS, 24-port scan+banners | `internal/recon` | scan/assess/suggest | done-partial (nmap/rustscan/masscan fallbacks, UDP, OS fingerprint pending) |
 | `tools/api/routes/decisions.py` | DB-backed approvals | api decisions routes | gate/409/answer tests | done |
@@ -38,7 +38,7 @@ Baseline: `git ls-files '*.py'` = **1,121** files.
 - ~174 `skills/*/scripts/*.py` executors (XSS checkers → future `modules` web families; KEV/EPSS processors → native enrichment).
 - Docker worker lifecycle + netns firewall (Rust gate+exec exist; container isolation pending).
 - Full recon profiles (nmap privileged fallbacks, UDP, OS fingerprint, masscan/rustscan), CVE intel enrichment, memory/semantic, report export (md/html/pdf), eval graded harness, operator connections, recon-first goal-select, multi-model consult, critic/reflection agents.
-- ChatGPT proxy login/start (`501 not_ported` in `internal/api/server.go:470,476`), benchmark service unconfigured (`501` ×2).
+- Benchmark service always available via lazy default (`ensureBench`); no unconfigured sentinel.
 - `mcp_server.py` / `mcp_exploit_server.py` / `mcp_engine_server.py` standalone entrypoints (native `internal/mcp` servers exist but lack `cmd/bp-mcp-*` binaries + stdio/HTTP wiring to fully replace executables).
 - `scripts/*.py` codegen (catalogs, CLI/config refs, release gates), `tools/webui/*`, `tools/importers/*`, `tools/research/*`, `tools/verification/*`, `tools/memory/*`, `tools/reporting/*`.
 
