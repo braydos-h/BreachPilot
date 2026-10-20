@@ -9,7 +9,8 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"sort"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -65,46 +66,103 @@ type RegistryUpdate struct {
 	New string `json:"new"`
 }
 
-// ComputeUpdates ports compute_registry_updates: for each alias->spec, find
-// available models in the same family (prefix before ':'); prefer the exact
-// same tag; else take the max version. Returns alias->{old,new}.
+var versionRe = regexp.MustCompile(`[-._]?v?(\d+(?:\.\d+)*)$`)
+
+// parseModelSpec splits a spec into (family, version), mirroring
+// parse_model_spec: base is the pre-tag part, family is base minus a
+// trailing version suffix, version is the numeric tuple (nil when absent).
+func parseModelSpec(spec string) (string, []int) {
+	base := spec
+	if i := strings.Index(base, ":"); i >= 0 {
+		base = base[:i]
+	}
+	base = strings.TrimSpace(base)
+	m := versionRe.FindStringSubmatch(base)
+	if m == nil {
+		return base, nil
+	}
+	var ver []int
+	for _, p := range strings.Split(m[1], ".") {
+		n, err := strconv.Atoi(p)
+		if err != nil {
+			return base, nil
+		}
+		ver = append(ver, n)
+	}
+	fam := base[:len(base)-len(m[0])]
+	if fam == "" {
+		fam = base
+	}
+	return fam, ver
+}
+
+func cmpVersion(a, b []int) int {
+	for i := 0; i < len(a) && i < len(b); i++ {
+		if a[i] != b[i] {
+			if a[i] < b[i] {
+				return -1
+			}
+			return 1
+		}
+	}
+	switch {
+	case len(a) < len(b):
+		return -1
+	case len(a) > len(b):
+		return 1
+	}
+	return 0
+}
+
+// ComputeUpdates ports compute_registry_updates: per alias, find available
+// models in the same family, take the max version (skip when not newer),
+// prefer the spec's tag among max-version candidates.
 func ComputeUpdates(registry map[string]string, available []string) map[string]RegistryUpdate {
-	families := map[string][]string{}
-	for _, a := range available {
-		fam := familyOf(a)
-		families[fam] = append(families[fam], a)
+	type cand struct {
+		ver  []int
+		tag  string
+		name string
+	}
+	index := map[string][]cand{}
+	for _, name := range available {
+		fam, ver := parseModelSpec(name)
+		if ver == nil || fam == "" {
+			continue
+		}
+		index[fam] = append(index[fam], cand{ver: ver, tag: tagOf(name), name: name})
 	}
 	updates := map[string]RegistryUpdate{}
 	for alias, spec := range registry {
-		fam := familyOf(spec)
-		cands := families[fam]
+		fam, ver := parseModelSpec(spec)
+		if ver == nil {
+			continue
+		}
+		cands := index[fam]
 		if len(cands) == 0 {
 			continue
 		}
-		best := ""
-		for _, c := range cands {
-			if tagOf(c) == tagOf(spec) {
+		best := cands[0]
+		for _, c := range cands[1:] {
+			if cmpVersion(c.ver, best.ver) > 0 {
 				best = c
+			}
+		}
+		if cmpVersion(best.ver, ver) <= 0 {
+			continue
+		}
+		tag := tagOf(spec)
+		newSpec := best.name
+		for _, c := range cands {
+			if cmpVersion(c.ver, best.ver) == 0 && c.tag == tag {
+				newSpec = c.name
 				break
 			}
 		}
-		if best == "" {
-			pool := append([]string{}, cands...)
-			sort.Strings(pool)
-			best = pool[len(pool)-1]
-		}
-		if best != spec {
-			updates[alias] = RegistryUpdate{Old: spec, New: best}
+		if newSpec != spec {
+			updates[alias] = RegistryUpdate{Old: spec, New: newSpec}
 		}
 	}
 	return updates
-}
-
-func familyOf(spec string) string {
-	if i := strings.Index(spec, ":"); i >= 0 {
-		return strings.ToLower(spec[:i])
-	}
-	return strings.ToLower(spec)
 }
 
 func tagOf(spec string) string {
